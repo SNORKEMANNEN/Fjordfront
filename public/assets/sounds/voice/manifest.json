@@ -1,0 +1,478 @@
+{
+ "bot0a": {
+  "reload": [
+   "bot0a_reload0.ogg",
+   "bot0a_reload1.ogg"
+  ],
+  "frag": [
+   "bot0a_frag0.ogg",
+   "bot0a_frag1.ogg"
+  ],
+  "grenade": [
+   "bot0a_grenade0.ogg",
+   "bot0a_grenade1.ogg"
+  ],
+  "flash": [
+   "bot0a_flash0.ogg"
+  ],
+  "smoke": [
+   "bot0a_smoke0.ogg"
+  ],
+  "stun": [
+   "bot0a_stun0.ogg"
+  ],
+  "contact": [
+   "bot0a_contact0.ogg",
+   "bot0a_contact1.ogg"
+  ],
+  "taking": [
+   "bot0a_taking0.ogg"
+  ],
+  "mandown": [
+   "bot0a_mandown0.ogg"
+  ],
+  "kill": [
+   "bot0a_kill0.ogg",
+   "bot0a_kill1.ogg"
+  ],
+  "hurt": [
+   "bot0a_hurt0.ogg"
+  ],
+  "capA": [
+   "bot0a_capA0.ogg"
+  ],
+  "capB": [
+   "bot0a_capB0.ogg"
+  ],
+  "capC": [
+   "bot0a_capC0.ogg"
+  ],
+  "breach": [
+   "bot0a_breach0.ogg"
+  ],
+  "clear": [
+   "bot0a_clear0.ogg"
+  ],
+  "blind": [
+   "bot0a_blind0.ogg"
+  ]
+ },
+ "bot0b": {
+  "reload": [
+   "bot0b_reload0.ogg",
+   "bot0b_reload1.ogg"
+  ],
+  "frag": [
+   "bot0b_frag0.ogg",
+   "bot0b_frag1.ogg"
+  ],
+  "grenade": [
+   "bot0b_grenade0.ogg",
+   "bot0b_grenade1.ogg"
+  ],
+  "flash": [
+   "bot0b_flash0.ogg"
+  ],
+  "smoke": [
+   "bot0b_smoke0.ogg"
+  ],
+  "stun": [
+   "bot0b_stun0.ogg"
+  ],
+  "contact": [
+   "bot0b_contact0.ogg",
+   "bot0b_contact1.ogg"
+  ],
+  "taking": [
+   "bot0b_taking0.ogg"
+  ],
+  "mandown": [
+   "bot0b_mandown0.ogg"
+  ],
+  "kill": [
+   "bot0b_kill0.ogg",
+   "bot0b_kill1.ogg"
+  ],
+  "hurt": [
+   "bot0b_hurt0.ogg"
+  ],
+  "capA": [
+   "bot0b_capA0.ogg"
+  ],
+  "capB": [
+   "bot0b_capB0.ogg"
+  ],
+  "capC": [
+   "bot0b_capC0.ogg"
+  ],
+  "breach": [
+   "bot0b_breach0.ogg"
+  ],
+  "clear": [
+   "bot0b_clear0.ogg"
+  ],
+  "blind": [
+   "bot0b_blind0.ogg"
+  ]
+ },
+ "bot1a": {
+  "reload": [
+   "bot1a_reload0.ogg",
+   "bot1a_reload1.ogg"
+  ],
+  "frag": [
+   "bot1a_frag0.ogg",
+   "bot1a_frag1.ogg"
+  ],
+  "grenade": [
+   "bot1a_grenade0.ogg",
+   "bot1a_grenade1.ogg"
+  ],
+  "flash": [
+   "bot1a_flash0.ogg"
+  ],
+  "smoke": [
+   "bot1a_smoke0.ogg"
+  ],
+  "stun": [
+   "bot1a_stun0.ogg"
+  ],
+  "contact": [
+   "bot1a_contact0.ogg",
+   "bot1a_contact1.ogg"
+  ],
+  "taking": [
+   "bot1a_taking0.ogg"
+  ],
+  "mandown": [
+   "bot1a_mandown0.ogg"
+  ],
+  "kill": [
+   "bot1a_kill0.ogg",
+   "bot1a_kill1.ogg"
+  ],
+  "hurt": [
+   "bot1a_hurt0.ogg"
+  ],
+  "capA": [
+   "bot1a_capA0.ogg"
+  ],
+  "capB": [
+   "bot1a_capB0.ogg"
+  ],
+  "capC": [
+   "bot1a_capC0.ogg"
+  ],
+  "breach": [
+   "bot1a_breach0.ogg"
+  ],
+  "clear": [
+   "bot1a_clear0.ogg"
+  ],
+  "blind": [
+   "bot1a_blind0.ogg"
+  ]
+ },
+ "bot1b": {
+  "reload": [
+   "bot1b_reload0.ogg",
+   "bot1b_reload1.ogg"
+  ],
+  "frag": [
+   "bot1b_frag0.ogg",
+   "bot1b_frag1.ogg"
+  ],
+  "grenade": [
+   "bot1b_grenade0.ogg",
+   "bot1b_grenade1.ogg"
+  ],
+  "flash": [
+   "bot1b_flash0.ogg"
+  ],
+  "smoke": [
+   "bot1b_smoke0.ogg"
+  ],
+  "stun": [
+   "bot1b_stun0.ogg"
+  ],
+  "contact": [
+   "bot1b_contact0.ogg",
+   "bot1b_contact1.ogg"
+  ],
+  "taking": [
+   "bot1b_taking0.ogg"
+  ],
+  "mandown": [
+   "bot1b_mandown0.ogg"
+  ],
+  "kill": [
+   "bot1b_kill0.ogg",
+   "bot1b_kill1.ogg"
+  ],
+  "hurt": [
+   "bot1b_hurt0.ogg"
+  ],
+  "capA": [
+   "bot1b_capA0.ogg"
+  ],
+  "capB": [
+   "bot1b_capB0.ogg"
+  ],
+  "capC": [
+   "bot1b_capC0.ogg"
+  ],
+  "breach": [
+   "bot1b_breach0.ogg"
+  ],
+  "clear": [
+   "bot1b_clear0.ogg"
+  ],
+  "blind": [
+   "bot1b_blind0.ogg"
+  ]
+ },
+ "ann": {
+  "start": [
+   "ann_start0.ogg"
+  ],
+  "secA": [
+   "ann_secA0.ogg"
+  ],
+  "secB": [
+   "ann_secB0.ogg"
+  ],
+  "secC": [
+   "ann_secC0.ogg"
+  ],
+  "lostA": [
+   "ann_lostA0.ogg"
+  ],
+  "lostB": [
+   "ann_lostB0.ogg"
+  ],
+  "lostC": [
+   "ann_lostC0.ogg"
+  ],
+  "losingA": [
+   "ann_losingA0.ogg"
+  ],
+  "losingB": [
+   "ann_losingB0.ogg"
+  ],
+  "losingC": [
+   "ann_losingC0.ogg"
+  ],
+  "uav": [
+   "ann_uav0.ogg"
+  ],
+  "uavEnemy": [
+   "ann_uavEnemy0.ogg"
+  ],
+  "mortar": [
+   "ann_mortar0.ogg"
+  ],
+  "mortarEnemy": [
+   "ann_mortarEnemy0.ogg"
+  ],
+  "heli": [
+   "ann_heli0.ogg"
+  ],
+  "heliEnemy": [
+   "ann_heliEnemy0.ogg"
+  ],
+  "heliDown": [
+   "ann_heliDown0.ogg"
+  ],
+  "heliLost": [
+   "ann_heliLost0.ogg"
+  ],
+  "minute": [
+   "ann_minute0.ogg"
+  ],
+  "win": [
+   "ann_win0.ogg"
+  ],
+  "lose": [
+   "ann_lose0.ogg"
+  ],
+  "closeWin": [
+   "ann_closeWin0.ogg",
+   "ann_closeWin1.ogg"
+  ],
+  "closeLose": [
+   "ann_closeLose0.ogg",
+   "ann_closeLose1.ogg"
+  ],
+  "contestA": [
+   "ann_contestA0.ogg"
+  ],
+  "contestB": [
+   "ann_contestB0.ogg"
+  ],
+  "contestC": [
+   "ann_contestC0.ogg"
+  ],
+  "comeback": [
+   "ann_comeback0.ogg",
+   "ann_comeback1.ogg"
+  ],
+  "leadTaken": [
+   "ann_leadTaken0.ogg"
+  ],
+  "leadLost": [
+   "ann_leadLost0.ogg"
+  ],
+  "allFlags": [
+   "ann_allFlags0.ogg"
+  ],
+  "enemyAll": [
+   "ann_enemyAll0.ogg"
+  ],
+  "tied": [
+   "ann_tied0.ogg"
+  ],
+  "thirty": [
+   "ann_thirty0.ogg"
+  ],
+  "nightOps": [
+   "ann_nightOps0.ogg",
+   "ann_nightOps1.ogg"
+  ],
+  "nodsReminder": [
+   "ann_nodsReminder0.ogg"
+  ],
+  "fogIn": [
+   "ann_fogIn0.ogg",
+   "ann_fogIn1.ogg"
+  ],
+  "snowIn": [
+   "ann_snowIn0.ogg",
+   "ann_snowIn1.ogg"
+  ],
+  "weatherClear": [
+   "ann_weatherClear0.ogg"
+  ]
+ },
+ "player": {
+  "reload": [
+   "player_reload0.ogg",
+   "player_reload1.ogg"
+  ],
+  "frag": [
+   "player_frag0.ogg",
+   "player_frag1.ogg"
+  ],
+  "flash": [
+   "player_flash0.ogg"
+  ],
+  "smoke": [
+   "player_smoke0.ogg"
+  ],
+  "stun": [
+   "player_stun0.ogg"
+  ],
+  "stim": [
+   "player_stim0.ogg"
+  ],
+  "kill": [
+   "player_kill0.ogg",
+   "player_kill1.ogg",
+   "player_kill2.ogg"
+  ],
+  "multi": [
+   "player_multi0.ogg"
+  ],
+  "headshot": [
+   "player_headshot0.ogg"
+  ],
+  "uav": [
+   "player_uav0.ogg"
+  ],
+  "mortar": [
+   "player_mortar0.ogg"
+  ],
+  "heli": [
+   "player_heli0.ogg"
+  ],
+  "capture": [
+   "player_capture0.ogg"
+  ],
+  "hurt": [
+   "player_hurt0.ogg"
+  ],
+  "lowAmmo": [
+   "player_lowAmmo0.ogg"
+  ],
+  "breach": [
+   "player_breach0.ogg"
+  ],
+  "supply": [
+   "player_supply0.ogg"
+  ],
+  "nvg": [
+   "player_nvg0.ogg",
+   "player_nvg1.ogg"
+  ],
+  "pingEnemy": [
+   "player_pingEnemy0.ogg",
+   "player_pingEnemy1.ogg",
+   "player_pingEnemy2.ogg"
+  ],
+  "pingSpot": [
+   "player_pingSpot0.ogg",
+   "player_pingSpot1.ogg",
+   "player_pingSpot2.ogg"
+  ],
+  "knifeKill": [
+   "player_knifeKill0.ogg",
+   "player_knifeKill1.ogg"
+  ]
+ },
+ "pilot": {
+  "heliIn": [
+   "pilot_heliIn0.ogg",
+   "pilot_heliIn1.ogg"
+  ],
+  "engage": [
+   "pilot_engage0.ogg",
+   "pilot_engage1.ogg",
+   "pilot_engage2.ogg"
+  ],
+  "kill": [
+   "pilot_kill0.ogg",
+   "pilot_kill1.ogg"
+  ],
+  "hit": [
+   "pilot_hit0.ogg",
+   "pilot_hit1.ogg"
+  ],
+  "down": [
+   "pilot_down0.ogg"
+  ],
+  "leave": [
+   "pilot_leave0.ogg",
+   "pilot_leave1.ogg"
+  ]
+ },
+ "ops": {
+  "uavUp": [
+   "ops_uavUp0.ogg",
+   "ops_uavUp1.ogg"
+  ],
+  "uavEnd": [
+   "ops_uavEnd0.ogg"
+  ],
+  "uavEnemy": [
+   "ops_uavEnemy0.ogg"
+  ],
+  "mortarCall": [
+   "ops_mortarCall0.ogg"
+  ],
+  "mortarShot": [
+   "ops_mortarShot0.ogg"
+  ],
+  "mortarDone": [
+   "ops_mortarDone0.ogg"
+  ]
+ }
+}

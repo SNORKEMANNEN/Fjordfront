@@ -1,0 +1,41 @@
+// CPU profile of the game loop per subsystem (ms/frame), simulation and render separately.
+const { chromium } = require('playwright');
+(async () => {
+  const b = await chromium.launch({ args: ['--use-angle=swiftshader', '--enable-unsafe-swiftshader', '--ignore-gpu-blocklist'] });
+  const p = await b.newPage({ viewport: { width: 960, height: 540 } });
+  p.on('pageerror', (e) => console.log('[pageerror] ' + e.message));
+  await p.goto('http://localhost:5173/?test&weather=clear', { timeout: 180000 });
+  await p.waitForFunction(() => window.__ready, null, { timeout: 300000, polling: 500 });
+  const r = await p.evaluate(() => {
+    const g = window.game; g.startMatch();
+    const T = {}; const now = () => performance.now();
+    const wrap = (obj, fn, key) => { const o = obj[fn].bind(obj); obj[fn] = (...a) => { const t = now(); const res = o(...a); T[key] = (T[key] || 0) + now() - t; return res; }; };
+    wrap(g.player, 'update', 'player');
+    wrap(g.physics, 'step', 'physics');
+    wrap(g.weapons, 'update', 'weapons+vm');
+    wrap(g.rig, 'update', 'camera');
+    for (const bt of g.bots) wrap(bt, 'update', 'bots');
+    wrap(g.env, 'update', 'env');
+    wrap(g.fx, 'update', 'fx');
+    wrap(g.world, 'update', 'world');
+    wrap(g.weather, 'update', 'weather');
+    wrap(g.ui, 'updateHUD', 'hud');
+    wrap(g.audio, 'ambience', 'audio');
+    wrap(g.nav, 'path', 'pathfinding');
+    wrap(g, 'renderFrame', 'render(cpu-submit)');
+    g.step(120, 1 / 60, false);
+    for (const k in T) T[k] = 0;
+    const N = 600;
+    const t0 = now();
+    g.step(N, 1 / 60, false);
+    const simTotal = now() - t0;
+    const sim = {}; for (const k in T) sim[k] = +(T[k] / N).toFixed(3);
+    for (const k in T) T[k] = 0;
+    const t1 = now();
+    for (let i = 0; i < 30; i++) g.step(1, 1 / 60, true);
+    const ren = (now() - t1) / 30;
+    return { simMsPerFrame: +(simTotal / N).toFixed(3), parts: sim, renderFrameMs: +ren.toFixed(1), renderCpu: +((T['render(cpu-submit)'] || 0) / 30).toFixed(1), info: g.renderer.info.render, mem: g.renderer.info.memory, progs: g.renderer.info.programs?.length };
+  });
+  console.log(JSON.stringify(r, null, 1));
+  await b.close();
+})();
