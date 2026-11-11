@@ -284,6 +284,20 @@ URL options: `?quality=low|medium|high|ultra`, `?weather=clear|overcast|rain|sno
 - **Rifle:** support hand moved so it no longer shows through the optic window.
 - **Pistol:** hold reworked.
 
+## Update 24: HVAL-47 pushed out, nameplates that work while aiming
+
+- **HVAL-47:** the rifle sat far too close to the face, both at the hip and aimed.
+  - It now sits at the same distance as the other rifles, with the eye at a proper cheek weld behind the rear sight, so the iron-sight picture is much smaller and more open.
+  - The sight line was raised to real-AK clearance over the dust cover, so the cover no longer climbs up the middle of the aimed view.
+  - The front sight ears were trimmed back to scale.
+- **Nameplates while scoped:** a scope shows a separate, magnified picture in its lens. Nameplates were still placed with the normal camera, so teammates' names floated in the wrong places.
+  - Teammate names, spotted-enemy markers, pings and waypoints are now projected through the scope's own camera into the lens, so each name sits on the soldier you actually see in the glass. Anything the glass doesn't show is hidden.
+  - Objective markers that would land inside the lens are placed where the flag really is in the glass, or pushed out to the lens rim.
+- **Nameplates while aiming down sights:**
+  - Plates switch to a compact style: smaller text on a dark backing, smaller chevrons.
+  - Teammates stay labelled out to 160 m.
+  - Plates right on the crosshair fade to 30 % so they never cover what you are aiming at.
+
 ## Update 23: HVAL-47 remodel, KR-98k right-hand loading, all-new equipment handling
 
 **HVAL-47 remodelled** from a side reference and an iron-sight reference:

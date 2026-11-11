@@ -126,6 +126,11 @@ function sphere(o: THREE.Vector3, d: THREE.Vector3, c: THREE.Vector3, r: number)
   return t >= 0 ? t : null;
 }
 
+function smooth01(x: number) {
+  const t = Math.min(1, Math.max(0, x));
+  return t * t * (3 - 2 * t);
+}
+
 const NAMES: [string[], string[]] = [
   ['Haugen', 'Solberg', 'Nilsen', 'Berg', 'Lie', 'Dahl', 'Strand', 'Moen', 'Lund', 'Bakke', 'Eide', 'Vik'],
   ['Ulv', 'Ravn', 'Jerv', 'Gaupe', 'Orm', 'Varg', 'Isbjørn', 'Falk', 'Hauk', 'Elg', 'Rein', 'Bjørn'],
@@ -1438,6 +1443,9 @@ export class Game {
       const ang = 2 * Math.atan(lensR / Math.max(0.05, lp.length()));
       this.scope.mat.uniforms.uReticle.value = def.scope.reticle === 'cross' ? 1 : 0;
       const ndc = lp.clone().project(this.vmCamera);
+      const edge = lp.clone().add(new THREE.Vector3(lensR, 0, 0)).project(this.vmCamera);
+      const W = window.innerWidth, H = window.innerHeight;
+      this.scopeScreen = { cx: (ndc.x * 0.5 + 0.5) * W, cy: (-ndc.y * 0.5 + 0.5) * H, r: Math.abs(edge.x - ndc.x) * 0.5 * W };
       this.scope.render(this.renderer, this.scene, this.camera, ang * (this.camera.fov / this.vmCamera.fov), def.scope.zoom, w.ads, new THREE.Vector2(ndc.x, ndc.y));
     }
     this.pipeline.render(dt, {
@@ -2746,7 +2754,25 @@ export class Game {
       const edge = behind || m > 1;
       x /= m;
       y /= m;
-      return { x: (x * 0.5 + 0.5) * w, y: (-y * 0.5 + 0.5) * h, letter: f.letter, rel: rel(f.owner), dist: f.pos.distanceTo(this.player.pos), edge, here: f === here };
+      let sx = (x * 0.5 + 0.5) * w, sy = (-y * 0.5 + 0.5) * h;
+      // through a scope: inside the lens the picture is magnified — put the marker where the flag
+      // really is in the glass, or out on the lens rim if the glass does not show it
+      const sc = this.weapons.scopeActive && this.scope.active ? this.scopeScreen : null;
+      if (sc && !behind) {
+        const at = this.markerAt(top);
+        if (at) {
+          sx = at.x;
+          sy = at.y;
+        } else {
+          const dx = sx - sc.cx, dy = sy - sc.cy, d = Math.hypot(dx, dy);
+          if (d < sc.r * 1.05) {
+            const k = (sc.r * 1.08) / Math.max(1, d);
+            sx = sc.cx + dx * k;
+            sy = sc.cy + dy * k;
+          }
+        }
+      }
+      return { x: sx, y: sy, letter: f.letter, rel: rel(f.owner), dist: f.pos.distanceTo(this.player.pos), edge, here: f === here };
     });
     let cap: { text: string; progress: number; rel: 'f' | 'e' | 'n'; letter: string } | null = null;
     if (here) {
@@ -3037,6 +3063,25 @@ export class Game {
     for (const m of this.bots) if (m.alive && m.team === this.avatar.team && !m.target && m.position().distanceTo(at) < 80 && Math.random() < 0.35) m.hear(at);
   }
 
+  /** lens circle on screen (px) while a PiP scope is up */
+  private scopeScreen = { cx: 0, cy: 0, r: 0 };
+  /**
+   * Where a world point shows on screen for the HUD markers. Through a scope the picture in the
+   * lens is a separate, magnified camera: project with that camera into the lens circle (and hide
+   * what the lens does not show), so names sit on the soldiers you actually see in the glass.
+   */
+  private markerAt(p: THREE.Vector3): { x: number; y: number; scoped: boolean } | null {
+    const w = window.innerWidth, h = window.innerHeight;
+    if (this.weapons.scopeActive && this.scope.active && this.scopeScreen.r > 4) {
+      const n = p.clone().project(this.scope.cam);
+      if (n.z >= 1 || n.x * n.x + n.y * n.y > 0.85) return null;
+      return { x: this.scopeScreen.cx + n.x * this.scopeScreen.r, y: this.scopeScreen.cy - n.y * this.scopeScreen.r, scoped: true };
+    }
+    const n = p.clone().project(this.camera);
+    if (n.z >= 1 || Math.abs(n.x) > 1.05 || Math.abs(n.y) > 1.05) return null;
+    return { x: (n.x * 0.5 + 0.5) * w, y: (-n.y * 0.5 + 0.5) * h, scoped: false };
+  }
+
   /** Radar blips and 3D markers (teammate nameplates, spotted enemies). */
   private updateRadar(dt: number) {
     const p = this.player.pos;
@@ -3044,6 +3089,15 @@ export class Game {
     const items: { x: number; y: number; text: string; cls: string; alpha: number }[] = [];
     const w = window.innerWidth, h = window.innerHeight;
     const cam = this.camera;
+    // aiming: compact plates, and the ones right on the crosshair fade so they never hide a target
+    const ads = this.weapons.ads;
+    const aimCls = this.weapons.scopeActive && this.scope.active ? ' ads scoped' : ads > 0.5 ? ' ads' : '';
+    const nearAim = (x: number, y: number) => {
+      if (ads < 0.5) return 1;
+      const d = Math.hypot(x - w / 2, y - h / 2) / h;
+      return 0.3 + 0.7 * smooth01((d - 0.03) / 0.09);
+    };
+
     for (const b of this.bots) {
       if (!b.alive) continue;
       const bp = b.position();
@@ -3051,16 +3105,16 @@ export class Game {
         blips.push({ x: bp.x, z: bp.z, kind: 'ally', alpha: 1 });
         const head = bp.clone().setY(bp.y + 2.05);
         const d = head.distanceTo(cam.position);
-        const ndc = head.clone().project(cam);
-        if (d < 90 && ndc.z < 1 && Math.abs(ndc.x) < 1.05 && Math.abs(ndc.y) < 1.05) items.push({ x: (ndc.x * 0.5 + 0.5) * w, y: (-ndc.y * 0.5 + 0.5) * h, text: b.name.toUpperCase(), cls: 'ally', alpha: Math.max(0.25, 1 - d / 100) });
+        const at = d < (aimCls ? 160 : 90) ? this.markerAt(head) : null;
+        if (at) items.push({ x: at.x, y: at.y, text: b.name.toUpperCase(), cls: 'ally' + aimCls, alpha: Math.max(0.3, 1 - d / (aimCls ? 170 : 100)) * nearAim(at.x, at.y) });
       } else {
         const spottedUntil = this.spotted.get(b.id) ?? 0;
         const ping = this.time - (this.pings.get(b.id) ?? -99);
         if (spottedUntil > this.time) {
           blips.push({ x: bp.x, z: bp.z, kind: 'spotted', alpha: 1 });
           const head = bp.clone().setY(bp.y + 2.1);
-          const ndc = head.clone().project(cam);
-          if (ndc.z < 1 && Math.abs(ndc.x) < 1.05 && Math.abs(ndc.y) < 1.05) items.push({ x: (ndc.x * 0.5 + 0.5) * w, y: (-ndc.y * 0.5 + 0.5) * h, text: 's', cls: 'spotted', alpha: Math.min(1, (spottedUntil - this.time) * 2) });
+          const at = this.markerAt(head);
+          if (at) items.push({ x: at.x, y: at.y, text: 's', cls: 'spotted' + aimCls, alpha: Math.min(1, (spottedUntil - this.time) * 2) * nearAim(at.x, at.y) });
         } else if (ping < 2.2 && bp.distanceTo(p) < FIRE_REVEAL_RADIUS) blips.push({ x: bp.x, z: bp.z, kind: 'ping', alpha: 1 - ping / 2.2 }); // gunfire is only heard nearby
         else if (this.streaks.uavUntil[this.avatar.team] > this.time) {
           // UAV sweep: every enemy blinks up each 2 s
@@ -3079,17 +3133,17 @@ export class Game {
     for (const pg of this.worldPings) {
       if (pg.until <= this.time) continue;
       const top = pg.pos.clone().setY(pg.pos.y + 0.4);
-      const ndc = top.clone().project(cam);
       blips.push({ x: pg.pos.x, z: pg.pos.z, kind: 'ping', alpha: 1 });
-      if (ndc.z < 1 && Math.abs(ndc.x) < 1.05 && Math.abs(ndc.y) < 1.05) items.push({ x: (ndc.x * 0.5 + 0.5) * w, y: (-ndc.y * 0.5 + 0.5) * h, text: `${Math.round(pg.pos.distanceTo(cam.position))}m`, cls: 'pingmark', alpha: Math.min(1, (pg.until - this.time) * 2) });
+      const at = this.markerAt(top);
+      if (at) items.push({ x: at.x, y: at.y, text: `${Math.round(pg.pos.distanceTo(cam.position))}m`, cls: 'pingmark' + aimCls, alpha: Math.min(1, (pg.until - this.time) * 2) * nearAim(at.x, at.y) });
     }
     if (this.waypoint) {
       const wp = this.waypoint;
       if (Math.hypot(wp.x - p.x, wp.z - p.z) < 6) this.waypoint = null;
       else {
         blips.push({ x: wp.x, z: wp.z, kind: 'ping', alpha: 1 });
-        const ndc = wp.clone().setY(wp.y + 1.2).project(cam);
-        if (ndc.z < 1 && Math.abs(ndc.x) < 1.05 && Math.abs(ndc.y) < 1.05) items.push({ x: (ndc.x * 0.5 + 0.5) * w, y: (-ndc.y * 0.5 + 0.5) * h, text: `WAYPOINT ${Math.round(wp.distanceTo(cam.position))}m`, cls: 'pingmark waypoint', alpha: 1 });
+        const at = this.markerAt(wp.clone().setY(wp.y + 1.2));
+        if (at) items.push({ x: at.x, y: at.y, text: `WAYPOINT ${Math.round(wp.distanceTo(cam.position))}m`, cls: 'pingmark waypoint' + aimCls, alpha: nearAim(at.x, at.y) });
       }
     }
     this.markers.update(items);

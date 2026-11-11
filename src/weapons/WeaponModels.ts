@@ -2074,7 +2074,7 @@ export function buildMP18(mats: WeaponMats): WeaponModel {
 // strongly curved steel thirty with a front locking lug (it rocks in and out around that lug).
 // Moving parts: charge (carrier handle, right side), trigger, mag, mag2.
 // ======================================================================
-export const AK = { bore: 0.03, sightV: 0.066, pivot: new THREE.Vector3(0, 0.0, -0.034) };
+export const AK = { bore: 0.03, sightV: 0.078, pivot: new THREE.Vector3(0, 0.0, -0.034) };
 export function buildHval47(mats: WeaponMats): WeaponModel {
   // Milled-receiver AK pattern (proportions from the side reference, ~1.4 mm/px): flat-sided
   // receiver with the long lightening cut above the magwell and a dovetail side-mount plate,
@@ -2118,8 +2118,8 @@ export function buildHval47(mats: WeaponMats): WeaponModel {
   b.add('blued', rbox(0.48, 0.505, bore + 0.01, bore + 0.02, -0.0065, 0.0065, 0.002)); // post tower
   b.add('steel', rbox(0.489, 0.4925, bore + 0.02, sv, -0.0011, 0.0011, 0.0003)); // post
   for (const w of [-1, 1]) {
-    b.add('blued', rbox(0.484, 0.497, bore + 0.006, sv + 0.016, w * 0.0092 - 0.0015, w * 0.0092 + 0.0015, 0.0006)); // ear
-    b.add('blued', rbox(0.484, 0.497, sv + 0.012, sv + 0.016, w * 0.006, w * 0.0104, 0.0012)); // inward hook
+    b.add('blued', rbox(0.484, 0.497, bore + 0.006, sv + 0.009, w * 0.0092 - 0.0015, w * 0.0092 + 0.0015, 0.0006)); // ear
+    b.add('blued', rbox(0.484, 0.497, sv + 0.0055, sv + 0.009, w * 0.006, w * 0.0104, 0.0012)); // inward hook
   }
   b.add('blued', rbox(0.38, 0.428, bore - 0.014, bore + 0.026, -0.0115, 0.0115, 0.003)); // gas block
   b.add('blued', rbox(0.43, 0.452, bore - 0.024, bore - 0.008, -0.004, 0.004, 0.0015)); // bayonet lug
@@ -2186,7 +2186,7 @@ export function buildHval47(mats: WeaponMats): WeaponModel {
   sockets.rightHand = rs;
   sockets.leftHand = ls;
   addLaser(root, sockets, mats, 0.33, bore - 0.012, 0.024);
-  return { root, parts: { charge, trigger, mag, mag2 }, sockets, adsDist: 0.13 };
+  return { root, parts: { charge, trigger, mag, mag2 }, sockets, adsDist: 0.3 };
 }
 
 // ======================================================================
