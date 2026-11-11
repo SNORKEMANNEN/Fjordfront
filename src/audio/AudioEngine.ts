@@ -1179,6 +1179,32 @@ export class AudioEngine {
     for (const k of ['magOut', 'magIn', 'magTouch', 'slideBack', 'slideRelease', 'dry', 'rattle']) {
       if (this.bank[`${k}@p80`]) this.bank[`${k}@mp18`] = this.bank[`${k}@p80`];
     }
+    // HVAL-47: 7.62x39 — the carbine report dropped and thickened, a harder low punch, more chatter
+    if (ar.length) {
+      await set('shot_hval47', ar.map((buf, i) => () => render([
+        { buf, rate: 0.84, gain: 1.0, drive: 1.6 },
+        { buf, rate: 0.6, gain: 0.5, lp: 450, drive: 2.4 },
+        ...(this.bank['shot@pump12']?.length ? [{ buf: this.bank['shot@pump12'][i % this.bank['shot@pump12'].length], rate: 1.5, gain: 0.16, hp: 1500 }] : []),
+      ], 1.7, 1.0)));
+      if (this.bank['far@k416']) this.bank['far_hval47'] = this.bank['far@k416'];
+    }
+    for (const [k, src] of [['magOut', 'magOut@skv338'], ['magIn', 'magIn@k416'], ['magTouch', 'magIn@mp7'], ['boltBack', 'boltBack@k416'], ['boltRelease', 'boltRelease@k416'], ['dry', 'dry@k416'], ['rattle', 'rattle@k416']] as const) {
+      if (this.bank[src]) this.bank[`${k}@hval47`] = this.bank[src];
+    }
+    // KR-98k: full-power 7.92 from a short barrel — the .338 report brighter and quicker, less boom
+    const snp2 = this.bank['shot@skv338'] ?? [];
+    if (snp2.length) {
+      await set('shot_kr98', snp2.map((buf) => () => render([
+        { buf, rate: 1.12, gain: 0.95, drive: 1.3 },
+        ...(ar.length ? [{ buf: ar[0], rate: 0.8, gain: 0.3, hp: 1200 }] : []),
+      ], 1.9, 1.0)));
+      if (this.bank['far@skv338']) this.bank['far_kr98'] = this.bank['far@skv338'];
+    }
+    // the Mauser's own bolt and loading foley: steel-on-steel, higher and drier than the .338
+    for (const [k, src, rate] of [['boltOpen', 'boltOpen@skv338', 1.18], ['boltBack', 'boltBack@skv338', 1.12], ['boltClose', 'boltClose@skv338', 1.15], ['insert', 'insert@rv357', 0.85], ['shellIn', 'shellIn@rv357', 0.8], ['magIn', 'magIn@skv338', 1.35], ['magOut', 'magOut@p80', 1.2], ['magTouch', 'magIn@p80', 1.5], ['eject', 'eject@rv357', 0.9], ['dry', 'dry@skv338', 1.1], ['rattle', 'rattle@k416', 1.2]] as const) {
+      const b = this.bank[src];
+      if (b?.length) await set(`${k}@kr98`, b.map((buf) => () => render([{ buf, rate, gain: 1.0 }], buf.duration / rate + 0.05, 1.0)));
+    }
     // UMS-45: .45 ACP is slower and fatter than the PDW's 4.6 — the PDW report pitched down with the
     // 9 mm pistol's punch underneath and a driven low thump
     const pdw = this.bank['shot@mp7'] ?? [], pst = this.bank['shot@p80'] ?? [];

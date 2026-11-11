@@ -32,7 +32,7 @@ const { chromium } = require('playwright');
       g.step(40, 1 / 60, false);
       if (action) {
         const vm = ws.vm;
-        vm.play(action, 2.4, [], undefined);
+        vm.play(action, 2.4, [], undefined, items[i][7]);
         // scrub: advance the action to t
         const steps = Math.round((at * 2.4) / (1 / 60));
         g.step(Math.max(1, steps), 1 / 60, false);

@@ -72,6 +72,27 @@ export const WEAPONS: Record<WeaponId, WeaponDef> = {
     speedMul: 0.97, adsSpeedMul: 0.6, penetration: 0.45, swaySpeed: 1, weight: 1.0, hip: [0.098, -0.054, -0.075], tracerEvery: 2,
     sound: { body: 1.0, crack: 1.0, low: 0.9, tail: 1.0, pitch: 1.0 },
   },
+  hval47: {
+    id: 'hval47', name: 'HVAL-47 Assault Rifle', short: 'HVAL-47', cls: 'Assault Rifle', slot: 'primary',
+    desc: '7.62 mm battle-proven rifle with a wooden stock and plain irons. Hits harder than the 5.56 rifles at a slower 600 rpm, and kicks like it.',
+    rpm: 600, modes: ['auto', 'semi'], damage: [36, 26], range: [30, 70], headMul: 1.45, limbMul: 0.85, pellets: 1, pelletSpread: 0,
+    mag: 30, reserve: 150, reload: 2.25, reloadEmpty: 2.95, adsTime: 0.25, adsZoom: 1.25, sprintToFire: 0.22,
+    hipSpread: 2.8, adsSpread: 0.07, moveSpread: 2.4, bloomPerShot: 0.4, bloomMax: 2.8,
+    recoil: { v: 0.82, h: 0.32, drift: 0.16, firstShotMul: 1.45, adsMul: 0.78, recover: 0.42, kickZ: 0.032, kickPitch: 0.042, roll: 0.026, shake: 0.0045 },
+    speedMul: 0.95, adsSpeedMul: 0.58, penetration: 0.6, swaySpeed: 0.95, weight: 1.12, hip: [0.098, -0.058, -0.075], tracerEvery: 2,
+    sound: { body: 1.25, crack: 1.0, low: 1.15, tail: 1.1, pitch: 0.88 },
+    reloadKind: 'rifle',
+  },
+  kr98: {
+    id: 'kr98', name: 'KR-98k Bolt Carbine', short: 'KR-98k', cls: 'Marksman', slot: 'primary',
+    desc: 'Mauser-pattern 7.92 mm bolt-action with iron sights and a five-round internal magazine. A chest shot drops anyone inside 60 m. Tops up round by round, or fast with stripper clips.',
+    rpm: 50, modes: ['bolt'], damage: [102, 80], range: [60, 160], headMul: 1.9, limbMul: 0.85, pellets: 1, pelletSpread: 0,
+    mag: 5, reserve: 30, reload: 2.6, reloadEmpty: 3.1, cycle: 0.95, adsTime: 0.3, adsZoom: 1.45, sprintToFire: 0.3,
+    hipSpread: 5, adsSpread: 0.0, moveSpread: 3.5, bloomPerShot: 0, bloomMax: 0,
+    recoil: { v: 3.6, h: 0.6, drift: 0.2, firstShotMul: 1, adsMul: 0.65, recover: 0.85, kickZ: 0.075, kickPitch: 0.11, roll: 0.045, shake: 0.012 },
+    speedMul: 0.95, adsSpeedMul: 0.5, penetration: 1.0, swaySpeed: 0.85, weight: 1.3, hip: [0.1, -0.06, -0.075], tracerEvery: 1,
+    sound: { body: 1.4, crack: 1.3, low: 1.3, tail: 1.6, pitch: 0.95 },
+  },
   ks17: {
     id: 'ks17', name: 'KS-17 Modular Carbine', short: 'KS-17', cls: 'Assault Rifle', slot: 'primary',
     desc: '5.56 mm battle carbine with a monolithic upper and protected iron sights. A steady, heavy-hitting 625 rpm — and a mag-to-mag reload that never leaves the gun empty.',
@@ -222,5 +243,5 @@ export const WEAPONS: Record<WeaponId, WeaponDef> = {
   },
 };
 
-export const PRIMARIES: WeaponId[] = ['k416', 'ks17', 'mp7', 'ums45', 'lmg', 'stille9', 'pump12', 'as20', 'db12', 'dmr14', 'skv338'];
+export const PRIMARIES: WeaponId[] = ['k416', 'ks17', 'mp7', 'ums45', 'hval47', 'lmg', 'stille9', 'pump12', 'as20', 'db12', 'dmr14', 'kr98', 'skv338'];
 export const SECONDARIES: WeaponId[] = ['p80', 'mp18', 'rv357'];

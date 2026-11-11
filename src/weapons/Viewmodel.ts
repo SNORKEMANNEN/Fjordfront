@@ -6,6 +6,7 @@ import { ReloadClip, ReloadKind, buildReloadClip, SPECS } from './ReloadClips';
 import { breakAction, BreakData } from './BreakAction';
 import { lmgReload } from './LmgAnim';
 import { sd9Reload, mp18Reload, AnimCtx } from './SmgAnims';
+import { akReload, karReload, karCycle, RifleCtx, KarPlan } from './RifleAnims';
 import { knifeAction, knifeCarry } from './KnifeAnim';
 import { WeaponModel } from './WeaponModels';
 import { WeaponDef } from './WeaponDefs';
@@ -162,7 +163,8 @@ function localBox(o: THREE.Object3D) {
 }
 
 export type ActionType = 'reload' | 'reloadEmpty' | 'inspect' | 'inspectMag' | 'draw' | 'holster' | 'pump' | 'bolt' | 'shellStart' | 'shell' | 'shellEnd' | 'melee' | 'throw' | 'stim' | 'uav' | 'designate' | 'nvg' | 'breakReload' | 'knifeSlash' | 'knifeStab' | 'knifeKill'
-  | 'claymore' | 'c4Throw' | 'detonate' | 'stickyThrow' | 'snapshotThrow' | 'decoyThrow' | 'trophy';
+  | 'claymore' | 'c4Throw' | 'detonate' | 'stickyThrow' | 'snapshotThrow' | 'decoyThrow' | 'trophy'
+  | 'karReload' | 'karCycle';
 
 export interface Action {
   type: ActionType;
@@ -258,6 +260,15 @@ export class Viewmodel {
   private cantBlend = 0;
   private peekBlend = 0;
   private animMem: AnimCtx['mem'] = {};
+  private rifleCtx(parts: Record<string, THREE.Object3D | undefined>, h: RifleCtx['hr']): RifleCtx {
+    return {
+      parts, h, hr: h, magHome: this.magHome, chargeHome: this.chargeHome, slideHome: this.slideHome, boltHome: this.boltHome,
+      wristFor: (an, q, r) => this.wristFor(an, q, r),
+      wristForR: (an, q, r) => this.wristAt('R', an, q, r),
+      ev: (n) => (n.startsWith('cam') ? this.clipEvent(n) : this.onEvent(n)),
+      fired: this.reloadFired, jolt: (u, r, b) => this.jolt(u, r, b), mem: this.animMem,
+    };
+  }
   /** MP-18 folding stock: flicks out round to the right when you aim, folds back at the hip */
   private stockBlend = 0;
   private stockOut = false;
@@ -1003,6 +1014,19 @@ export class Viewmodel {
     if (p.charge) p.charge.position.copy(this.chargeHome);
     if (p.cover) p.cover.rotation.x = 0;
     if (p.mag2) p.mag2.visible = false;
+    if (p.magRounds) p.magRounds.visible = false;
+    if (p.hround) p.hround.visible = false;
+    if (p.clip) {
+      p.clip.visible = false;
+      for (const ch of p.clip.children) {
+        ch.visible = true;
+        if (ch.name !== 'strip') ch.position.y = 0;
+      }
+    }
+    if (p.bolt && this.def?.id === 'kr98') {
+      p.bolt.position.copy(this.boltHome);
+      p.bolt.rotation.set(0, 0, 0);
+    }
     if (p.charge) p.charge.rotation.set(0, 0, 0);
     if (p.belt) {
       p.belt.visible = true;
@@ -1319,7 +1343,7 @@ export class Viewmodel {
       const travel = def.cls === 'Sniper' ? 0 : -0.032;
       this.boltCycle = Math.max(0, this.boltCycle - dt * (def.rpm / 60) * 1.0);
       const bc = this.boltLocked ? 1 : Math.sin(this.boltCycle * Math.PI);
-      if (def.cls !== 'Sniper') parts.bolt.position.set(this.boltHome.x, this.boltHome.y, this.boltHome.z - travel * bc);
+      if (def.cls !== 'Sniper' && def.modes[0] !== 'bolt') parts.bolt.position.set(this.boltHome.x, this.boltHome.y, this.boltHome.z - travel * bc);
     }
     if (parts.slide) {
       this.boltCycle = Math.max(0, this.boltCycle - dt * 14);
@@ -1959,6 +1983,19 @@ export class Viewmodel {
         this.freeR.p.y += 0.12 * rel;
         break;
       }
+      case 'karReload':
+      case 'karCycle': {
+        if (t < 0.02 && !a.data?.started) {
+          this.reloadFired.clear();
+          this.animMem = {};
+          if (a.data) a.data.started = true;
+        }
+        const ctx = this.rifleCtx(parts, h);
+        if (a.type === 'karReload') karReload(t, a.data as KarPlan, pos, rot, ctx);
+        else karCycle(t, pos, rot, ctx);
+        this.camRoll = rot.z * 0.03;
+        break;
+      }
       case 'pump': {
         const back = kf(t, [[0, 0], [0.42, 1], [0.55, 1], [1, 0]]);
         if (parts.pump) parts.pump.position.z = this.pumpHome.z + 0.085 * back;
@@ -1994,7 +2031,10 @@ export class Viewmodel {
           this.reloadFired.clear();
           this.animMem = {};
         }
-        if (def.id === 'stille9' || def.id === 'mp18') {
+        if (def.id === 'hval47') {
+          akReload(t, a.type === 'reloadEmpty', pos, rot, this.rifleCtx(parts, h));
+          this.camRoll = rot.z * 0.035;
+        } else if (def.id === 'stille9' || def.id === 'mp18') {
           const ctx: AnimCtx = {
             parts, h, magHome: this.magHome, chargeHome: this.chargeHome, slideHome: this.slideHome,
             wristFor: (an, q, r) => this.wristFor(an, q, r),

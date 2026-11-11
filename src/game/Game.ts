@@ -774,7 +774,7 @@ export class Game {
   private spawnBots() {
     // 12v12: eleven bots beside the player, twelve against. Same class mix on both sides
     // (rifles carry the line, SMGs + shotguns clear buildings, two marksmen per side)
-    const mix: WeaponId[] = ['k416', 'mp7', 'ks17', 'pump12', 'skv338', 'dmr14', 'as20', 'lmg', 'db12', 'ums45', 'stille9', 'ks17'];
+    const mix: WeaponId[] = ['k416', 'mp7', 'ks17', 'pump12', 'skv338', 'dmr14', 'kr98', 'lmg', 'db12', 'ums45', 'stille9', 'hval47'];
     const ids: WeaponId[][] = [mix.slice(0, 11), mix];
     let id = 1;
     const diff = { recruit: 0, regular: 0.5, veteran: 1 }[Settings.data.botDifficulty];

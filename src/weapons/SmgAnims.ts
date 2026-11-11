@@ -25,12 +25,12 @@ import { clamp, smoothstep, easeInOutCubic, easeOutBack } from '../core/math';
  *   hand is already at the belt; fresh mag in, then the hand comes over the top, grabs the rear
  *   of the locked slide and slingshots it.
  */
-type V3 = [number, number, number];
-type Pose = { p: THREE.Vector3; q: THREE.Quaternion };
+export type V3 = [number, number, number];
+export type Pose = { p: THREE.Vector3; q: THREE.Quaternion };
 interface PKey { t: number; p: V3; e: V3 }
 
-const Q = (e: V3) => new THREE.Quaternion().setFromEuler(new THREE.Euler(e[0], e[1], e[2], 'XYZ'));
-function samplePose(t: number, keys: PKey[]): Pose {
+export const Q = (e: V3) => new THREE.Quaternion().setFromEuler(new THREE.Euler(e[0], e[1], e[2], 'XYZ'));
+export function samplePose(t: number, keys: PKey[]): Pose {
   if (t <= keys[0].t) return { p: new THREE.Vector3(...keys[0].p), q: Q(keys[0].e) };
   for (let i = 1; i < keys.length; i++) {
     if (t <= keys[i].t) {
@@ -42,7 +42,7 @@ function samplePose(t: number, keys: PKey[]): Pose {
   const L = keys[keys.length - 1];
   return { p: new THREE.Vector3(...L.p), q: Q(L.e) };
 }
-function kf(t: number, keys: [number, number][]) {
+export function kf(t: number, keys: [number, number][]) {
   if (t <= keys[0][0]) return keys[0][1];
   for (let i = 1; i < keys.length; i++) {
     if (t <= keys[i][0]) {
@@ -52,7 +52,7 @@ function kf(t: number, keys: [number, number][]) {
   }
   return keys[keys.length - 1][1];
 }
-function kv(t: number, keys: [number, V3][], out = new THREE.Vector3()) {
+export function kv(t: number, keys: [number, V3][], out = new THREE.Vector3()) {
   if (t <= keys[0][0]) return out.set(...keys[0][1]);
   for (let i = 1; i < keys.length; i++) {
     if (t <= keys[i][0]) {
@@ -63,12 +63,12 @@ function kv(t: number, keys: [number, V3][], out = new THREE.Vector3()) {
   }
   return out.set(...keys[keys.length - 1][1]);
 }
-const mul = (a: Pose, b: Pose): Pose => ({ p: b.p.clone().applyQuaternion(a.q).add(a.p), q: a.q.clone().multiply(b.q) });
-const inv = (a: Pose): Pose => {
+export const mul = (a: Pose, b: Pose): Pose => ({ p: b.p.clone().applyQuaternion(a.q).add(a.p), q: a.q.clone().multiply(b.q) });
+export const inv = (a: Pose): Pose => {
   const qi = a.q.clone().invert();
   return { p: a.p.clone().negate().applyQuaternion(qi), q: qi };
 };
-const place = (o: THREE.Object3D | undefined, ps: Pose) => {
+export const place = (o: THREE.Object3D | undefined, ps: Pose) => {
   if (!o) return;
   o.position.copy(ps.p);
   o.quaternion.copy(ps.q);
@@ -92,7 +92,7 @@ export interface AnimCtx {
   /** per-reload scratch (captured transforms) */
   mem: Record<string, Pose>;
 }
-const once = (c: AnimCtx, key: string, t: number, at: number, f: () => void) => {
+export const once = (c: AnimCtx, key: string, t: number, at: number, f: () => void) => {
   if (t >= at && !c.fired.has(key)) {
     c.fired.add(key);
     f();
@@ -105,7 +105,7 @@ const MAG_GRIP: Pose = (() => {
   return { p: new THREE.Vector3(-0.0118, -0.085, -0.01), q };
 })();
 /** put the support hand on a held pose (anchor + orientation in weapon space) */
-function handOn(c: AnimCtx, grip: Pose, blend: number, pose: FingerPose, r = 0.004) {
+export function handOn(c: AnimCtx, grip: Pose, blend: number, pose: FingerPose, r = 0.004) {
   c.h.leftQ.copy(grip.q);
   c.h.leftTarget.copy(c.wristFor(grip.p, grip.q, r));
   c.h.setLeft(blend, pose);

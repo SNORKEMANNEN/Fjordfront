@@ -152,7 +152,7 @@ export class WeaponSystem {
     this.vm.setWeapon(s.model, s.def);
     s.model.sockets.muzzle.add(this.flash.group);
     this.reloading = false;
-    this.vm.boltLocked = s.mag === 0 && (s.def.cls === 'Pistol' || s.def.cls === 'Assault Rifle' || s.def.cls === 'SMG' || s.def.cls === 'Marksman');
+    this.vm.boltLocked = s.mag === 0 && s.def.modes[0] !== 'bolt' && (s.def.cls === 'Pistol' || s.def.cls === 'Assault Rifle' || s.def.cls === 'SMG' || s.def.cls === 'Marksman');
     this.vm.bipod = 0;
     this.bipod = 0;
     this.switching = true;
@@ -184,6 +184,23 @@ export class WeaponSystem {
         s.chambered = true;
         this.reloading = false;
       }, plan);
+      return;
+    }
+    if (d.id === 'kr98') {
+      // internal magazine: the reload is planned from what is left. 1-2 missing → single rounds
+      // through the open bolt; more → a stripper clip; empty → clip, then chamber deliberately
+      const missing = d.mag - s.mag;
+      const take = Math.min(missing, s.reserve);
+      if (take <= 0) return;
+      const kind: 'single' | 'clip' | 'empty' = s.mag === 0 ? 'empty' : take <= 2 ? 'single' : 'clip';
+      const dur = kind === 'single' ? 1.05 + 0.62 * take : kind === 'clip' ? d.reload : d.reloadEmpty;
+      this.reloading = true;
+      this.vm.play('karReload', dur, [[0.0, 'reloadStart']], () => {
+        s.mag += take;
+        s.reserve -= take;
+        s.chambered = true;
+        this.reloading = false;
+      }, { kind, n: take, start: s.mag });
       return;
     }
     this.reloading = true;
@@ -232,6 +249,8 @@ export class WeaponSystem {
     const d = s.def;
     if (d.modes[0] === 'pump') {
       this.vm.play('pump', d.cycle!, [[0.05, 'pumpBack'], [0.5, 'eject'], [0.62, 'pumpForward']], () => (s.chambered = true));
+    } else if (d.id === 'kr98') {
+      this.vm.play('karCycle', d.cycle!, [], () => (s.chambered = true));
     } else if (d.modes[0] === 'bolt') {
       this.vm.play('bolt', d.cycle!, [[0.12, 'boltOpen'], [0.34, 'boltBack'], [0.45, 'eject'], [0.62, 'boltClose']], () => (s.chambered = true));
     }
@@ -268,7 +287,7 @@ export class WeaponSystem {
       if (inp.wasPressed('reload')) this.startReload();
       // tap = full inspect, hold = magazine / chamber check
       if (inp.wasPressed('inspect')) this.inspectHeld = 0;
-      if (inp.isDown('inspect') && this.inspectHeld >= 0 && d.cls !== 'LMG') {
+      if (inp.isDown('inspect') && this.inspectHeld >= 0 && d.cls !== 'LMG' && d.id !== 'kr98') {
         this.inspectHeld += dt;
         if (this.inspectHeld > 0.28 && !this.vm.action && !this.reloading) {
           this.inspectHeld = -1;
@@ -308,7 +327,7 @@ export class WeaponSystem {
       if (inp.wasPressed('ads')) this.adsHeld = !this.adsHeld;
     } else this.adsHeld = inp.isDown('ads');
     const busy = this.switching || (this.reloading && !d.perShell);
-    const cycling = this.vm.action?.type === 'bolt';
+    const cycling = this.vm.action?.type === 'bolt' || this.vm.action?.type === 'karCycle';
     const handsBusy = !!this.vm.action && ['throw', 'stim', 'uav', 'designate', 'melee', 'nvg'].includes(this.vm.action.type);
     const wantAds = d.cls !== 'Melee' && this.enabled && this.adsHeld && !busy && !handsBusy && !p.sprinting && !p.mantle && !(p.sliding && d.cls === 'Sniper');
     if (wantAds && p.sprinting) p.sprinting = false;
@@ -577,7 +596,7 @@ export class WeaponSystem {
     this.rig.shotKick(vk);
     this.vm.kick(d, this.ads);
     this.flash.fire(d.sound.suppressed ? 0.25 : d.cls === 'Shotgun' ? 1.5 : d.cls === 'Sniper' ? 1.7 : d.cls === 'Marksman' ? 1.35 : d.cls === 'Pistol' ? 0.7 : 1);
-    if (s.mag === 0 && (d.cls === 'Pistol' || d.cls === 'Assault Rifle' || d.cls === 'SMG' || d.cls === 'Marksman')) this.vm.boltLocked = true;
+    if (s.mag === 0 && d.modes[0] !== 'bolt' && (d.cls === 'Pistol' || d.cls === 'Assault Rifle' || d.cls === 'SMG' || d.cls === 'Marksman')) this.vm.boltLocked = true;
 
     // side-by-side: right barrel first, then left (flash + smoke come out of the one that fired)
     if (d.action === 'break') s.model.sockets.muzzle.position.x = s.mag >= 1 ? DB_W : -DB_W;

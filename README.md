@@ -284,6 +284,47 @@ URL options: `?quality=low|medium|high|ultra`, `?weather=clear|overcast|rain|sno
 - **Rifle:** support hand moved so it no longer shows through the optic window.
 - **Pistol:** hold reworked.
 
+## Update 22: HVAL-47 assault rifle and KR-98k bolt carbine
+
+Both guns and every one of their animations were built from scratch for this update. No animation is shared with another weapon; the code is in `src/weapons/RifleAnims.ts`.
+
+**HVAL-47** (new primary, Assault Rifle): a 7.62 mm rifle in the AKM pattern.
+- **Model:**
+  - Stamped receiver with a ribbed dust cover and the tangent rear sight on the trunnion block.
+  - Gas tube under a wooden upper guard, flared wooden lower handguard, slant muzzle brake, cleaning rod.
+  - The big right-side safety lever, wood grip and stock.
+  - A strongly curved steel thirty that locks on a front lug.
+- **Handling:** 600 rpm and harder-hitting than the 5.56 rifles, with a heavier, kickier spray and a deep, chattering report.
+- **Tactical reload** (2.25 s): the right hand never leaves the grip.
+  1. The left hand fetches a fresh mag and brings it up behind the old one.
+  2. It drives the new mag's nose into the old mag's spine. The old one rocks forward off its lug and drops away.
+  3. In the same motion the new mag's lug is hooked and the mag rocked back until it clicks.
+  4. The hand returns to the handguard.
+- **Empty reload** (2.95 s):
+  1. The same mag-on-mag move, but punched: the empty is smashed out and spins away, and the fresh mag is slammed home with a harder camera hit.
+  2. The rifle rolls over to show its right side. The left hand reaches over the top, rips the carrier handle back and lets it fly.
+  3. A short settling roll before it comes back up to fire.
+
+**KR-98k** (new primary, Marksman): a 7.92 mm bolt-action in the Mauser pattern.
+- **Model:**
+  - Full-length walnut stock with a semi-pistol wrist, two barrel bands and a cleaning rod.
+  - Tangent rear sight with a V-notch, hooded front post.
+  - A controlled-feed bolt with a turned-down handle and pear knob.
+  - Stripper-clip guides on the receiver bridge, and a 5-round internal magazine whose cartridges you can see through the open action.
+- **Damage:** a chest shot kills inside about 60 m.
+- **Its own bolt throw after every shot:** the right hand comes up under the knob, lifts it, rips it back (the case flies), drives it forward and slaps it down. The rifle is pushed out from the face so you can see the hand work.
+- **The reload plans itself from what is left in the magazine and only loads what is missing:**
+  - **1–2 rounds missing:** the bolt opens and the left hand thumbs single cartridges in through the action, one by one. It fetches each round, lines it up over the port, and presses it down and forward under the rail. The bolt then closes.
+  - **3–4 missing:** stripper clip.
+    1. A loaded clip drops into the guides.
+    2. The thumb presses the stack down. Only as many rounds go in as there is room for; the rest stay in the clip.
+    3. The empty clip is pulled out and tossed.
+    4. The bolt closes.
+  - **Empty:** the clip routine, done more deliberately: the five go in, then the bolt is driven home to chamber the first round, with a firmer lock and a shoulder settle.
+- **Sounds:** its own bolt, cartridge and clip foley.
+- **Ammo:** reserve ammo is only spent on the rounds actually loaded.
+- Bots carry both guns.
+
 ## Update 21: Stille-9 suppressed SMG and MP-18 machine pistol
 
 **Stille-9** (new primary, SMG): an integrally suppressed 9 mm roller-delayed SMG in the MP5SD pattern, modelled from scratch.
