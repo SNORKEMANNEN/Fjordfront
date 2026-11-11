@@ -7,6 +7,7 @@ import { breakAction, BreakData } from './BreakAction';
 import { lmgReload } from './LmgAnim';
 import { sd9Reload, mp18Reload, AnimCtx } from './SmgAnims';
 import { akReload, karReload, karCycle, RifleCtx, KarPlan } from './RifleAnims';
+import { lethalGrenade, lethalKnife, lethalC4, tacticalThrow, detPress, EqCtx } from './EquipAnims';
 import { knifeAction, knifeCarry } from './KnifeAnim';
 import { WeaponModel } from './WeaponModels';
 import { WeaponDef } from './WeaponDefs';
@@ -164,7 +165,8 @@ function localBox(o: THREE.Object3D) {
 
 export type ActionType = 'reload' | 'reloadEmpty' | 'inspect' | 'inspectMag' | 'draw' | 'holster' | 'pump' | 'bolt' | 'shellStart' | 'shell' | 'shellEnd' | 'melee' | 'throw' | 'stim' | 'uav' | 'designate' | 'nvg' | 'breakReload' | 'knifeSlash' | 'knifeStab' | 'knifeKill'
   | 'claymore' | 'c4Throw' | 'detonate' | 'stickyThrow' | 'snapshotThrow' | 'decoyThrow' | 'trophy'
-  | 'karReload' | 'karCycle';
+  | 'karReload' | 'karCycle'
+  | 'lethalFrag' | 'lethalSticky' | 'lethalKnife' | 'lethalC4' | 'tactical' | 'detPress';
 
 export interface Action {
   type: ActionType;
@@ -260,11 +262,14 @@ export class Viewmodel {
   private cantBlend = 0;
   private peekBlend = 0;
   private animMem: AnimCtx['mem'] = {};
+  /** finger pose for the right hand while an animation drives it off the grip (reset each frame) */
+  rightActionPose: FingerPose | null = null;
   private rifleCtx(parts: Record<string, THREE.Object3D | undefined>, h: RifleCtx['hr']): RifleCtx {
     return {
       parts, h, hr: h, magHome: this.magHome, chargeHome: this.chargeHome, slideHome: this.slideHome, boltHome: this.boltHome,
       wristFor: (an, q, r) => this.wristFor(an, q, r),
       wristForR: (an, q, r) => this.wristAt('R', an, q, r),
+      setRPose: (fp) => { this.rightActionPose = fp; },
       ev: (n) => (n.startsWith('cam') ? this.clipEvent(n) : this.onEvent(n)),
       fired: this.reloadFired, jolt: (u, r, b) => this.jolt(u, r, b), mem: this.animMem,
     };
@@ -439,6 +444,37 @@ export class Viewmodel {
     for (const it of Object.values(this.items)) it.visible = false;
     this.grenade = this.items[name] ?? this.items.frag;
     this.grenade.userData.kind = name;
+    this.grenade.userData.posed = false;
+    this.grenade.userData.hand = 'L';
+    const ring = this.grenade.getObjectByName('ring');
+    if (ring) {
+      if (ring.userData.rest) ring.position.copy(ring.userData.rest as THREE.Vector3);
+      ring.visible = true;
+    }
+  }
+  /** C4 remote kept in the left hand (gun one-handed) until it is used or put away */
+  detonatorOut = false;
+  private detBlend = 0;
+  private noWrapLFrame = false;
+  private eqCtx(a: { data?: any }): EqCtx {
+    a.data ??= {};
+    return {
+      freeL: this.freeL, freeR: this.freeR,
+      setRPose: (fp) => { this.freeRPose = fp; this.rightActionPose = fp; },
+      item: () => this.grenade,
+      hold: (n) => this.holdItem(n),
+      palmAt: (side, wrist, q, off) => {
+        const palm = this.rig ? this.rig.palmOffset(side, new THREE.Vector3()) : new THREE.Vector3(side === 'R' ? -0.003 : 0.003, -0.007, -0.072);
+        palm.y -= (this.rig ? this.rig.palmDepth(side) : 0.014) + off;
+        return wrist.clone().add(palm.applyQuaternion(q));
+      },
+      wristAt: (side, an, q, r) => this.wristAt(side, an, q, r),
+      noWrapL: () => { this.noWrapLFrame = true; },
+      ev: (n) => (n.startsWith('cam') ? this.clipEvent(n) : this.onEvent(n)),
+      jolt: (u, r, b) => this.jolt(u, r, b),
+      time: this.t,
+      data: a.data,
+    };
   }
   /** UAV phone screen (canvas texture) */
   private static phoneTex: THREE.CanvasTexture | null = null;
@@ -1293,6 +1329,8 @@ export class Viewmodel {
 
     // ---------------- ladder & mantle: the gun drops away, the hands do the climbing ----------------
     this.freeR.b = 0;
+    this.rightActionPose = null;
+    this.noWrapLFrame = false;
     const lad = c.ladder ?? 0;
     this.climbBlend = damp(this.climbBlend, lad, lad > this.climbBlend ? 7 : 9, dt);
     const mant = c.mantle ?? -1;
@@ -1364,6 +1402,20 @@ export class Viewmodel {
       knifeCarry(pos, rot);
       if (a && (a.type === 'knifeSlash' || a.type === 'knifeStab' || a.type === 'knifeKill')) knifeAction(a.type, a.data, clamp(a.t + dt / a.dur, 0, 1), pos, rot, { freeL: this.freeL });
     }
+    // C4 remote held ready in the left hand while charges are out (the gun one-handed)
+    const detWant = this.detonatorOut && !a;
+    this.detBlend = damp(this.detBlend, detWant ? 1 : 0, detWant ? 8 : 12, dt);
+    if (this.detBlend > 0.002 && !a) {
+      if (this.grenade !== this.items.detonator) this.holdItem('detonator');
+      const k = easeInOutCubic(this.detBlend);
+      this.freeL.b = Math.max(this.freeL.b, k);
+      this.freeL.p.set(-0.14, -0.165 + Math.sin(this.t * 1.6) * 0.002, -0.27);
+      this.freeL.q.copy(handQ(new THREE.Vector3(0.35, 0.2, -1), new THREE.Vector3(1, 0.1, 0.35)));
+      this.freeL.pose = POSES.grip;
+      this.grenade.visible = k > 0.3;
+      pos.x += 0.012 * k;
+      rot.z -= 0.05 * k;
+    } else if (!a && this.grenade === this.items.detonator) this.grenade.visible = false;
     if (a) {
       // actions can pause at a point while a button is held (cooking a grenade)
       const holdAt = a.data?.holdAt as number | undefined;
@@ -1418,9 +1470,9 @@ export class Viewmodel {
     if (this.rig) {
       this.rig.solve('R', wr.distanceTo(this.shoulderR) > 0.56 ? this.shoulderR.clone().lerp(wr, (wr.distanceTo(this.shoulderR) - 0.56) / wr.distanceTo(this.shoulderR)) : this.shoulderR, wr, wq, poleR);
       // fingers wrap the actual grip; the trigger finger keeps its authored place
-      const heldR = this.freeR.b > 0.5 && this.grenade.visible && this.grenade.userData.twoHand ? this.heldSDF() : null;
+      const heldR = this.freeR.b > 0.5 && this.grenade.visible && (this.grenade.userData.twoHand || this.grenade.userData.hand === 'R') ? this.heldSDF() : null;
       const wrapR = this.freeR.b > 0.5 ? (heldR ? this.rig.wrapPose('R', heldR, this.freeRPose) : poseR) : { ...this.cachedWrap('R', sockR, poseR, ['index']), index: poseR.index };
-      this.rig.pose('R', wrapR, rightFree > 0 ? POSES.pinch : undefined, rightFree);
+      this.rig.pose('R', wrapR, rightFree > 0 ? (this.rightActionPose ?? POSES.pinch) : undefined, rightFree);
     } else {
       this.right.solve(this.shoulderR, wr, wq, poleR);
       this.right.hand.setPose(poseR, rightFree > 0 ? POSES.pinch : undefined, rightFree);
@@ -1457,7 +1509,7 @@ export class Viewmodel {
       }
     }
     // grenade sits in the left palm
-    if (this.grenade.visible && !this.grenade.userData.twoHand) {
+    if (this.grenade.visible && !this.grenade.userData.twoHand && !this.grenade.userData.posed) {
       const hold = Viewmodel.HOLD[this.grenade.userData.kind ?? 'frag'] ?? Viewmodel.HOLD.frag;
       const palm = this.rig ? this.rig.palmOffset('L', new THREE.Vector3()) : new THREE.Vector3(0.003, -0.007, -0.072);
       palm.y -= (this.rig ? this.rig.palmDepth('L') : 0.014) + hold.off;
@@ -1499,7 +1551,7 @@ export class Viewmodel {
       // on the gun: wrap the handguard / grip; off the gun: wrap whatever the hand is holding
       const onGun = this.leftPoseBlend < 0.98 ? this.cachedWrap('L', sockL, baseL) : baseL;
       const held = this.heldSDF();
-      const offGun = held && this.leftPoseBlend > 0.02 ? this.rig.wrapPose('L', held, leftPose) : leftPose;
+      const offGun = held && this.leftPoseBlend > 0.02 && !this.noWrapLFrame && this.grenade.userData.hand !== 'R' ? this.rig.wrapPose('L', held, leftPose) : leftPose;
       this.rig.pose('L', onGun, offGun, this.leftPoseBlend);
     } else {
       this.left.solve(this.shoulderL, lp, lq, poleL);
@@ -1983,6 +2035,22 @@ export class Viewmodel {
         this.freeR.p.y += 0.12 * rel;
         break;
       }
+      case 'lethalFrag':
+      case 'lethalSticky':
+        lethalGrenade(a.type === 'lethalFrag' ? 'frag' : 'sticky', t, pos, rot, this.eqCtx(a));
+        break;
+      case 'lethalKnife':
+        lethalKnife(t, pos, rot, this.eqCtx(a));
+        break;
+      case 'lethalC4':
+        lethalC4(t, pos, rot, this.eqCtx(a), (side, item, mk, f, n, r, p) => this.gripItem(side, item, mk, f, n, r, p));
+        break;
+      case 'tactical':
+        tacticalThrow((a.data?.kind as string) ?? 'flash', t, pos, rot, this.eqCtx(a));
+        break;
+      case 'detPress':
+        detPress(t, pos, rot, this.eqCtx(a));
+        break;
       case 'karReload':
       case 'karCycle': {
         if (t < 0.02 && !a.data?.started) {

@@ -2074,74 +2074,97 @@ export function buildMP18(mats: WeaponMats): WeaponModel {
 // strongly curved steel thirty with a front locking lug (it rocks in and out around that lug).
 // Moving parts: charge (carrier handle, right side), trigger, mag, mag2.
 // ======================================================================
-export const AK = { bore: 0.03, sightV: 0.064, pivot: new THREE.Vector3(0, 0.0, -0.034) };
+export const AK = { bore: 0.03, sightV: 0.066, pivot: new THREE.Vector3(0, 0.0, -0.034) };
 export function buildHval47(mats: WeaponMats): WeaponModel {
+  // Milled-receiver AK pattern (proportions from the side reference, ~1.4 mm/px): flat-sided
+  // receiver with the long lightening cut above the magwell and a dovetail side-mount plate,
+  // dust cover with its rounded tail, rear sight base with the two round spring housings and the
+  // wide notch block (looking down the sights you see a flat dark block with a small U-notch and
+  // the hooked tips of the front sight ears above it), front sight post between two hooked ears on
+  // a ring base, short muzzle nut, gas block with the bayonet lug, short upper handguard on the
+  // gas tube, straight lower handguard with a steel ferrule, wood grip and stock, ribbed slab mag.
   const root = new THREE.Group();
   root.name = 'HVAL47';
   const b = new PartBuilder();
   const bore = AK.bore;
   const sv = AK.sightV;
-  // ---- receiver + ribbed dust cover ----
-  b.add('metal', rbox(-0.16, 0.17, -0.032, 0.032, -0.0165, 0.0165, 0.002));
-  b.add('metal', cyl(0.0168, -0.158, 0.118, 0.034, 0, 20));
-  for (let i = 0; i < 3; i++) b.add('metal', rbox(-0.13 + i * 0.07, -0.11 + i * 0.07, 0.049, 0.0515, -0.004, 0.004, 0.0015));
-  b.add('steel', rbox(-0.166, -0.156, 0.026, 0.044, -0.004, 0.004, 0.002)); // cover latch button
+  // ---- receiver (milled): flat sides, rounded underside toward the grip ----
+  b.add('blued', profile([[-0.165, 0.03], [0.172, 0.03], [0.172, -0.024], [0.13, -0.034], [0.03, -0.034], [-0.07, -0.03], [-0.16, -0.02], [-0.168, -0.01]], 0.034, { round: 0.0025, bevel: 0.0018 }));
   for (const w of [-1, 1]) {
-    b.add('dark', rbox(-0.14, 0.15, -0.012, -0.009, w * 0.0167 - 0.0004, w * 0.0167 + 0.0004, 0.0004));
-    for (const u of [-0.14, -0.05, 0.03, 0.14]) b.add('steel', pin(u, -0.022, w * 0.0168, 0.0022, 0.001));
+    b.add('dark', rbox(0.0, 0.122, -0.022, -0.006, w * 0.0171 - 0.0006, w * 0.0171 + 0.0006, 0.0015)); // lightening cut
+    b.add('dark', rbox(-0.12, -0.03, -0.014, -0.011, w * 0.0171 - 0.0004, w * 0.0171 + 0.0004, 0.0005));
+    for (const u of [-0.14, -0.035, 0.15]) b.add('steel', pin(u, -0.016, w * 0.0172, 0.0022, 0.001));
   }
-  b.add('dark', rbox(0.0, 0.1, 0.008, 0.03, 0.0158, 0.0172, 0.001)); // ejection / handle slot (right)
-  // safety lever: the long plate on the right with its finger tab
-  b.add('steel', profile([[-0.12, 0.006], [0.06, 0.018], [0.064, 0.012], [-0.115, -0.002], [-0.124, -0.008], [-0.13, 0.0]], 0.003, { bevel: 0.0006, wc: 0.0182 }));
-  // ---- trunnion block + rear tangent sight (leaf with a notch at the sight line) ----
-  b.add('metal', rbox(0.112, 0.175, 0.026, 0.052, -0.0135, 0.0135, 0.003));
-  b.add('metal', rbox(0.118, 0.17, 0.052, 0.056, -0.009, 0.009, 0.0015)); // leaf
-  for (const w of [-1, 1]) b.add('metal', rbox(0.118, 0.126, 0.056, sv, w * 0.0018, w * 0.0075, 0.0006)); // notch shoulders
-  b.add('steel', rbox(0.15, 0.158, 0.05, 0.059, -0.0105, 0.0105, 0.0012)); // range slider
-  // ---- barrel, gas block, gas tube, front sight, slant brake ----
-  b.add('steel', cyl(0.0088, 0.17, 0.52, bore, 0, 18));
-  b.add('metal', rbox(0.4, 0.43, bore - 0.012, sv - 0.008, -0.011, 0.011, 0.003)); // gas block
-  b.add('metal', cyl(0.0098, 0.17, 0.41, bore + 0.026, 0, 16)); // gas tube
-  b.add('metal', rbox(0.47, 0.505, bore - 0.012, bore + 0.016, -0.0105, 0.0105, 0.003)); // front sight base
-  b.add('metal', lathe([[0.478, 0.009], [0.478, 0.0115], [0.498, 0.0115], [0.498, 0.009], [0.478, 0.009]], sv - 0.004, 0, 20)); // hood ring (open-topped look via the post)
-  b.add('steel', rbox(0.486, 0.49, bore + 0.012, sv, -0.001, 0.001, 0.0003)); // post
-  b.add('metal', lathe([[0.515, 0.0], [0.515, 0.012], [0.556, 0.012], [0.556, 0.0]], bore, 0, 18)); // slant brake
-  b.add('dark', rbox(0.53, 0.55, bore + 0.006, bore + 0.0125, -0.006, 0.006, 0.002)); // brake cut (top-left)
-  b.add('steel', cyl(0.003, 0.2, 0.47, bore - 0.016, 0.0, 8)); // cleaning rod
-  // ---- wood: upper guard over the gas tube, flared lower handguard, grip, stock ----
-  b.add('walnut', rbox(0.19, 0.38, bore + 0.016, bore + 0.04, -0.0145, 0.0145, 0.008));
-  b.add('walnut', profile([[0.18, bore + 0.014], [0.38, bore + 0.014], [0.39, bore + 0.006], [0.39, bore - 0.03], [0.37, bore - 0.04], [0.2, bore - 0.04], [0.18, bore - 0.034]], 0.044, { round: 0.006, bevel: 0.004 }));
-  for (const w of [-1, 1]) b.add('walnut', rbox(0.23, 0.36, bore - 0.02, bore - 0.004, w * 0.0225 - 0.003, w * 0.0225 + 0.002, 0.003)); // finger swells
-  b.add('steel', rbox(0.168, 0.182, bore - 0.04, bore + 0.018, -0.0225, 0.0225, 0.002)); // retainer
-  // trigger guard + pistol grip
-  b.add('steel', profile([[-0.05, -0.032], [0.04, -0.032], [0.044, -0.036], [0.044, -0.052], [0.04, -0.056], [-0.042, -0.056], [-0.05, -0.05], [-0.046, -0.046], [-0.04, -0.05], [0.038, -0.05], [0.04, -0.046], [0.04, -0.036], [-0.046, -0.036]], 0.012, { round: 0.0015, bevel: 0.001 }));
-  b.add('walnut', profile([[-0.046, -0.032], [-0.05, -0.06], [-0.06, -0.1], [-0.068, -0.13], [-0.1, -0.13], [-0.096, -0.1], [-0.088, -0.06], [-0.086, -0.032]], 0.03, { round: 0.008, bevel: 0.004 }));
-  b.add('walnut', profile([[-0.16, 0.026], [-0.53, 0.004], [-0.545, 0.004], [-0.548, -0.118], [-0.53, -0.12], [-0.3, -0.07], [-0.2, -0.04], [-0.16, -0.032]], 0.036, { round: 0.008, bevel: 0.004 }));
-  b.add('steel', rbox(-0.556, -0.545, -0.12, 0.006, -0.018, 0.018, 0.002)); // butt plate
-  b.add('steel', cyl(0.005, -0.44, -0.43, -0.092, 0.018, 10)); // sling loop
-  // magwell + paddle release
-  b.add('metal', rbox(0.055, 0.12, -0.042, -0.03, -0.0155, 0.0155, 0.002));
-  b.add('steel', profile([[0.044, -0.034], [0.054, -0.034], [0.056, -0.05], [0.05, -0.054], [0.044, -0.05]], 0.012, { round: 0.002, bevel: 0.001 }));
+  // dovetail side-mount plate (left)
+  b.add('blued', rbox(-0.03, 0.095, 0.0, 0.026, -0.0205, -0.0172, 0.0015));
+  for (let i = 0; i < 4; i++) b.add('dark', rbox(-0.02 + i * 0.03, -0.012 + i * 0.03, 0.004, 0.022, -0.0207, -0.0203, 0.0004));
+  // ---- dust cover with its rib, rounded tail and the cover catch ----
+  b.add('blued', cyl(0.0172, -0.162, 0.118, 0.03, 0, 22));
+  b.add('blued', rbox(-0.162, 0.118, 0.03, 0.046, -0.0045, 0.0045, 0.002));
+  b.add('blued', lathe([[-0.172, 0.0], [-0.172, 0.012], [-0.168, 0.0168], [-0.162, 0.0172], [-0.162, 0.0]], 0.03, 0, 22));
+  b.add('steel', rbox(-0.18, -0.168, 0.018, 0.03, -0.004, 0.004, 0.002)); // catch button
+  // ---- rear sight: base with spring housings, leaf, the wide notch block ----
+  b.add('blued', rbox(0.11, 0.178, 0.024, 0.05, -0.0115, 0.0115, 0.003));
+  for (const w of [-1, 1]) b.add('blued', cyl(0.0062, 0.112, 0.176, 0.042, w * 0.0142, 16));
+  b.add('blued', rbox(0.126, 0.178, 0.05, 0.0545, -0.008, 0.008, 0.0012)); // leaf
+  for (const w of [-1, 1]) b.add('blued', rbox(0.118, 0.13, 0.05, sv, w * 0.0012, w * 0.0112, 0.0008)); // notch block halves
+  b.add('blued', rbox(0.118, 0.13, 0.05, sv - 0.003, -0.0013, 0.0013, 0.0004)); // notch floor
+  b.add('steel', rbox(0.148, 0.156, 0.0545, 0.059, -0.0092, 0.0092, 0.001)); // range slider
+  // ---- barrel, muzzle nut, front sight (post between hooked ears), gas block, bayonet lug ----
+  b.add('blued', cyl(0.0088, 0.172, 0.525, bore, 0, 18));
+  b.add('blued', lathe([[0.525, 0.0], [0.525, 0.0102], [0.548, 0.0102], [0.552, 0.009], [0.552, 0.0]], bore, 0, 18));
+  b.add('dark', cyl(0.0044, 0.551, 0.553, bore, 0, 12));
+  b.add('blued', lathe([[0.474, 0.0], [0.474, 0.0128], [0.51, 0.0128], [0.51, 0.0]], bore, 0, 20)); // ring base
+  b.add('blued', rbox(0.48, 0.505, bore + 0.01, bore + 0.02, -0.0065, 0.0065, 0.002)); // post tower
+  b.add('steel', rbox(0.489, 0.4925, bore + 0.02, sv, -0.0011, 0.0011, 0.0003)); // post
+  for (const w of [-1, 1]) {
+    b.add('blued', rbox(0.484, 0.497, bore + 0.006, sv + 0.016, w * 0.0092 - 0.0015, w * 0.0092 + 0.0015, 0.0006)); // ear
+    b.add('blued', rbox(0.484, 0.497, sv + 0.012, sv + 0.016, w * 0.006, w * 0.0104, 0.0012)); // inward hook
+  }
+  b.add('blued', rbox(0.38, 0.428, bore - 0.014, bore + 0.026, -0.0115, 0.0115, 0.003)); // gas block
+  b.add('blued', rbox(0.43, 0.452, bore - 0.024, bore - 0.008, -0.004, 0.004, 0.0015)); // bayonet lug
+  b.add('blued', cyl(0.0088, 0.172, 0.385, bore + 0.02, 0, 16)); // gas tube
+  for (let i = 0; i < 4; i++) b.add('dark', cyl(0.0022, 0.33 + i * 0.012, 0.334 + i * 0.012, bore + 0.027, 0.0, 6)); // vent holes
+  b.add('steel', cyl(0.003, 0.2, 0.47, bore - 0.017, 0, 8)); // cleaning rod
+  // ---- wood: short upper guard, straight lower handguard with a ferrule, grip, stock ----
+  b.add('walnut', rbox(0.19, 0.325, bore + 0.012, bore + 0.03, -0.0132, 0.0132, 0.006));
+  b.add('walnut', profile([[0.18, bore + 0.012], [0.372, bore + 0.012], [0.372, bore - 0.03], [0.36, bore - 0.036], [0.19, bore - 0.036], [0.18, bore - 0.03]], 0.042, { round: 0.008, bevel: 0.004 }));
+  b.add('steel', rbox(0.372, 0.382, bore - 0.034, bore + 0.014, -0.0205, 0.0205, 0.002)); // ferrule
+  b.add('steel', rbox(0.172, 0.182, bore - 0.036, bore + 0.018, -0.0215, 0.0215, 0.002)); // retainer
+  b.add('steel', rbox(0.185, 0.215, bore - 0.0405, bore - 0.034, -0.0195, 0.0195, 0.0015));
+  b.add('steel', profile([[-0.052, -0.03], [0.034, -0.03], [0.038, -0.034], [0.038, -0.05], [0.033, -0.054], [-0.044, -0.054], [-0.052, -0.048], [-0.048, -0.044], [-0.042, -0.048], [0.032, -0.048], [0.034, -0.044], [0.034, -0.034], [-0.048, -0.034]], 0.012, { round: 0.0015, bevel: 0.001 }));
+  b.add('walnut', profile([[-0.05, -0.03], [-0.054, -0.06], [-0.064, -0.1], [-0.072, -0.13], [-0.106, -0.132], [-0.1, -0.1], [-0.09, -0.06], [-0.088, -0.03]], 0.031, { round: 0.009, bevel: 0.004 }));
+  b.add('walnut', profile([[-0.165, 0.028], [-0.54, 0.008], [-0.552, 0.008], [-0.555, -0.112], [-0.54, -0.116], [-0.38, -0.08], [-0.24, -0.046], [-0.17, -0.028]], 0.038, { round: 0.009, bevel: 0.004 }));
+  b.add('steel', rbox(-0.562, -0.552, -0.116, 0.01, -0.019, 0.019, 0.002)); // butt plate
+  b.add('steel', lathe([[-0.53, 0.0], [-0.53, 0.0075], [-0.522, 0.0075], [-0.522, 0.0]], -0.112, 0.0, 10)); // sling swivel base
+  b.add('steel', rbox(-0.532, -0.52, -0.13, -0.112, -0.0012, 0.0012, 0.003));
+  // ---- magwell lip and paddle release ----
+  b.add('blued', rbox(0.052, 0.122, -0.04, -0.03, -0.0165, 0.0165, 0.002));
+  b.add('steel', profile([[0.042, -0.032], [0.052, -0.032], [0.054, -0.048], [0.048, -0.052], [0.042, -0.048]], 0.012, { round: 0.002, bevel: 0.001 }));
+  // safety lever (right)
+  b.add('steel', profile([[-0.12, 0.004], [0.06, 0.016], [0.064, 0.01], [-0.115, -0.004], [-0.124, -0.01], [-0.13, -0.002]], 0.003, { bevel: 0.0006, wc: 0.0186 }));
   // ---- moving parts ----
   const cb = new PartBuilder();
-  cb.add('steel', rbox(0.11, 0.135, 0.012, 0.024, 0.016, 0.03, 0.002));
-  cb.add('steel', cyl(0.0065, 0.112, 0.134, 0.018, 0.034, 12));
+  cb.add('steel', rbox(0.108, 0.136, 0.012, 0.026, 0.016, 0.031, 0.002));
+  cb.add('steel', rbox(0.11, 0.134, 0.01, 0.028, 0.031, 0.04, 0.004));
   const charge = cb.build(mats, 'charge');
   const tb = new PartBuilder();
   tb.add('steel', profile([[0.004, -0.0], [0.006, -0.012], [0.004, -0.021], [-0.002, -0.024], [-0.004, -0.022], [0.0, -0.014], [-0.001, -0.0]], 0.006, { bevel: 0.0008, round: 0.0015 }));
   const trigger = tb.build(mats, 'trigger');
-  trigger.position.set(0, -0.034, -0.0);
+  trigger.position.set(0, -0.032, 0.0);
   const magBuild = () => {
     const mb = new PartBuilder();
     const front = bez([0.034, 0.0], [0.044, -0.12], [0.112, -0.22], 12);
     const rear = bez([0.072, -0.236], [0.0, -0.13], [-0.03, 0.0], 12);
-    mb.add('metal', profile([...front, ...rear], 0.023, { round: 0.003, bevel: 0.002 }));
-    mb.add('metal', profile([[0.112, -0.214], [0.12, -0.226], [0.078, -0.246], [0.07, -0.234]], 0.026, { round: 0.002, bevel: 0.002 })); // floorplate
-    for (let i = 0; i < 4; i++) {
-      const t = 0.18 + i * 0.19;
-      const v = -0.22 * t, uc = -0.02 + 0.07 * t * t + 0.02 * t;
-      for (const w of [-1, 1]) mb.add('dark', rbox(uc, uc + 0.045, v - 0.004, v, w * 0.0116 - 0.0005, w * 0.0116 + 0.0005, 0.0004));
+    mb.add('blued', profile([...front, ...rear], 0.0225, { round: 0.003, bevel: 0.002 }));
+    // pressed ribs running down the slab sides, following the curve
+    const rearRev = rear.slice().reverse();
+    for (const f of [0.3, 0.55, 0.78]) {
+      const mid = front.map(([u, v], i) => [u * (1 - f) + rearRev[i][0] * f, v * (1 - f) + rearRev[i][1] * f] as P2);
+      const band: P2[] = [...mid.slice(1, -1).map(([u, v]) => [u + 0.0022, v] as P2), ...mid.slice(1, -1).reverse().map(([u, v]) => [u - 0.0022, v] as P2)];
+      mb.add('blued', profile(band, 0.0246, { round: 0.001, bevel: 0.0008 }));
     }
+    mb.add('blued', profile([[0.112, -0.214], [0.12, -0.226], [0.078, -0.246], [0.07, -0.234]], 0.026, { round: 0.002, bevel: 0.002 })); // floorplate
     mb.add('steel', rbox(0.03, 0.04, -0.004, 0.004, -0.006, 0.006, 0.001)); // front lug
     mb.add('brass', cyl(0.0056, -0.02, 0.016, 0.002, 0, 10));
     mb.add('copper', lathe([[0.016, 0.0], [0.016, 0.0056], [0.026, 0.0035], [0.029, 0.0]], 0.002, 0, 10));
@@ -2154,16 +2177,16 @@ export function buildHval47(mats: WeaponMats): WeaponModel {
   mag2.visible = false;
   root.add(b.build(mats, 'body'), charge, trigger, mag, mag2);
   const sockets = addSockets(root, [
-    socket('muzzle', 0.556, bore, 0),
+    socket('muzzle', 0.553, bore, 0),
     socket('eject', 0.05, 0.02, 0.018),
-    socket('sight', 0.122, sv, 0),
+    socket('sight', 0.124, sv, 0),
     socket('magWell', 0.07, -0.032, 0),
   ]);
-  const { rs, ls } = grips(root, [-0.072, -0.072, -0.3, 0.0155], { u: 0.29, v: bore - 0.014, r: 0.024, fingers: [0.7, -0.5, -0.5], palm: [0.32, 1, 0] });
+  const { rs, ls } = grips(root, [-0.074, -0.074, -0.3, 0.0158], { u: 0.28, v: bore - 0.012, r: 0.0235, fingers: [0.7, -0.5, -0.5], palm: [0.32, 1, 0] });
   sockets.rightHand = rs;
   sockets.leftHand = ls;
-  addLaser(root, sockets, mats, 0.34, bore - 0.014, 0.025);
-  return { root, parts: { charge, trigger, mag, mag2 }, sockets, adsDist: 0.24 };
+  addLaser(root, sockets, mats, 0.33, bore - 0.012, 0.024);
+  return { root, parts: { charge, trigger, mag, mag2 }, sockets, adsDist: 0.13 };
 }
 
 // ======================================================================

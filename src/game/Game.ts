@@ -1280,6 +1280,7 @@ export class Game {
     this.ballistics.update(dt);
     this.explosives.update(dt);
     this.runTimers();
+    if (this.vm.detonatorOut && (!this.avatar.alive || !this.myC4().length || this.weapons.reloading || this.weapons.switching || this.player.ladder || this.player.mantle || this.player.tactical || this.vm.action?.type === 'nvg')) this.vm.detonatorOut = false;
     this.deployables.update(dt, this.camera.position);
     if (this.destruction) {
       this.destruction.update(dt, this.camera.position);
@@ -2121,10 +2122,17 @@ export class Game {
       if (lethal === 'c4' && this.frags === 0 && this.myC4().length) this.startDetonate();
       else if (this.frags > 0) {
         this.frags--;
-        if (lethal === 'tknife') this.startThrow('tknife', () => false, 0.62);
-        else if (lethal === 'frag') this.startThrow('frag', () => inp.isDown('grenade'));
-        else if (lethal === 'sticky') this.startEquip('sticky', 'stickyThrow', 0.95, [[0.04, 'cloth'], [0.23, 'stickyArm'], [0.42, 'swish'], [0.62, 'swish'], [0.66, 'release']], { holdAt: 0.53, hold: () => inp.isDown('grenade') });
-        else if (lethal === 'c4') this.startEquip('c4', 'c4Throw', 1.05, [[0.04, 'cloth'], [0.3, 'c4Arm'], [0.5, 'swish'], [0.63, 'release']]);
+        // lethals: thrown when the key is released (each has its own ready hold)
+        const held = { hold: () => inp.isDown('grenade') };
+        if (lethal === 'tknife') this.startEquip('tknife', 'lethalKnife', 0.8, [], { holdAt: 0.28, ...held });
+        else if (lethal === 'frag') this.startEquip('frag', 'lethalFrag', 1.3, [], { holdAt: 0.52, ...held });
+        else if (lethal === 'sticky') this.startEquip('sticky', 'lethalSticky', 1.25, [], { holdAt: 0.52, ...held });
+        else if (lethal === 'c4') {
+          this.vm.detonatorOut = false;
+          this.startEquip('c4', 'lethalC4', 1.45, [], { holdAt: 0.42, ...held }, () => {
+            if (this.myC4().length) this.vm.detonatorOut = true;
+          });
+        }
         else if (lethal === 'claymore') {
           this.player.tactical = false;
           this.startEquip('claymore', 'claymore', 1.95, [[0.03, 'cloth'], [0.12, 'cloth'], [0.21, 'legs'], [0.27, 'legs'], [0.33, 'laserOn'], [0.4, 'plantDip'], [0.58, 'plant'], [0.66, 'cloth']], { holdAt: 0.36, hold: () => inp.isDown('grenade') });
@@ -2138,9 +2146,14 @@ export class Game {
         this.player.sprinting = false;
         vm.holdItem('stim');
         vm.play('stim', 1.15, [[0.05, 'cloth'], [0.36, 'stimCap'], [0.56, 'stimInject']]);
-      } else if (tk === 'snapshot') this.startEquip('snapshot', 'snapshotThrow', 0.9, [[0.04, 'cloth'], [0.25, 'twist'], [0.33, 'twist'], [0.36, 'snapArm'], [0.55, 'swish'], [0.67, 'release']]);
-      else if (tk === 'decoy') this.startEquip('decoy', 'decoyThrow', 0.85, [[0.04, 'cloth'], [0.22, 'decoyTap'], [0.29, 'decoyTap'], [0.36, 'decoyTap'], [0.52, 'swish'], [0.6, 'release']]);
-      else this.startThrow(tk, () => false);
+      } else {
+        // left hand only: the gun stays up (and keeps firing); held ready until the key is released
+        this.throwKind = tk;
+        this.cookStart = -1;
+        this.vm.detonatorOut = false;
+        vm.holdItem(tk);
+        vm.play('tactical', tk === 'snapshot' ? 1.05 : 1.1, [], undefined, { kind: tk, holdAt: 0.5, hold: () => inp.isDown('tactical') });
+      }
     }
     // [H] field upgrade: the trophy system, two-handed deploy
     if (inp.wasPressed('field') && free && !this.player.mantle && !this.player.ladder) {
@@ -2208,7 +2221,7 @@ export class Game {
     }
     if (this.designating) this.updateDesignator();
     // cooked too long: it goes off in your hand
-    if (this.cookStart >= 0 && vm.action?.type === 'throw' && this.time - this.cookStart >= this.explosives.fuseTime) {
+    if (this.cookStart >= 0 && (vm.action?.type === 'throw' || vm.action?.type === 'lethalFrag') && this.time - this.cookStart >= this.explosives.fuseTime) {
       this.cookStart = -1;
       vm.cancelAction();
       this.explosives.explode(this.player.pos.clone().setY(this.player.pos.y + 1.2), this.avatar, FRAG, 8.5, 200);
@@ -2220,7 +2233,10 @@ export class Game {
     this.cookStart = -1;
     const fwd = new THREE.Vector3(0, 0, -1).applyQuaternion(this.camera.quaternion);
     const right = new THREE.Vector3(1, 0, 0).applyQuaternion(this.camera.quaternion);
-    const from = this.camera.position.clone().addScaledVector(fwd, 0.5).addScaledVector(right, -0.15);
+    // thrown from the hand that holds it: lethals right, tacticals left, C4 from the middle
+    const kind0 = this.throwKind;
+    const side = kind0 === 'frag' || kind0 === 'sticky' || kind0 === 'tknife' ? 0.15 : kind0 === 'c4' ? 0 : -0.15;
+    const from = this.camera.position.clone().addScaledVector(fwd, 0.5).addScaledVector(right, side);
     // keep the spawn point out of walls right in front of you
     const blocked = this.physics.raycast(this.camera.position, fwd, 0.6);
     if (blocked) from.copy(this.camera.position).addScaledVector(fwd, Math.max(0.05, blocked.distance - 0.15));
@@ -2239,13 +2255,14 @@ export class Game {
   }
 
   /** Equipment with its own viewmodel action (sticky, C4, claymore, snapshot, decoy). */
-  private startEquip(item: GrenadeKind | 'claymore', action: ActionType, dur: number, events: [number, string][], data?: { holdAt: number; hold: () => boolean }) {
+  private startEquip(item: GrenadeKind | 'claymore' | 'tknife', action: ActionType, dur: number, events: [number, string][], data?: { holdAt: number; hold: () => boolean }, onDone?: () => void) {
     this.player.sprinting = false;
     this.player.tactical = false;
     this.cookStart = -1;
+    this.vm.detonatorOut = false;
     if (item !== 'claymore') this.throwKind = item;
     this.vm.holdItem(item);
-    this.vm.play(action, dur, events, undefined, data);
+    this.vm.play(action, dur, events, onDone, data);
   }
   private lastUseTap = -9;
   /** game-time timers (pause- and test-step-safe, unlike setTimeout) */
@@ -2271,6 +2288,13 @@ export class Game {
       this.detonateMine();
       return;
     }
+    if (vm.detonatorOut) {
+      // already in hand: flip and press
+      vm.play('detPress', 0.42, [], () => {
+        if (!this.myC4().length) vm.detonatorOut = false;
+      });
+      return;
+    }
     vm.holdItem('detonator');
     vm.play('detonate', 0.72, [[0.04, 'cloth'], [0.27, 'coverFlip'], [0.42, 'detonate']]);
   }
@@ -2283,14 +2307,6 @@ export class Game {
     this.equipNet?.('det', {});
   }
 
-  private startThrow(kind: GrenadeKind | 'tknife', hold: () => boolean, dur = 0.95) {
-    this.player.sprinting = false;
-    this.player.tactical = false;
-    this.cookStart = -1;
-    this.throwKind = kind;
-    this.vm.holdItem(kind);
-    this.vm.play('throw', dur, kind === 'tknife' ? [[0.04, 'cloth'], [0.58, 'swish'], [0.66, 'release']] : [[0.04, 'cloth'], [0.25, 'pin'], [0.6, 'swish'], [0.66, 'release']], undefined, { holdAt: 0.55, hold: kind === 'frag' ? hold : () => false });
-  }
 
   // ---- mortar designation: a laser from the designator to wherever you aim
   private updateDesignator() {

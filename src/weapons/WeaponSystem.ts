@@ -269,7 +269,7 @@ export class WeaponSystem {
       if (this.cycleTimer <= 0 && !this.reloading && !this.switching && !s.chambered) {
         // pump / bolt waits for a one-handed action (stim, UAV) to finish instead of cutting it off
         const t = this.vm.action?.type;
-        if (t === 'stim' || t === 'uav') this.cycleTimer = 1e-4;
+        if (t === 'stim' || t === 'uav' || t === 'tactical' || t === 'detPress') this.cycleTimer = 1e-4;
         else this.cycleAction();
       }
     }
@@ -328,7 +328,7 @@ export class WeaponSystem {
     } else this.adsHeld = inp.isDown('ads');
     const busy = this.switching || (this.reloading && !d.perShell);
     const cycling = this.vm.action?.type === 'bolt' || this.vm.action?.type === 'karCycle';
-    const handsBusy = !!this.vm.action && ['throw', 'stim', 'uav', 'designate', 'melee', 'nvg'].includes(this.vm.action.type);
+    const handsBusy = !!this.vm.action && ['throw', 'stim', 'uav', 'designate', 'melee', 'nvg', 'tactical', 'detPress'].includes(this.vm.action.type);
     const wantAds = d.cls !== 'Melee' && this.enabled && this.adsHeld && !busy && !handsBusy && !p.sprinting && !p.mantle && !(p.sliding && d.cls === 'Sniper');
     if (wantAds && p.sprinting) p.sprinting = false;
     if (this.adsHeld && p.sprinting && !busy) {
@@ -374,7 +374,7 @@ export class WeaponSystem {
       this.reloadInterrupt = true;
     }
     // stim and the UAV tablet are one-handed: the right hand keeps shooting
-    const oneHand = !!this.vm.action && (this.vm.action.type === 'stim' || this.vm.action.type === 'uav');
+    const oneHand = !!this.vm.action && (this.vm.action.type === 'stim' || this.vm.action.type === 'uav' || this.vm.action.type === 'tactical' || this.vm.action.type === 'detPress');
     const canFire = d.cls !== 'Melee' && !this.switching && !this.reloading && this.sprintBlock <= 0 && this.cooldown <= 0 && !p.mantle && (this.vm.action === null || this.vm.action.type === 'inspect' || oneHand);
     if (canFire && ((s.mode === 'auto' && trig) || this.wantFire) && this.vm.action && (this.vm.action.type === 'inspect')) this.vm.cancelAction();
     // 3-round burst: one pull fires three at a raised cyclic, then a short reset

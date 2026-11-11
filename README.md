@@ -32,9 +32,9 @@ URL options: `?quality=low|medium|high|ultra`, `?weather=clear|overcast|rain|sno
 | Lean left / right | Hold Q / E. Peek round corners and over cover; the lean stops short of walls |
 | Fire mode | B (auto / burst / semi on the K416 and KS-17) |
 | Inspect weapon | Tap I. **Hold** for a magazine / chamber check |
-| Lethal | G. Frag grenade: hold to cook (watch the timer), release to throw. Sticky grenade: hold to aim, release to throw. Claymore: hold to ready it, release to set it down. C4: tap to throw. Throwing knife: instant throw, walk over it to pick it up again (choose in the loadout) |
+| Lethal | G. Hold to ready, release to throw (frag cooks while held). Sticky grenade: hold to aim, release to throw. Claymore: hold to ready it, release to set it down. C4: tap to throw. Throwing knife: instant throw, walk over it to pick it up again (choose in the loadout) |
 | Detonate C4 | Double-tap F, or G when you have no C4 left in hand |
-| Tactical | T. Flashbang, stun grenade, smoke grenade, stim, snapshot grenade or decoy grenade (choose in the loadout) |
+| Tactical | T. Hold to ready (one-handed, you can keep firing), release to throw. Flashbang, stun, smoke, stim, snapshot or decoy (choose in the loadout) |
 | Field upgrade | H. Trophy System, once its charge ring is full |
 | Dolphin dive | Z while sprinting |
 | Loadout in a match | Esc → LOADOUT (applies on next spawn, or right away if you just spawned) |
@@ -283,6 +283,46 @@ URL options: `?quality=low|medium|high|ultra`, `?weather=clear|overcast|rain|sno
 - **MP7:** sprint and jump clutter reduced.
 - **Rifle:** support hand moved so it no longer shows through the optic window.
 - **Pistol:** hold reworked.
+
+## Update 23: HVAL-47 remodel, KR-98k right-hand loading, all-new equipment handling
+
+**HVAL-47 remodelled** from a side reference and an iron-sight reference:
+- **Body:** milled receiver with the long lightening cut above the magwell and a dovetail side-mount plate.
+- **Dust cover and rear sight:** the dust cover with its rounded tail, and a rear sight base with its two round spring housings and the wide notch block.
+- **Front sight:** a post between two hooked protective ears on a ring base.
+- **Barrel and furniture:** short muzzle nut, gas block with bayonet lug, short upper handguard, straight lower handguard with a steel ferrule, sling swivel, ribbed slab magazine.
+- **Sight picture:** the eye sits right behind the rear block, so you see the dark block with its small U-notch over the round base, with the hooked tips of the front ears just above it. The upper handguard and gas tube were lowered under the sight line so nothing hides the front sight.
+
+**KR-98k reload, right hand only.**
+- The left hand stays on the fore-end the whole time.
+- **The right hand:**
+  1. Lifts and draws the bolt.
+  2. Drops to the belt.
+  3. Loads, depending on what is missing:
+     - **1–2 rounds missing:** thumbs in exactly those, one by one. It pinches each cartridge by the case head, lines it up over the port, and rolls the thumb over to press it down and forward.
+     - **3–4 missing:** seats a stripper clip in the guides, presses the stack down in two firm thumb strokes (only as many rounds as fit), then plucks the empty clip out and flicks it away.
+     - **Empty:** the same with all five, then a firmer close that chambers the first round.
+  4. Drives the bolt home and returns to the wrist.
+- **Fingers:** they blend between a knob grip, a cartridge pinch, a thumb press and a clip pinch, with no snapping between shapes.
+
+**Equipment handling, rebuilt** (`src/weapons/EquipAnims.ts`). Everything is thrown when you release the key.
+- **Tacticals** (flashbang, stun, smoke, decoy): the gun stays up in the right hand and **you can keep firing**.
+  - The left hand pulls the grenade off the vest, hooks the ring with the thumb and twists it out (the ring rides the thumb, then drops).
+  - The arm cocks back and holds until you let go, then throws overhand.
+  - The decoy now has a pin like the others.
+- **Snapshot:** the same one-handed hold, but its own preparation: a wrist roll turns the cap a quarter (two detent clicks, the sensor band lights up). It is held low and bowled underhand.
+- **Stim:** unchanged.
+- **Lethals:** the gun drops away first.
+  - **Frag:** the right hand pulls it and the left fingertips pull the pin. The right arm cocks back (cooking) while the left arm points out front, until you release.
+  - **Sticky:** the right hand pulls it and the left index presses the arming button (the LED starts racing), then the same ready and throw.
+  - **Throwing knife:** plucked straight off the chest into the over-the-shoulder ready, flicked on release.
+  - **C4:** both hands bring the brick up and toss it on release. The gun comes straight back up in the right hand while the left pulls the remote and keeps it ready.
+    - With the remote in hand the gun is one-handed but still fires.
+    - Double-tap F (or G with no C4 left) flips the cover and clacks it.
+    - The remote is put away when you reload, switch, climb or sprint, or once your charges are gone.
+  - **Claymore:** unchanged.
+- **Placement:** items are placed exactly by the animation and the hands are solved from the item. Rings sit on the fingertips, buttons under the finger, and the right fingers wrap the real shape of what they hold.
+- **Throw origin:** throws leave from the hand that holds them (lethals right, tacticals left, C4 centre).
 
 ## Update 22: HVAL-47 assault rifle and KR-98k bolt carbine
 

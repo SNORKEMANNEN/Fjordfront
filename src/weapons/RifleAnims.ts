@@ -34,6 +34,7 @@ export interface RifleHands {
 export interface RifleCtx extends AnimCtx {
   hr: RifleHands;
   boltHome: THREE.Vector3;
+  setRPose: (fp: FingerPose) => void;
   wristForR: (anchor: THREE.Vector3, q: THREE.Quaternion, r: number) => THREE.Vector3;
 }
 
@@ -167,6 +168,7 @@ function rightOnKnob(c: RifleCtx, knob: THREE.Vector3, blend: number, lift: numb
   c.hr.rightQ.copy(q);
   c.hr.rightTarget.copy(c.wristForR(knob, q, 0.0095));
   c.hr.setRight(blend);
+  c.setRPose(FP_KNOB);
 }
 
 /** Per-shot bolt throw: up, rip back (the case flies), drive forward, slap down. */
@@ -190,31 +192,55 @@ export function karCycle(t: number, pos: THREE.Vector3, rot: THREE.Vector3, c: R
   once(c, 'k5', t, 0.79, () => { c.ev('fireMode'); c.jolt(0.5, -0.3, -0.1); });
 }
 
-const ROUND_GRIP: Pose = { p: new THREE.Vector3(0, 0.0055, 0.03), q: handFrame(new THREE.Vector3(0.15, -0.55, -1), new THREE.Vector3(0.45, -0.9, 0)) };
+// ---- right-hand finger shapes for the loading work (blended, never snapped) ----
+const FP_KNOB: FingerPose = { index: [-0.95, -1.05, -0.7], middle: [-1.05, -1.15, -0.7], ring: [-1.1, -1.15, -0.72], pinky: [-1.15, -1.15, -0.72], thumb: [0.3, -0.7, -0.6, -0.4] };
+const FP_ROUND: FingerPose = { index: [-0.5, -0.75, -0.5], middle: [-1.3, -1.4, -0.9], ring: [-1.35, -1.4, -0.9], pinky: [-1.4, -1.35, -0.85], thumb: [0.15, -0.55, -0.45, -0.3], spread: 0.02 };
+const FP_THUMB: FingerPose = { index: [-1.0, -1.1, -0.7], middle: [-1.1, -1.2, -0.72], ring: [-1.15, -1.2, -0.72], pinky: [-1.2, -1.2, -0.72], thumb: [0.65, 0.1, 0.05, 0.0] };
+const FP_CLIP: FingerPose = { index: [-0.72, -0.9, -0.6], middle: [-0.82, -1.0, -0.62], ring: [-1.2, -1.3, -0.8], pinky: [-1.3, -1.3, -0.8], thumb: [0.25, -0.5, -0.4, -0.3] };
+const FP_OPEN: FingerPose = { index: [-0.2, -0.25, -0.12], middle: [-0.25, -0.3, -0.15], ring: [-0.3, -0.35, -0.18], pinky: [-0.35, -0.4, -0.2], thumb: [0.55, -0.05, -0.1, -0.05], spread: 0.1 };
+function mixFP(a: FingerPose, b: FingerPose, u: number): FingerPose {
+  const m3 = (x: [number, number, number], y: [number, number, number]) => x.map((v, i) => v + (y[i] - v) * u) as [number, number, number];
+  return { index: m3(a.index, b.index), middle: m3(a.middle, b.middle), ring: m3(a.ring, b.ring), pinky: m3(a.pinky, b.pinky), thumb: a.thumb.map((v, i) => v + (b.thumb[i] - v) * u) as [number, number, number, number], spread: (a.spread ?? 0) + ((b.spread ?? 0) - (a.spread ?? 0)) * u };
+}
+/** right hand pinching a cartridge by the case head: thumb on top, index under, fingers tucked */
+const R_ROUND: Pose = { p: new THREE.Vector3(0.002, 0.006, 0.026), q: handFrame(new THREE.Vector3(-0.3, -0.45, -1), new THREE.Vector3(-0.55, -0.83, 0.05)) };
+/** right hand pinching the clip's strip from the right */
+const R_CLIP: Pose = { p: new THREE.Vector3(0.006, 0.003, -0.004), q: handFrame(new THREE.Vector3(-0.35, -0.55, -0.8), new THREE.Vector3(-0.9, -0.35, 0.0)) };
 
+function rightOn(c: RifleCtx, grip: Pose, blend: number, r: number) {
+  c.hr.rightQ.copy(grip.q);
+  c.hr.rightTarget.copy(c.wristForR(grip.p, grip.q, r));
+  c.hr.setRight(blend);
+}
+
+/**
+ * The left hand stays on the fore-end the whole time; the right hand does all of it:
+ * bolt up and back → down to the belt → cartridges thumbed in one by one (only the missing ones)
+ * or a stripper clip into the guides, the stack pressed down with the thumb, the empty clip
+ * plucked out and flicked away → bolt forward and down (chambering) → back to the wrist.
+ */
 export function karReload(t: number, plan: KarPlan, pos: THREE.Vector3, rot: THREE.Vector3, c: RifleCtx) {
   const { parts } = c;
   const deliberate = plan.kind === 'empty';
-  // bolt open / close windows (normalised)
-  const [o0, o1] = deliberate ? [0.02, 0.13] : [0.0, plan.kind === 'clip' ? 0.15 : 0.18];
-  const [c0, c1] = deliberate ? [0.72, 0.9] : plan.kind === 'clip' ? [0.74, 0.88] : [0.8, 0.94];
+  const single = plan.kind === 'single';
+  // ---- windows (normalised)
+  const o0 = 0.0, o1 = deliberate ? 0.12 : 0.13;
+  const c0 = single ? 0.8 : deliberate ? 0.75 : 0.77, c1 = single ? 0.92 : deliberate ? 0.92 : 0.9;
+  const w0 = o1 + 0.02, w1 = c0 - 0.03;
   const lift = kf(t, [[o0, 0], [o0 + (o1 - o0) * 0.4, 1], [c0 + (c1 - c0) * 0.55, 1], [c1, 0]]);
   const draw = kf(t, [[o0 + (o1 - o0) * 0.4, 0], [o1, 1], [c0, 1], [c0 + (c1 - c0) * 0.5, 0]]);
   setBolt(c, lift, draw);
-  // right hand: on the knob while it opens / closes, back on the wrist in between
-  const rb = Math.max(kf(t, [[o0, 0], [o0 + 0.04, 1], [o1, 1], [o1 + 0.06, 0]]), kf(t, [[c0 - 0.06, 0], [c0, 1], [c1, 1], [c1 + 0.06, 0]]));
-  rightOnKnob(c, knobAt(c, lift, draw), rb, lift);
-  once(c, 'b1', t, o0 + (o1 - o0) * 0.3, () => c.ev('boltOpen'));
-  once(c, 'b2', t, o1 - 0.02, () => { c.ev('boltBack'); c.jolt(0.2, 0.2, 0.3); });
-  once(c, 'b3', t, c0 + (c1 - c0) * 0.42, () => { c.ev('boltClose'); if (deliberate) c.jolt(0.8, -0.4, -0.3); });
-  once(c, 'b4', t, c1 - 0.01, () => { c.ev('fireMode'); c.jolt(deliberate ? 0.9 : 0.5, -0.3, -0.1); if (deliberate) c.ev('camSeat'); });
-  // ---- gun: canted over so the open action faces the left hand, lifted to the chest
-  const cant = kf(t, [[0, 0], [o1 * 0.6, 0.42], [c0, 0.42], [c1, 0.1], [1, 0]]);
-  rot.z += cant - 0.06 * rb;
-  rot.x += kf(t, [[0, 0], [o1 * 0.6, 0.24], [c0, 0.22], [c1, 0.06], [1, 0]]) + (deliberate ? 0.05 * Math.sin(clamp((t - c1) / (1 - c1), 0, 1) * Math.PI) : 0);
-  rot.y += 0.55 * cant;
-  pos.add(kv(t, [[0, [0, 0, 0]], [o1 * 0.6, [-0.02, -0.06, -0.19]], [c0, [-0.02, -0.058, -0.19]], [c1, [-0.01, -0.04, -0.1]], [1, [0, 0, 0]]]));
-  // ---- the rounds the magazine holds (visible through the open action): bottom-up stack
+  // ---- gun: held out by the left hand on the fore-end, rolled so the action faces the right hand
+  const hold = kf(t, [[0, 0], [0.08, 1], [c1, 1], [1, 0]]);
+  rot.z += -0.32 * hold + (deliberate ? 0.06 * Math.sin(clamp((t - c1) / (1 - c1), 0, 1) * Math.PI) : 0);
+  rot.x += 0.2 * hold - (deliberate ? 0.04 * kf(t, [[c1 - 0.04, 0], [c1, 1], [c1 + 0.04, 0]]) : 0);
+  rot.y += 0.16 * hold;
+  pos.add(new THREE.Vector3(-0.02, -0.04, -0.15).multiplyScalar(hold));
+  const w = clamp((t - w0) / (w1 - w0), 0, 1);
+  const knob = knobAt(c, lift, draw);
+  const knobGrip: Pose = { p: knob, q: handFrame(new THREE.Vector3(-0.35, 0.25 + 0.3 * lift, -0.9), new THREE.Vector3(-0.55, 0.8, 0.05)) };
+  const belt: Pose = { p: new THREE.Vector3(0.13, -0.17, 0.12), q: E(0.5, -0.4, -0.6) };
+  // magazine contents through the open action
   const showMag = (n: number) => {
     const g = parts.magRounds;
     if (!g) return;
@@ -222,70 +248,97 @@ export function karReload(t: number, plan: KarPlan, pos: THREE.Vector3, rot: THR
     n = clamp(Math.round(n), 0, 5);
     g.children.forEach((r, i) => (r.visible = i >= 5 - n));
   };
-  const work0 = o1 + 0.03, work1 = c0 - 0.03;
-  const w = clamp((t - work0) / (work1 - work0), 0, 1);
-  if (plan.kind === 'single') {
-    // ---- thumb single cartridges in: fetch, line up over the port, press down and forward
+  let grip: Pose = knobGrip, fp: FingerPose = FP_KNOB, r = 0.0095;
+  if (t < w0) {
+    // bolt open, then the hand lets go and drops for ammunition
+    const leave = smoothstep(o1 - 0.01, w0 + 0.02, t);
+    grip = lerpPose(knobGrip, belt, leave);
+    fp = mixFP(FP_KNOB, FP_OPEN, leave);
+    showMag(plan.start);
+  } else if (t > w1) {
+    // up to the knob, drive it home
+    const come = smoothstep(w1, c0 + 0.01, t);
+    grip = lerpPose(belt, knobGrip, come);
+    fp = mixFP(FP_OPEN, FP_KNOB, come);
+    showMag(single ? plan.start + plan.n : 5);
+  } else if (single) {
+    // ---- single cartridges: fetch, line up over the port, press down & forward with the thumb
     const n = Math.max(1, plan.n);
     const slot = Math.min(n - 1, Math.floor(w * n));
-    const u = w * n - slot; // 0..1 within this round
-    const loaded = plan.start + slot + (u > 0.72 ? 1 : 0);
-    showMag(Math.min(5, loaded));
-    const port = P(0.0, KAR.bore + 0.006, 0.006, E(-0.05, 0, 0));
-    const above = P(-0.012, KAR.bore + 0.05, 0.03, E(-0.5, 0.15, 0.25));
-    const belt = P(-0.2, -0.3, 0.08, E(0.4, 0.6, 0.8));
-    const pressed = P(0.0, KAR.bore - 0.007, -0.002, E(0, 0, 0));
-    const rp = u < 0.32 ? lerpPose(belt, above, smoothstep(0, 0.32, u)) : u < 0.52 ? lerpPose(above, port, smoothstep(0.32, 0.52, u)) : u < 0.72 ? lerpPose(port, pressed, easeInOutCubic((u - 0.52) / 0.2)) : lerpPose(pressed, belt, smoothstep(0.72, 1, u));
+    const u = w * n - slot;
+    showMag(plan.start + slot + (u > 0.72 ? 1 : 0));
+    const above = P(0.004, KAR.bore + 0.05, 0.02, E(-0.45, -0.1, -0.2));
+    const port = P(0.0, KAR.bore + 0.008, 0.008, E(-0.08, 0, 0));
+    const pressed = P(0.0, KAR.bore - 0.007, -0.004, E(0, 0, 0));
+    const pouch = P(0.12, -0.16, 0.11, E(0.5, -0.5, -0.7));
+    const rp = u < 0.3 ? lerpPose(pouch, above, smoothstep(0, 0.3, u)) : u < 0.5 ? lerpPose(above, port, smoothstep(0.3, 0.5, u)) : u < 0.72 ? lerpPose(port, pressed, easeInOutCubic((u - 0.5) / 0.22)) : lerpPose(pressed, pouch, smoothstep(0.72, 1, u));
     if (parts.hround) {
       place(parts.hround, rp);
-      parts.hround.visible = w > 0 && w < 1 && u > 0.05 && u < 0.72;
+      parts.hround.visible = u > 0.06 && u < 0.72;
     }
-    const grip = mul(rp, ROUND_GRIP);
-    if (u > 0.72) grip.p.add(new THREE.Vector3(-0.01, 0.02, 0.0).multiplyScalar(smoothstep(0.72, 0.85, u)));
-    const blend = kf(t, [[o0, 0], [work0, 1], [work1, 1], [work1 + 0.08, 0]]);
-    leftOn(c, grip, blend, u > 0.72 ? POSES.open : POSES.pinch, 0.003);
+    grip = mul(rp, R_ROUND);
+    // on the press the thumb takes over: the hand rolls over the top of the round
+    const press = smoothstep(0.48, 0.58, u) * (1 - smoothstep(0.74, 0.84, u));
+    grip.p.y += 0.004 * press;
+    fp = u < 0.06 ? mixFP(FP_OPEN, FP_ROUND, u / 0.06) : u < 0.5 ? FP_ROUND : u < 0.72 ? mixFP(FP_ROUND, FP_THUMB, smoothstep(0.5, 0.6, u)) : mixFP(FP_THUMB, FP_OPEN, smoothstep(0.72, 0.85, u));
+    r = 0.003;
     for (let i = 0; i < n; i++) {
-      once(c, 's' + i, w, (i + 0.6) / n, () => c.ev('insert'));
+      once(c, 's' + i, w, (i + 0.48) / n, () => c.ev('insert'));
       once(c, 'p' + i, w, (i + 0.71) / n, () => { c.ev('shellIn'); c.jolt(0.25, -0.15); });
     }
   } else {
-    // ---- stripper clip: fetch, drop into the guides, thumb the stack down, pull the empty clip
-    const fetchE = 0.24, seatE = 0.34, pressE = 0.72, pullE = 0.88;
-    const guide = P(0, KAR.bore + 0.052, KAR.guideU * -1, E(0, 0, 0));
-    const lifted = P(-0.03, KAR.bore + 0.11, 0.06, E(-0.4, 0.2, 0.3));
-    const belt = P(-0.2, -0.3, 0.08, E(0.6, 0.5, 0.9));
-    const gone = P(-0.22, KAR.bore + 0.14, 0.1, E(-0.6, 0.6, 1.2));
-    const clipPose = w < fetchE ? lerpPose(belt, lifted, smoothstep(0, fetchE, w)) : w < seatE ? lerpPose(lifted, guide, easeOutBack(clamp((w - fetchE) / (seatE - fetchE), 0, 1))) : w < pressE ? guide : lerpPose(guide, gone, smoothstep(pressE + 0.02, pullE, w));
-    const clip = parts.clip;
+    // ---- stripper clip
+    const fetchE = 0.22, seatE = 0.32, pressE = 0.72, pullE = 0.86;
+    const guide = P(0, KAR.bore + 0.052, -KAR.guideU, E(0, 0, 0));
+    const lifted = P(0.035, KAR.bore + 0.1, 0.06, E(-0.35, -0.2, -0.35));
+    const pouch = P(0.12, -0.16, 0.11, E(0.6, -0.5, -0.9));
+    const flick = P(0.2, KAR.bore + 0.12, 0.08, E(-0.7, -0.8, -1.4));
+    const clipPose = w < fetchE ? lerpPose(pouch, lifted, smoothstep(0, fetchE, w)) : w < seatE ? lerpPose(lifted, guide, easeOutBack(clamp((w - fetchE) / (seatE - fetchE), 0, 1))) : w < pressE ? guide : lerpPose(guide, flick, smoothstep(pressE + 0.02, pullE, w));
     const press = smoothstep(seatE + 0.04, pressE - 0.04, w);
+    const room = deliberate ? 5 : 5 - plan.start;
+    const clip = parts.clip;
     if (clip) {
       place(clip, clipPose);
       clip.visible = w > 0.02 && w < pullE + 0.02;
-      // the stack slides down out of the clip; the bottom rounds enter the magazine one by one
-      // (topping off: only as many go in as there is room for, the rest stay in the clip)
-      const room = plan.kind === 'empty' ? 5 : 5 - plan.start;
       const entered = Math.floor(press * room + 1e-3);
       clip.children.forEach((ch, i) => {
         if (ch.name === 'strip') return;
-        const k = i - 1; // 0 = top round in the clip
         ch.position.y = -Math.min(press, room / 5) * 0.048;
-        ch.visible = k < 5 - entered;
+        ch.visible = i - 1 < 5 - entered;
       });
     }
-    const loadedNow = plan.kind === 'empty' ? 5 * press : plan.start + (5 - plan.start) * press;
-    showMag(loadedNow);
-    // hand: carries the clip in, then the thumb presses on the top round, then pinches the clip out
-    let grip: Pose;
-    if (w < seatE) grip = mul(clipPose, { p: new THREE.Vector3(-0.009, -0.012, -0.03), q: handFrame(new THREE.Vector3(0.3, -0.5, -1), new THREE.Vector3(1, -0.15, 0)) });
-    else if (w < pressE) grip = { p: new THREE.Vector3(-0.006, KAR.bore + 0.054 - press * 0.046, 0.012), q: handFrame(new THREE.Vector3(0.35, -0.6, -0.8), new THREE.Vector3(0.15, -1, 0.1)) };
-    else grip = mul(clipPose, { p: new THREE.Vector3(-0.004, 0.006, -0.002), q: handFrame(new THREE.Vector3(0.25, -0.8, -0.5), new THREE.Vector3(0.9, -0.3, 0)) });
-    const blend = kf(t, [[o0, 0], [work0, 1], [work1, 1], [work1 + 0.08, 0]]);
-    leftOn(c, grip, blend, w < seatE ? POSES.pinch : w < pressE ? POSES.hold : POSES.pinch, 0.004);
+    showMag(deliberate ? 5 * press : plan.start + room * press);
+    if (w < seatE) {
+      grip = mul(clipPose, R_CLIP);
+      fp = mixFP(FP_OPEN, FP_CLIP, smoothstep(0, 0.06, w));
+    } else if (w < pressE) {
+      // thumb on the top round, pushing the stack down; the hand sits over the right of the action
+      const thumbPose: Pose = { p: new THREE.Vector3(0.008, KAR.bore + 0.056 - Math.min(press, room / 5) * 0.046, 0.026), q: handFrame(new THREE.Vector3(-0.25, -0.55, -1), new THREE.Vector3(-0.75, -0.65, 0.05)) };
+      const into = smoothstep(seatE, seatE + 0.05, w);
+      grip = lerpPose(mul(clipPose, R_CLIP), thumbPose, into);
+      // the push comes in two firm strokes
+      grip.p.y -= 0.003 * Math.sin(clamp((w - seatE - 0.05) / (pressE - seatE - 0.05), 0, 1) * Math.PI * 2);
+      fp = mixFP(FP_CLIP, FP_THUMB, into);
+    } else {
+      const back = smoothstep(pressE, pressE + 0.03, w);
+      grip = lerpPose(grip, mul(clipPose, R_CLIP), 1);
+      fp = mixFP(FP_THUMB, FP_CLIP, back);
+      if (w > pullE - 0.04) fp = mixFP(FP_CLIP, FP_OPEN, smoothstep(pullE - 0.04, pullE, w));
+    }
+    r = 0.004;
     once(c, 'q1', w, seatE - 0.01, () => { c.ev('magTouch'); c.jolt(0.2, -0.1); });
-    once(c, 'q2', w, seatE + 0.12, () => c.ev('insert'));
+    once(c, 'q2', w, seatE + 0.14, () => c.ev('insert'));
     once(c, 'q3', w, pressE - 0.06, () => { c.ev('magIn'); c.jolt(0.5, -0.3, -0.1); });
     once(c, 'q4', w, pressE + 0.05, () => c.ev('magOut'));
   }
+  // right hand: on the work from the first frame to the last; the left never leaves the fore-end
+  const blend = kf(t, [[0, 0], [0.04, 1], [c1, 1], [1, 0]]);
+  rightOn(c, grip, blend, r);
+  c.setRPose(fp);
+  once(c, 'b1', t, o0 + (o1 - o0) * 0.3, () => c.ev('boltOpen'));
+  once(c, 'b2', t, o1 - 0.02, () => { c.ev('boltBack'); c.jolt(0.2, 0.2, 0.3); });
+  once(c, 'b3', t, c0 + (c1 - c0) * 0.42, () => { c.ev('boltClose'); if (deliberate) c.jolt(0.8, -0.4, -0.3); });
+  once(c, 'b4', t, c1 - 0.01, () => { c.ev('fireMode'); c.jolt(deliberate ? 0.9 : 0.5, -0.3, -0.1); if (deliberate) c.ev('camSeat'); });
   once(c, 'z0', t, 0.01, () => c.ev('cloth'));
   once(c, 'z1', t, 0.97, () => c.ev('rattle'));
 }

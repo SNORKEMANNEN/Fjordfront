@@ -189,6 +189,9 @@ export function makeC4() {
   const l = led(0xff2a1a, 0.0024);
   l.position.set(-0.002, 0.0318, -0.002);
   g.add(l);
+  // where the palms go when it is carried in both hands (the brick's ends)
+  marker(g, 'gripL', -0.057, 0.0, 0.0);
+  marker(g, 'gripR', 0.057, 0.0, 0.0);
   return finish(g);
 }
 
@@ -304,6 +307,12 @@ export function makeDecoy() {
   const l = led(0xffa020, 0.0022);
   l.position.set(0.0, 0.02, 0.0225);
   g.add(l);
+  // safety pin ring through the top cap
+  const ring = new THREE.Mesh(new THREE.TorusGeometry(0.011, 0.0016, 6, 16), M.steel());
+  ring.position.set(0.016, 0.066, 0);
+  ring.rotation.y = Math.PI / 2;
+  ring.name = 'ring';
+  g.add(ring);
   const stripe = new THREE.Mesh(new THREE.CylinderGeometry(0.0222, 0.0222, 0.006, 18, 1, true), new THREE.MeshStandardMaterial({ color: 0x2a6ad8, roughness: 0.6 }));
   stripe.position.y = 0.035;
   g.add(stripe);
