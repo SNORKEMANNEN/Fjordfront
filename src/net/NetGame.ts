@@ -401,6 +401,18 @@ export class NetGame {
         this.replayDeath(m);
         return;
       }
+      case 'eq': {
+        // equipment placed / fired on another machine
+        if (this.isHost) this.net.broadcast(m, from);
+        const o = this.bySlot(m.s);
+        if (!o) return;
+        const p = Array.isArray(m.p) ? new THREE.Vector3(...(m.p as [number, number, number])) : null;
+        if (m.a === 'det') {
+          for (const gr of g.explosives.grenades.filter((x: { kind: string; owner: unknown }) => x.kind === 'c4' && x.owner === o)) g.explosives.detonate(gr);
+        } else if (m.a === 'clay' && p) g.deployables.placeClaymore(o, p, m.y as number);
+        else if (m.a === 'trophy' && p) g.deployables.deployTrophy(o, p, m.y as number);
+        return;
+      }
       case 'nade': {
         if (this.isHost) this.net.broadcast(m, from);
         const o = this.bySlot(m.s);
@@ -544,6 +556,12 @@ export class NetGame {
         else this.net.broadcast(m);
       }
       return r;
+    };
+    g.equipNet = (a: string, d: Record<string, unknown>) => {
+      if (!this.active) return;
+      const m = { t: 'eq', s: g.avatar.id, a, ...d };
+      if (this.isClient) this.net.send(m);
+      else this.net.broadcast(m);
     };
     const use0 = g.streaks.use.bind(g.streaks);
     g.streaks.use = (c: Combatant, id: string, now: number, aim?: THREE.Vector3) => {

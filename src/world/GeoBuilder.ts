@@ -16,6 +16,24 @@ export class GeoBuilder {
   /** doorways found in walls (full-height openings 0.8–1.45 m wide); real doors are hung later */
   doors: DoorSpec[] = [];
 
+  /**
+   * Destructibles (Update 20). While `tag` is set, every geometry added is remembered so the
+   * merged vertex range can be collapsed later (a car that blows up leaves the merged mesh); while
+   * `hitHook` is set, every collider gets it as onHit. Free-standing props (barrels, fence runs)
+   * are not merged at all: they are recorded in `destructibles` with their world transform and
+   * built as their own instanced pieces by the Destruction system.
+   */
+  tag: string | null = null;
+  /** set by the game: a bullet hit a tagged car */
+  static onCarHit: ((id: string, p: THREE.Vector3, d: THREE.Vector3, power: number, by: unknown) => void) | null = null;
+  hitHook: ColliderInfo['onHit'] | null = null;
+  private tagged: { tag: string; mat: string; idx: number }[] = [];
+  ranges = new Map<string, { mesh: THREE.Mesh; start: number; count: number }[]>();
+  destructibles: { kind: 'barrel' | 'fence'; m: THREE.Matrix4; data: Record<string, unknown> }[] = [];
+  destructible(kind: 'barrel' | 'fence', local: THREE.Matrix4, data: Record<string, unknown>) {
+    this.destructibles.push({ kind, m: this.m.clone().multiply(local), data });
+  }
+
   constructor(public physics: Physics, public mats: Record<string, THREE.Material>) {}
 
   get m() {
@@ -41,6 +59,7 @@ export class GeoBuilder {
     clean.setAttribute('uv', ng.getAttribute('uv'));
     if (!this.geos.has(mat)) this.geos.set(mat, []);
     this.geos.get(mat)!.push(clean);
+    if (this.tag) this.tagged.push({ tag: this.tag, mat, idx: this.geos.get(mat)!.length - 1 });
   }
 
   /**
@@ -62,7 +81,8 @@ export class GeoBuilder {
     const world = this.m.clone().multiply(local);
     const p = new THREE.Vector3(), q = new THREE.Quaternion(), s = new THREE.Vector3();
     world.decompose(p, q, s);
-    return this.physics.addBox(p, new THREE.Vector3(Math.max(hx, 0.01), Math.max(hy, 0.01), Math.max(hz, 0.01)), q, { surface, ...extra });
+    const hook = this.hitHook && !extra?.onHit ? { onHit: this.hitHook } : {};
+    return this.physics.addBox(p, new THREE.Vector3(Math.max(hx, 0.01), Math.max(hy, 0.01), Math.max(hz, 0.01)), q, { surface, ...extra, ...hook });
   }
 
   /** A box rotated around an arbitrary euler, defined by centre & size. */
@@ -169,10 +189,25 @@ export class GeoBuilder {
 
   /** Flush accumulated geometry into meshes and add to a parent. */
   flush(parent: THREE.Object3D, castShadow = true) {
+    // where each tagged geometry ends up: (material, index) -> tag
+    const tagAt = new Map<string, string>();
+    for (const t of this.tagged) tagAt.set(t.mat + '#' + t.idx, t.tag);
+    this.tagged.length = 0;
     for (const [mat, list] of this.geos) {
       // merge in chunks to keep buffers reasonable
       for (let i = 0; i < list.length; i += 4000) {
-        const merged = mergeGeometries(list.slice(i, i + 4000), false);
+        const chunk = list.slice(i, i + 4000);
+        const spans: { tag: string; start: number; count: number }[] = [];
+        if (tagAt.size) {
+          let off = 0;
+          chunk.forEach((g, k) => {
+            const n = g.getAttribute('position').count;
+            const tg = tagAt.get(mat + '#' + (i + k));
+            if (tg) spans.push({ tag: tg, start: off, count: n });
+            off += n;
+          });
+        }
+        const merged = mergeGeometries(chunk, false);
         if (!merged) continue;
         merged.computeBoundingSphere();
         merged.computeBoundingBox();
@@ -181,6 +216,10 @@ export class GeoBuilder {
         mesh.receiveShadow = true;
         mesh.name = 'static:' + mat;
         parent.add(mesh);
+        for (const sp of spans) {
+          if (!this.ranges.has(sp.tag)) this.ranges.set(sp.tag, []);
+          this.ranges.get(sp.tag)!.push({ mesh, start: sp.start, count: sp.count });
+        }
         this.meshes.push(mesh);
       }
     }

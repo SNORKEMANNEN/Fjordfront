@@ -28,19 +28,22 @@ URL options: `?quality=low|medium|high|ultra`, `?weather=clear|overcast|rain|sno
 | Jump, mantle, vault | Space. Mantling and window/fence vaulting are detected automatically |
 | Fire / aim | Left mouse / right mouse |
 | Reload | R |
-| Switch weapon | 1 / 2 / Q / mouse wheel |
+| Switch weapon | 1 / 2 / mouse wheel |
+| Lean left / right | Hold Q / E. Peek round corners and over cover; the lean stops short of walls |
 | Fire mode | B (auto / burst / semi on the K416 and KS-17) |
-| Inspect weapon | Tap I or T. **Hold** for a magazine / chamber check |
-| Lethal | G. Frag grenade: hold to cook (watch the timer), release to throw. Throwing knife: instant throw, walk over it to pick it up again (choose in the loadout) |
-| Tactical | F. Flashbang, stun grenade, smoke grenade or stim (choose in the loadout) |
+| Inspect weapon | Tap I. **Hold** for a magazine / chamber check |
+| Lethal | G. Frag grenade: hold to cook (watch the timer), release to throw. Sticky grenade: hold to aim, release to throw. Claymore: hold to ready it, release to set it down. C4: tap to throw. Throwing knife: instant throw, walk over it to pick it up again (choose in the loadout) |
+| Detonate C4 | Double-tap F, or G when you have no C4 left in hand |
+| Tactical | T. Flashbang, stun grenade, smoke grenade, stim, snapshot grenade or decoy grenade (choose in the loadout) |
+| Field upgrade | H. Trophy System, once its charge ring is full |
 | Dolphin dive | Z while sprinting |
 | Loadout in a match | Esc → LOADOUT (applies on next spawn, or right away if you just spawned) |
-| Melee / combat knife | Tap V: quick melee with the gun. **Hold V**: draw the combat knife (left mouse = slash, right mouse = stab, V also attacks). 1 / 2 / Q puts the guns back |
+| Melee / combat knife | Tap V: quick melee with the gun. **Hold V**: draw the combat knife (left mouse = slash, right mouse = stab, V also attacks). 1 / 2 / mouse wheel puts the guns back |
 | Ping | X or middle mouse. Enemy under the crosshair: marked for the team and called out. Anything else: a location marker |
 | Killstreaks | 3 = UAV (phone), 4 = Mortar Strike (laser designator: aim, left click to call it, right click to cancel), 5 = Attack Helicopter |
-| Doors | Walk into them to push them open, sprint into them to kick them open, or use E |
+| Doors | Walk into them to push them open, sprint into them to kick them open, or use F |
 | Skip killcam | Space or left mouse |
-| Use / spot | E. Clips onto a zipline in reach, opens or closes the door you are looking at (prompt under the crosshair), otherwise spots enemies. Space lets go of a zipline |
+| Use / spot | F. Clips onto a zipline in reach, opens or closes the door you are looking at (prompt under the crosshair), otherwise spots enemies. Space lets go of a zipline |
 | Night vision | N. The left hand flips the goggles down (or back up) |
 | Vault through a window | Space, facing the window close by (inside or outside): the whole window breaks |
 | Performance overlay | F3 |
@@ -280,6 +283,123 @@ URL options: `?quality=low|medium|high|ultra`, `?weather=clear|overcast|rain|sno
 - **MP7:** sprint and jump clutter reduced.
 - **Rifle:** support hand moved so it no longer shows through the optic window.
 - **Pistol:** hold reworked.
+
+## Update 20: LMG, new equipment, Trophy System, leaning, battlefield audio, destruction
+
+**Controls changed.**
+- **Q / E** now lean.
+- **F** is use / doors / zipline / spot (it was E).
+- **T** throws your tactical (it was F).
+- **H** deploys the field upgrade.
+- Q no longer swaps weapons; use 1 / 2 or the mouse wheel.
+- I is still inspect.
+
+**KVL-7 "Bjørn" LMG** (new primary, class LMG).
+- Belt-fed 5.56 mm with a 100-round box, 720 rpm.
+- Feed cover hinged at the front with the red dot on it, heavy barrel under a perforated heat shield, carry handle, folding bipod.
+- **Handling:**
+  - Clearly heavier than the rifles: weight 1.75, 0.40 s aim-down-sights, 0.36 s sprint-to-fire, 86 % move speed.
+  - Bigger hip bob, hangs lower at the hip.
+  - Its own spray pattern: a hard first kick, a climb that walks right, then a heavy wander that settles.
+- **Reload** (`src/weapons/LmgAnim.ts`, 5.4 s tactical / 6.3 s empty):
+  1. The gun rolls over and the support thumb pops the latch.
+  2. The feed cover swings up.
+  3. The old belt is lifted out of the tray.
+  4. The empty box is stripped down and away, and a fresh one comes up from the pouch, hooks and rocks in.
+  5. The belt end is drawn up and laid across the tray, and the cover is palmed shut.
+  6. Empty reloads also rip the charging handle back.
+- **Bipod:**
+  - The legs swing down by themselves when you go prone, or when you aim standing or crouched still with a ledge (wall, sill, car) right in front of you.
+  - While it is down: about half the recoil, much tighter spread, and almost no sway or bob.
+  - Moving off or standing up folds it.
+- **Sound:** a deeper, chugging report built from the field recordings.
+- Bots use it too.
+
+**New lethals** (G):
+- **Sticky grenade.**
+  - The thumb arms it (the LED starts racing), then an over-the-shoulder throw.
+  - Sticks to walls, floors and soldiers. Stuck to someone, it is a guaranteed kill. You get "STUCK", the victim gets a warning.
+  - 2.3 s fuse.
+- **Claymore.**
+  - Two-handed: the gun drops away and the mine comes up off the vest. The thumbs flick its scissor legs out and the tripwire module wakes up.
+  - It is held out while you keep G down. Release and you drop to a knee and set it down on its legs in front of you.
+  - Two red laser beams fan out from it.
+  - Anyone crossing in front (within 3.4 m, in its line of sight) gets a click and a directional blast: full damage forward, little behind.
+  - Shooting it destroys it; a nearby explosion sets it off. Two out at most.
+- **C4.**
+  - The brick comes up face-up and is armed (beep), then tossed underhand, spinning flat. It sticks to whatever it hits.
+  - Detonate with a double-tap of F, or with G when none are left in hand: the remote comes up, the thumb flips the cover and clacks the button.
+  - The HUD shows how many charges are out.
+
+**New tacticals** (T):
+- **Snapshot grenade.**
+  - A wrist twist turns the cap (detent clicks, the sensor band lights up), then a low underhand bowl.
+  - Its pulse is an expanding blue scan sphere. Every enemy within 22 m is outlined in red through walls for ~3 s and marked on the minimap.
+  - Thrown at you, it shows a blue tint and "REVEALED".
+- **Decoy grenade.**
+  - Three taps on the program button, then a flat side-arm flick.
+  - For 12 s it plays bursts of real gunshot recordings from random guns, with irregular gaps.
+  - Enemy bots go to investigate.
+  - If an enemy throws one, your minimap shows fake red fire contacts around it.
+
+**Field upgrade: Trophy System** (H).
+- **Charge:** fills over 75 s, shown as a ring on the HUD that glows when ready.
+- **Deploy:**
+  1. The gun swings down and both hands haul the unit up by its side handles (it is heavy: a dip as it arrives).
+  2. Its legs snap out.
+  3. Both arms shove it forward onto the ground with a camera push.
+- **In action:**
+  - It thuds down, locks its legs and spins up.
+  - Its head turns and its lamp blinks.
+  - It shoots down up to three enemy grenades, sticky grenades, C4, snapshot / decoy grenades and throwing knives within 7.5 m: a blue zap beam, a pop in mid-air, and +50 for you.
+- **Limits:** it can be shot (4 hits), explosions next to it wreck it, and it burns out after its charges or 60 s.
+
+**Unique animations.** Every new item has its own first-person animation. Two-handed items put both palms on grip points on the model and both arms solve onto them. The fingers wrap the real shape of whatever they hold.
+
+**Leaning (Q / E).**
+- Hold to lean: the head swings out from the hips (sideways and slightly down) and the view rolls into it.
+- The gun tips with you at the hip and stays on the sights when aiming, with a little lag-and-settle swing as your weight shifts (plus a cloth rustle).
+- Two sideways rays (eye and shoulder height) stop the lean short of walls, so you can lean flat against cover.
+- Bots see and shoot your leaned head and shoulders, not your body behind the corner.
+- Not while sprinting, sliding, climbing or on a zipline.
+- The door peek from Update 9 still works as before.
+
+**Audio.**
+- **Footstep occlusion.**
+  - Each step from another soldier traces up to three layers between you and them.
+  - A door or a thin wooden, glass or metal wall takes the top off.
+  - Masonry, rock or earth leaves a dull thud. Two or more layers leave barely a knock.
+  - If a path round a corner or through a gap next to them is open, the step comes through almost clearly.
+- **Distant battle.**
+  - Every few seconds, another fight 300–900 m away: rifle and LMG bursts (sometimes answered), a sniper shot, an explosion, or a roll of artillery.
+  - Each comes from a real bearing, filtered by distance, and is quieter indoors and in the tunnel.
+- **Tunnel draughts.**
+  - Both emergency shafts and both portals have their own looping wind emitters.
+  - Gain, filter and pitch gust together, and each shaft has its own voice.
+  - The howl swells as you climb toward a hatch and fades down the gallery.
+
+**Destruction** (`src/world/Destruction.ts`).
+- **Barrels.**
+  - Every standing drum is now its own object (instanced, one draw per paint).
+  - Shot through, an ordinary drum is knocked over and rolls away.
+  - Red fuel drums spring a burning leak and blow up a few seconds later, or at once in a blast, chaining into drums and cars nearby.
+- **Fences.**
+  - Picket and post-and-rail fences are built in ~1.6 m sections.
+  - Bullets, a blast, or sprinting straight through snaps a section: pickets and planks fly, dust and splinters puff, and the gap is open for good.
+- **Cars.**
+  - Every intact parked car takes damage from bullets and explosions.
+  - Past ~55 % damage the engine bay smokes. Past 80 % it catches fire: crackling fire loop, flickering firelight, flames, and a burn zone that hurts anyone next to it.
+  - About 7 s later it explodes: a large blast credited to whoever did the damage, a deep second boom and a long camera shake.
+  - The car is swapped for a burnt-out shell (still cover) that keeps burning, then smoulders.
+- Everything resets between matches.
+
+**Performance.** The new systems stay cheap:
+- Barrels: one instanced draw per paint.
+- Fences: one merged mesh per material. Broken sections are collapsed out of the mesh rather than re-merged.
+- Cars stay in the static mesh until they blow up.
+- One shared fire light.
+- Claymore and trophy scans run at 20 Hz.
+- Footstep occlusion only for steps within 40 m.
 
 ## Update 19: performance pass, blue hour, quieter guns, clearer night vision
 

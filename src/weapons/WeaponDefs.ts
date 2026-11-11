@@ -6,7 +6,7 @@ export interface WeaponDef {
   id: WeaponId;
   name: string;
   short: string;
-  cls: 'Assault Rifle' | 'SMG' | 'Shotgun' | 'Sniper' | 'Pistol' | 'Marksman' | 'Melee';
+  cls: 'Assault Rifle' | 'SMG' | 'Shotgun' | 'Sniper' | 'Pistol' | 'Marksman' | 'LMG' | 'Melee';
   slot: 'primary' | 'secondary' | 'melee';
   desc: string;
   rpm: number;
@@ -82,6 +82,16 @@ export const WEAPONS: Record<WeaponId, WeaponDef> = {
     speedMul: 0.96, adsSpeedMul: 0.6, penetration: 0.5, swaySpeed: 1, weight: 1.05, hip: [0.098, -0.056, -0.075], tracerEvery: 2,
     sound: { body: 1.1, crack: 1.0, low: 1.0, tail: 1.05, pitch: 0.95 },
     reloadKind: 'scar',
+  },
+  lmg: {
+    id: 'lmg', name: 'KVL-7 "Bjørn" LMG', short: 'KVL-7', cls: 'LMG', slot: 'primary',
+    desc: 'Belt-fed 5.56 light machine gun with a 100-round box. Heavy to carry and slow to aim, but it holds a lane all day. Go prone or rest it on a ledge and the bipod comes down.',
+    rpm: 720, modes: ['auto'], damage: [31, 24], range: [36, 82], headMul: 1.4, limbMul: 0.85, pellets: 1, pelletSpread: 0,
+    mag: 100, reserve: 200, reload: 5.4, reloadEmpty: 6.3, adsTime: 0.4, adsZoom: 1.3, sprintToFire: 0.36,
+    hipSpread: 3.6, adsSpread: 0.07, moveSpread: 3.0, bloomPerShot: 0.3, bloomMax: 3.2,
+    recoil: { v: 0.58, h: 0.3, drift: 0.14, firstShotMul: 1.6, adsMul: 0.78, recover: 0.4, kickZ: 0.034, kickPitch: 0.036, roll: 0.03, shake: 0.0045 },
+    speedMul: 0.86, adsSpeedMul: 0.46, penetration: 0.6, swaySpeed: 0.7, weight: 1.75, hip: [0.104, -0.064, -0.06], tracerEvery: 3,
+    sound: { body: 1.2, crack: 1.05, low: 1.15, tail: 1.15, pitch: 0.9 },
   },
   ums45: {
     id: 'ums45', name: 'UMS-45 Submachine Gun', short: 'UMS-45', cls: 'SMG', slot: 'primary',
@@ -190,5 +200,5 @@ export const WEAPONS: Record<WeaponId, WeaponDef> = {
   },
 };
 
-export const PRIMARIES: WeaponId[] = ['k416', 'ks17', 'mp7', 'ums45', 'pump12', 'as20', 'db12', 'dmr14', 'skv338'];
+export const PRIMARIES: WeaponId[] = ['k416', 'ks17', 'mp7', 'ums45', 'lmg', 'pump12', 'as20', 'db12', 'dmr14', 'skv338'];
 export const SECONDARIES: WeaponId[] = ['p80', 'rv357'];

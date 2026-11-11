@@ -52,6 +52,10 @@ const PATTERNS: Record<string, [number, number][]> = {
   // UMS-45: slow and heavy, it bounces: big lift, small lift, drifting a touch right
   ums45: [[0, 1.4], [0.15, 0.75], [0.2, 1.35], [0.3, 0.72], [0.15, 1.3], [0.35, 0.7], [0.0, 1.25], [0.4, 0.68], [0.2, 1.2], [-0.1, 0.66],
     [0.3, 1.15], [0.5, 0.64], [0.2, 1.1], [0.0, 0.62]],
+  // KVL-7: a hard first kick, a steady climb that walks right, then a slow heavy wander that
+  // settles low (the weight soaks it up once you are into the belt)
+  lmg: [[0, 1.45], [0.2, 1.2], [0.4, 1.15], [0.55, 1.1], [0.7, 1.05], [0.8, 0.98], [0.7, 0.92], [0.45, 0.86], [0.1, 0.8], [-0.25, 0.76],
+    [-0.5, 0.72], [-0.6, 0.68], [-0.45, 0.64], [-0.1, 0.62], [0.3, 0.6], [0.55, 0.6], [0.4, 0.58], [0.0, 0.58], [-0.4, 0.58], [-0.3, 0.58]],
 };
 
 /** Aim recoil of shot n (1-based) in a spray, before stance / ADS multipliers. */
@@ -80,7 +84,7 @@ export function aimKick(def: WeaponDef, n: number): AimKick {
 
 /** How fast the climb settles during sustained fire (fraction of the built-up climb pulled back per second). */
 export function settleRate(def: WeaponDef) {
-  return def.cls === 'SMG' ? 1.1 : def.cls === 'Assault Rifle' ? 0.8 : 0.35;
+  return def.cls === 'SMG' ? 1.1 : def.cls === 'Assault Rifle' ? 0.8 : def.cls === 'LMG' ? 0.9 : 0.35;
 }
 
 /** View-kick magnitudes for one shot (radians / metres / fraction). */

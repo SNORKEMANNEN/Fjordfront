@@ -5,7 +5,7 @@ import { LADDERS } from './MapLayout';
 
 /**
  * Ziplines: motorised two-way cables (a powered trolley pulls you either way) strung between the
- * flat roofs you can reach by ladder and from the hillsides down into the village. Press [E] at
+ * flat roofs you can reach by ladder and from the hillsides down into the village. Press [F] at
  * either end, or while looking at the cable within reach, to clip on; the trolley carries you at
  * speed and the harness takes your weight, so both hands stay on the gun and you can shoot. Jump
  * to let go (you keep the momentum), or ride to the end and you're set down on the platform.

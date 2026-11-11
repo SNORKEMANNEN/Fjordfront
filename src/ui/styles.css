@@ -463,3 +463,17 @@ button.primary:hover { background: #f3d76a; }
 .netpanel .msg { min-height: 22px; margin-top: 14px; color: #ffe27a; letter-spacing: .04em; }
 .netpanel .foot { display: flex; justify-content: space-between; align-items: center; gap: 12px; margin-top: 10px; color: var(--dim); font-family: Inter, sans-serif; font-size: 12px; flex-wrap: wrap; }
 .netpanel button[disabled] { opacity: .45; pointer-events: none; }
+
+/* ---- Update 20: field upgrade charge ring, C4 detonate prompt, snapshot / decoy feedback ---- */
+.nades .eqs.fu { position: relative; }
+.nades .eqs.fu::before { content: ''; position: absolute; left: 2px; top: 50%; width: 28px; height: 28px; margin-top: -14px; border-radius: 50%;
+  background: conic-gradient(rgba(120,200,255,.55) var(--fu), rgba(255,255,255,.08) 0); -webkit-mask: radial-gradient(circle, transparent 11px, #000 12px); mask: radial-gradient(circle, transparent 11px, #000 12px); }
+.nades .eqs.fu.empty { opacity: .6; }
+.nades .eqs.fu b { font-size: 11px; color: var(--dim); }
+.nades .eqs.fu.ready { border-color: rgba(120,200,255,.8); box-shadow: 0 0 10px rgba(80,170,255,.45); animation: fuReady 1.4s ease-in-out infinite; }
+@keyframes fuReady { 50% { box-shadow: 0 0 2px rgba(80,170,255,.2); } }
+.nades .det { align-self: center; font-size: 11px; letter-spacing: .12em; color: #ffb3a8; background: rgba(120,20,10,.45); border: 1px solid rgba(255,120,100,.5); padding: 3px 7px; animation: detBlink 1s steps(2) infinite; }
+@keyframes detBlink { 50% { opacity: .55; } }
+.snapflash { position: absolute; inset: 0; pointer-events: none; background: radial-gradient(ellipse at center, rgba(90,170,255,0) 30%, rgba(90,170,255,.22) 100%); opacity: 0; transition: opacity .25s; }
+.snapflash.on { opacity: 1; transition: none; }
+.lean-ind { position: absolute; left: 50%; top: 58%; transform: translateX(-50%); font-size: 10px; letter-spacing: .25em; color: rgba(255,255,255,.55); pointer-events: none; }

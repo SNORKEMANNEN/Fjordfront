@@ -18,6 +18,8 @@ interface Flying {
   stuck: boolean;
   /** stuck knives fade after a while if nobody collects them */
   life: number;
+  /** shot down by a trophy system */
+  dead?: boolean;
 }
 
 export class ThrowingKnives {
@@ -53,6 +55,10 @@ export class ThrowingKnives {
     for (let i = this.knives.length - 1; i >= 0; i--) {
       const k = this.knives[i];
       k.t += dt;
+      if (k.dead) {
+        this.remove(i);
+        continue;
+      }
       if (k.stuck) {
         k.life -= dt;
         const near = collector && collector.owner === k.owner && k.pos.distanceTo(collector.pos) < 1.4;

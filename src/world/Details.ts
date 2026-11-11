@@ -100,10 +100,8 @@ export class Details {
       const a = (i / n) * Math.PI * 2;
       const x = Math.cos(a) * 0.45 * (n > 1 ? 1 : 0), z = Math.sin(a) * 0.45 * (n > 1 ? 1 : 0);
       if (this.rng.chance(0.15)) this.lyingCyl(m, 0.29, 0.88, x, 0.29, z + 0.9, 'metal');
-      else {
-        this.b.cyl(this.rng.chance(0.7) ? m : this.rng.pick(mats), x, 0, z, 0.29, 0.9, 12, 'metal');
-        this.b.cyl('dkgrey', x, 0.89, z, 0.27, 0.02, 12);
-      }
+      // standing drums are destructible (Destruction): shot through they topple, red fuel drums burn and blow
+      else this.b.destructible('barrel', new THREE.Matrix4().setPosition(x, 0, z), { mat: this.rng.chance(0.7) ? m : this.rng.pick(mats) });
     }
   }
   private fishCrates(piles: number) {
@@ -243,8 +241,8 @@ export class Details {
     else this.lyingCyl('wrap', 0.75, 1.2, 0, 0.75, 0, 'fabric');
   }
   private fence(len: number) {
-    for (let x = -len / 2; x <= len / 2 + 0.01; x += 2) this.b.box('woodRaw', x - 0.05, 0, -0.05, x + 0.05, 1.2, 0.05);
-    for (const y of [0.45, 0.95]) this.b.box('woodRaw', -len / 2, y, -0.03, len / 2, y + 0.09, 0.03, 'wood', { penetrable: 1 });
+    // post-and-rail fence, destructible section by section (Destruction)
+    this.b.destructible('fence', new THREE.Matrix4(), { x0: -len / 2, x1: len / 2, z: 0, style: 'rail' });
   }
   private concretePipe() {
     this.lyingCyl('concrete', 0.62, 2.3, 0, 0.62, 0, 'concrete', 'z');

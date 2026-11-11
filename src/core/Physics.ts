@@ -10,7 +10,7 @@ export interface ColliderInfo {
   /** Bullets can pass through if the hit thickness along the ray is < this (m). */
   penetrable?: number;
   /** Called when hit by a bullet. */
-  onHit?: (point: THREE.Vector3, dir: THREE.Vector3, power?: number) => void;
+  onHit?: (point: THREE.Vector3, dir: THREE.Vector3, power?: number, by?: any) => void;
   tag?: string;
 }
 

@@ -1684,6 +1684,154 @@ export function buildUMS45(mats: WeaponMats): WeaponModel {
   return { root, parts: { charge, trigger, mag }, sockets, adsDist: 0.2 };
 }
 
+
+// ======================================================================
+// KVL-7 "Bjørn" light machine gun (5.56, belt-fed from a 100-round box). Wide square receiver
+// with a feed cover hinged at the front (the optic rides on it), a soft-sided ammo box hanging
+// under the left side with the belt running up into the feed tray, heavy barrel under a
+// perforated heat shield, folding carry handle, gas tube, and a folding bipod under the front.
+// Moving parts: cover (pivot), belt, mag (the box), charge, trigger, bipodL / bipodR (pivots).
+// ======================================================================
+export const LMG_COVER_PIVOT = new THREE.Vector3(0, 0.077, -0.168);
+export function buildLMG(mats: WeaponMats): WeaponModel {
+  const root = new THREE.Group();
+  root.name = 'KVL7';
+  const b = new PartBuilder();
+  const bore = 0.046;
+  // ---- receiver: wide, squared, with a raised feed tray block ----
+  b.add('metal', profile([[-0.15, 0.0], [-0.15, 0.062], [-0.142, 0.07], [0.168, 0.07], [0.176, 0.06], [0.176, 0.008], [0.16, -0.004], [0.12, -0.004], [0.112, -0.014], [-0.03, -0.014], [-0.05, -0.006], [-0.14, -0.004]], 0.05, { bevel: 0.002, round: 0.002 }));
+  // side plates, rivets, the ejection chute underneath
+  for (const w of [-1, 1]) {
+    b.add('metal', rbox(-0.13, 0.16, 0.008, 0.06, w * 0.025 - 0.0012, w * 0.025 + 0.0012, 0.0008));
+    for (const u of [-0.11, -0.06, 0.0, 0.06, 0.12]) for (const v of [0.016, 0.052]) b.add('steel', pin(u, v, w * 0.0262, 0.0022, 0.0012));
+  }
+  b.add('dark', rbox(-0.01, 0.07, -0.02, -0.012, -0.012, 0.012, 0.002)); // ejection port (down)
+  // feed tray mouth on the left, belt guide lip
+  b.add('metal', rbox(0.03, 0.115, 0.042, 0.068, -0.044, -0.025, 0.003));
+  b.add('dark', rbox(0.036, 0.109, 0.046, 0.064, -0.0445, -0.03, 0.002));
+  // box latch housing under the receiver (left)
+  b.add('metal', rbox(0.016, 0.134, -0.016, -0.004, -0.058, -0.008, 0.003));
+  // trigger group, guard and pistol grip
+  b.add('metal', profile([[-0.06, -0.014], [0.03, -0.014], [0.034, -0.03], [0.03, -0.044], [-0.04, -0.044], [-0.062, -0.03]], 0.024, { bevel: 0.0015, round: 0.002 }));
+  b.add('metal', profile([[-0.044, -0.04], [0.03, -0.04], [0.034, -0.036], [0.034, -0.026], [0.029, -0.026], [0.028, -0.035], [-0.04, -0.035], [-0.044, -0.03]], 0.012, { bevel: 0.0012 }));
+  b.add('polymer', profile(pistolGrip(0, -0.012), 0.032, { round: 0.008, bevel: 0.004 }));
+  b.add('metal', rbox(-0.075, -0.055, -0.006, 0.006, 0.026, 0.031, 0.0015)); // selector
+  // ---- stock: fixed polymer with a cheek rest and a butt plate ----
+  b.add('polymer', profile([[-0.15, 0.058], [-0.2, 0.06], [-0.43, 0.066], [-0.45, 0.07], [-0.462, 0.062], [-0.466, -0.06], [-0.452, -0.074], [-0.43, -0.07], [-0.36, -0.04], [-0.24, -0.012], [-0.15, -0.004]], 0.042, { round: 0.008, bevel: 0.004, holes: [[[-0.25, 0.034], [-0.4, 0.04], [-0.41, -0.024], [-0.37, -0.026], [-0.27, 0.006]]] }));
+  b.add('polymer', rbox(-0.38, -0.24, 0.058, 0.078, -0.021, 0.021, 0.008)); // cheek rest
+  b.add('rubber', rbox(-0.48, -0.464, -0.078, 0.074, -0.023, 0.023, 0.005));
+  b.add('steel', cyl(0.006, -0.41, -0.4, -0.05, 0.024, 12)); // sling swivel
+  // ---- barrel, heat shield, gas tube, handguard ----
+  b.add('steel', cyl(0.0125, 0.176, 0.62, bore, 0, 22));
+  b.add('metal', cyl(0.0175, 0.176, 0.215, bore, 0, 20)); // trunnion collar
+  b.add('metal', lathe([[0.61, 0.0], [0.61, 0.0135], [0.62, 0.0145], [0.67, 0.0145], [0.676, 0.012], [0.676, 0.007], [0.67, 0.0072], [0.67, 0.0]], bore, 0, 28));
+  for (let i = 0; i < 5; i++) b.add('dark', aroundBore(rbox(0.628, 0.668, bore + 0.0115, bore + 0.0148, -0.0018, 0.0018, 0.0008), bore, i * (Math.PI * 2 / 5)));
+  // heat shield over the barrel (top half), with vent slots
+  {
+    const hs = new THREE.CylinderGeometry(0.02, 0.02, 0.22, 16, 1, true, -Math.PI / 2, Math.PI);
+    hs.rotateX(-Math.PI / 2);
+    hs.translate(0, bore, -(0.22 + 0.11));
+    b.add('metal', hs);
+    for (let i = 0; i < 8; i++) for (const a of [-0.6, 0, 0.6]) b.add('dark', aroundBore(rbox(0.232 + i * 0.026, 0.248 + i * 0.026, bore + 0.0195, bore + 0.0205, -0.0028, 0.0028, 0.0008), bore, a));
+  }
+  b.add('steel', cyl(0.0068, 0.176, 0.5, bore - 0.029, 0, 14)); // gas tube
+  b.add('metal', rbox(0.485, 0.515, bore - 0.04, bore + 0.012, -0.013, 0.013, 0.004)); // gas block
+  // lower handguard with rail underneath (for the support hand) and side scallops
+  b.add('polymer', profile([[0.176, bore - 0.012], [0.44, bore - 0.012], [0.452, bore - 0.02], [0.452, bore - 0.05], [0.44, bore - 0.058], [0.176, bore - 0.058]], 0.052, { round: 0.006, bevel: 0.003 }));
+  for (let i = 0; i < 5; i++) for (const w of [-1, 1]) b.add('dark', rbox(0.2 + i * 0.045, 0.232 + i * 0.045, bore - 0.045, bore - 0.025, w * 0.0262 - 0.0006, w * 0.0262 + 0.0006, 0.002));
+  for (const g of picatinny(0.21, 0.43, bore - 0.0625, 0, 0.021)) b.add('metal', aroundBore(g, bore - 0.06, Math.PI));
+  // folding carry handle on the barrel collar
+  b.add('metal', rbox(0.25, 0.27, bore + 0.018, bore + 0.03, -0.006, 0.006, 0.002));
+  b.add('polymer', rbox(0.21, 0.33, bore + 0.028, bore + 0.04, -0.008, 0.008, 0.005));
+  // bipod mount clamp
+  b.add('metal', cyl(0.017, 0.455, 0.48, bore - 0.004, 0, 18));
+  // ---- feed cover (hinged at its front edge, lifts at the rear) with rail + red dot ----
+  const coverPivot = new THREE.Group();
+  coverPivot.name = 'cover';
+  coverPivot.position.copy(LMG_COVER_PIVOT);
+  const coverInner = new THREE.Group();
+  coverInner.position.copy(LMG_COVER_PIVOT).negate();
+  coverPivot.add(coverInner);
+  const cb = new PartBuilder();
+  cb.add('metal', profile([[-0.06, 0.07], [-0.06, 0.088], [-0.052, 0.094], [0.16, 0.094], [0.17, 0.086], [0.17, 0.07]], 0.054, { bevel: 0.002, round: 0.003 }));
+  cb.add('metal', rbox(-0.075, -0.058, 0.074, 0.09, -0.012, 0.012, 0.003)); // rear latch tab
+  cb.add('steel', cyl(0.0045, 0.162, 0.17, 0.077, 0, 12));
+  for (const g of picatinny(-0.05, 0.16, 0.094)) cb.add('metal', g);
+  const sightAxis = redDot(cb, 0.02, 0.0985, mats, coverInner);
+  coverInner.add(cb.build(mats, 'coverBody'));
+  // feed tray under the cover: visible when it is open
+  b.add('steel', rbox(0.03, 0.115, 0.066, 0.07, -0.026, 0.024, 0.001));
+  for (let i = 0; i < 3; i++) b.add('dark', rbox(0.036, 0.109, 0.0695, 0.0705, -0.02 + i * 0.016, -0.016 + i * 0.016, 0.0004));
+  // ---- the belt: rounds side by side (pointing forward) from the box up into the tray ----
+  const bb = new PartBuilder();
+  const path: [number, number][] = [];
+  for (let i = 0; i < 6; i++) path.push([-0.05 + i * 0.002, -0.015 + i * 0.012]); // up the left side
+  for (let i = 0; i < 5; i++) path.push([-0.04 + i * 0.0112, 0.058]); // across the feed tray
+  for (const [w, v] of path) {
+    bb.add('brass', cyl(0.0029, 0.042, 0.088, v, w, 8));
+    bb.add('copper', lathe([[0.088, 0.0029], [0.094, 0.0024], [0.101, 0.0], [0.088, 0.0]], v, w, 8));
+    bb.add('steel', rbox(0.05, 0.062, v - 0.0035, v + 0.0035, w - 0.0034, w + 0.0034, 0.0008)); // link
+  }
+  const belt = bb.build(mats, 'belt');
+  // ---- 100-round box: soft OD case on a rigid frame, strap, window ----
+  const mb = new PartBuilder();
+  mb.add('od', rbox(-0.055, 0.055, -0.13, 0.0, -0.033, 0.033, 0.009));
+  mb.add('od', rbox(-0.058, 0.058, -0.135, -0.118, -0.035, 0.035, 0.006));
+  mb.add('rubber', rbox(-0.012, 0.012, -0.132, 0.002, -0.0345, 0.0345, 0.002)); // strap
+  mb.add('steel', rbox(-0.045, 0.045, -0.006, 0.004, -0.031, 0.031, 0.002)); // latch frame
+  mb.add('dark', rbox(-0.03, 0.03, -0.05, -0.02, -0.0335, -0.032, 0.002)); // window
+  mb.add('brass', rbox(-0.026, 0.026, -0.046, -0.024, -0.0332, -0.031, 0.001));
+  const mag = mb.build(mats, 'mag');
+  mag.position.set(-0.026, -0.006, -0.075);
+  // ---- charging handle (right side) and trigger ----
+  const chb = new PartBuilder();
+  chb.add('metal', rbox(0.07, 0.1, 0.03, 0.044, 0.025, 0.03, 0.002));
+  chb.add('polymer', rbox(0.076, 0.094, 0.026, 0.048, 0.03, 0.05, 0.004));
+  const charge = chb.build(mats, 'charge');
+  const tb = new PartBuilder();
+  tb.add('metal', profile([[0.004, -0.0], [0.006, -0.012], [0.004, -0.021], [-0.002, -0.026], [-0.004, -0.024], [0.0, -0.016], [-0.001, -0.0]], 0.006, { bevel: 0.0008, round: 0.0015 }));
+  const trigger = tb.build(mats, 'trigger');
+  trigger.position.set(0, -0.016, 0.0);
+  // ---- bipod: two legs on pivots under the front, folded forward along the barrel ----
+  const bipod: THREE.Group[] = [];
+  for (const w of [-1, 1]) {
+    const piv = new THREE.Group();
+    piv.name = w < 0 ? 'bipodL' : 'bipodR';
+    piv.position.set(w * 0.012, bore - 0.02, -0.468);
+    const lb = new PartBuilder();
+    lb.add('metal', rbox(-0.008, 0.008, -0.11, 0.0, -0.005, 0.005, 0.003));
+    lb.add('steel', cyl(0.0042, -0.004, 0.004, -0.115, 0, 10));
+    lb.add('steel', rbox(-0.005, 0.005, -0.19, -0.1, -0.0035, 0.0035, 0.002)); // extension
+    lb.add('rubber', lathe([[-0.012, 0.0], [-0.012, 0.007], [0.006, 0.006], [0.006, 0.0]], -0.195, 0, 10)); // foot
+    lb.add('steel', cyl(0.005, -0.006, 0.006, 0, 0, 10)); // pivot pin
+    const leg = lb.build(mats, 'leg');
+    // the lathe foot is built along the bore axis: stand it up
+    piv.add(leg);
+    piv.userData.w = w;
+    bipod.push(piv);
+  }
+  const setBipod = (k: number) => {
+    for (const piv of bipod) {
+      // folded: legs swung forward under the barrel; deployed: straight down, splayed out
+      piv.rotation.set((1 - k) * (Math.PI / 2 - 0.08), 0, (piv.userData.w as number) * 0.22 * k);
+    }
+  };
+  setBipod(0);
+  root.userData.setBipod = setBipod;
+  root.add(b.build(mats, 'body'), coverPivot, belt, mag, charge, trigger, ...bipod);
+  const sockets = addSockets(root, [
+    socket('muzzle', 0.676, bore, 0),
+    socket('eject', 0.03, -0.02, 0.0),
+    socket('sight', 0.026, sightAxis, 0),
+    socket('magWell', 0.075, -0.006, -0.026),
+  ]);
+  const { rs, ls } = grips(root, [-0.079, -0.07, -0.25, 0.0155], { u: 0.3, v: bore - 0.034, r: 0.027, fingers: [0.75, -0.4, -0.5], palm: [0.3, 1, 0] });
+  sockets.rightHand = rs;
+  sockets.leftHand = ls;
+  addLaser(root, sockets, mats, 0.4, bore - 0.034, 0.0262);
+  return { root, parts: { cover: coverPivot, belt, mag, charge, trigger, bipodL: bipod[0], bipodR: bipod[1] }, sockets, adsDist: 0.2 };
+}
+
 export const WEAPON_BUILDERS = {
   k416: buildCarbine,
   mp7: buildMP7,
@@ -1697,5 +1845,6 @@ export const WEAPON_BUILDERS = {
   knife: buildKnife,
   ks17: buildKS17,
   ums45: buildUMS45,
+  lmg: buildLMG,
 } as const;
 export type WeaponId = keyof typeof WEAPON_BUILDERS;

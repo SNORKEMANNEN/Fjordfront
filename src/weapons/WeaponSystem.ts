@@ -78,6 +78,10 @@ export class WeaponSystem {
   cant = 0;
   /** set by the game: signed door-peek lean amount */
   peek = 0;
+  /** set by the game: LMG bipod deployed (prone, or mounted on a ledge) */
+  bipod = 0;
+  /** set by the game: signed Q/E lean amount -1..1 */
+  lean = 0;
   lastSpread = 0;
   private cycleTimer = 0;
   private adsSoundOn = false;
@@ -149,6 +153,8 @@ export class WeaponSystem {
     s.model.sockets.muzzle.add(this.flash.group);
     this.reloading = false;
     this.vm.boltLocked = s.mag === 0 && (s.def.cls === 'Pistol' || s.def.cls === 'Assault Rifle' || s.def.cls === 'SMG' || s.def.cls === 'Marksman');
+    this.vm.bipod = 0;
+    this.bipod = 0;
     this.switching = true;
     this.vm.play('draw', instant ? 0.5 : 0.24 + s.def.weight * 0.17, [[0.0, 'draw']], () => (this.switching = false));
   }
@@ -262,7 +268,7 @@ export class WeaponSystem {
       if (inp.wasPressed('reload')) this.startReload();
       // tap = full inspect, hold = magazine / chamber check
       if (inp.wasPressed('inspect')) this.inspectHeld = 0;
-      if (inp.isDown('inspect') && this.inspectHeld >= 0) {
+      if (inp.isDown('inspect') && this.inspectHeld >= 0 && d.cls !== 'LMG') {
         this.inspectHeld += dt;
         if (this.inspectHeld > 0.28 && !this.vm.action && !this.reloading) {
           this.inspectHeld = -1;
@@ -271,7 +277,7 @@ export class WeaponSystem {
       }
       if (inp.wasReleased('inspect') && this.inspectHeld >= 0) {
         this.inspectHeld = -1;
-        const dur = ({ 'Assault Rifle': 3.6, SMG: 3.0, Pistol: 3.0, Shotgun: 3.4, Sniper: 3.6, Marksman: 3.6, Melee: 2.4 } as Record<string, number>)[d.cls] ?? 3.2;
+        const dur = ({ LMG: 4.2, 'Assault Rifle': 3.6, SMG: 3.0, Pistol: 3.0, Shotgun: 3.4, Sniper: 3.6, Marksman: 3.6, Melee: 2.4 } as Record<string, number>)[d.cls] ?? 3.2;
         if (!this.vm.action && !this.reloading) this.vm.play('inspect', dur, [[0.06, 'inspect1'], [0.45, 'inspect2']]);
       }
     }
@@ -439,11 +445,13 @@ export class WeaponSystem {
       vault: !!p.mantle?.vault,
       cant: this.cant,
       peek: this.peek,
+      lean: this.lean,
     };
     // the dive tucks the gun like a slide
     this.diveBlend = damp(this.diveBlend, p.diving ? 1 : 0, p.diving ? 10 : 4, dt);
     ctx.slide = Math.max(ctx.slide, this.diveBlend);
     if (this.vmForce) Object.assign(ctx, this.vmForce);
+    this.vm.bipod = this.bipod;
     this.vm.sprayShake = this.sinceShot < 0.12 && s.mode === 'auto' ? Math.min(1, this.shotsInSpray / 9) : 0;
     try {
       this.vm.update(dt, ctx);
@@ -511,6 +519,7 @@ export class WeaponSystem {
     else if (m === 'burst') sp *= 0.88;
     if (!p.grounded) sp *= 2.2;
     if (p.sliding) sp *= 1.4;
+    if (this.bipod > 0) sp *= 1 - 0.45 * this.bipod;
     this.lastSpread = sp;
     return sp;
   }
@@ -551,7 +560,7 @@ export class WeaponSystem {
 
     // camera recoil (pattern: climbs, drifts with weapon-specific bias)
     const r = d.recoil;
-    const stanceMul = (p.stance === 'crouch' ? 0.8 : p.stance === 'prone' ? 0.6 : 1) * (d.modes.includes('auto') && s.mode === 'semi' ? 0.85 : s.mode === 'burst' ? 0.8 : 1);
+    const stanceMul = (p.stance === 'crouch' ? 0.8 : p.stance === 'prone' ? 0.6 : 1) * (d.modes.includes('auto') && s.mode === 'semi' ? 0.85 : s.mode === 'burst' ? 0.8 : 1) * (1 - 0.5 * this.bipod);
     const first = this.shotsInSpray === 1 ? r.firstShotMul : 1;
     const adsMul = 1 + (r.adsMul - 1) * this.ads;
     void first;
@@ -560,7 +569,12 @@ export class WeaponSystem {
     this.pendingRecoil.x += (ak.v * adsMul * stanceMul * Math.PI) / 180;
     this.pendingRecoil.y += (ak.h * adsMul * stanceMul * Math.PI) / 180;
     // view kick (camera punch, does not move the aim) and weapon kick
-    this.rig.shotKick(viewKick(d, this.ads));
+    const vk = viewKick(d, this.ads);
+    if (this.bipod > 0) {
+      const k = 1 - 0.5 * this.bipod;
+      vk.pitch *= k; vk.yaw *= k; vk.roll *= k; vk.back *= k;
+    }
+    this.rig.shotKick(vk);
     this.vm.kick(d, this.ads);
     this.flash.fire(d.sound.suppressed ? 0.25 : d.cls === 'Shotgun' ? 1.5 : d.cls === 'Sniper' ? 1.7 : d.cls === 'Marksman' ? 1.35 : d.cls === 'Pistol' ? 0.7 : 1);
     if (s.mag === 0 && (d.cls === 'Pistol' || d.cls === 'Assault Rifle' || d.cls === 'SMG' || d.cls === 'Marksman')) this.vm.boltLocked = true;

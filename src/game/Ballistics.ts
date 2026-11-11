@@ -18,11 +18,11 @@ interface Bullet {
 }
 
 /** Muzzle velocities (m/s) by class. */
-export const MUZZLE_VELOCITY: Record<string, number> = { 'Assault Rifle': 880, SMG: 410, Shotgun: 420, Sniper: 910, Pistol: 370, Marksman: 850 };
+export const MUZZLE_VELOCITY: Record<string, number> = { LMG: 900, 'Assault Rifle': 880, SMG: 410, Shotgun: 420, Sniper: 910, Pistol: 370, Marksman: 850 };
 
 /** Air drag (1/s) and how strongly the wind pushes each class's bullets sideways (m/s² per m/s). */
-const DRAG: Record<string, number> = { 'Assault Rifle': 0.12, SMG: 0.32, Shotgun: 1.1, Sniper: 0.07, Pistol: 0.38, Marksman: 0.09 };
-const WIND_K: Record<string, number> = { 'Assault Rifle': 0.45, SMG: 0.5, Shotgun: 0.3, Sniper: 1.35, Pistol: 0.5, Marksman: 0.8 };
+const DRAG: Record<string, number> = { LMG: 0.11, 'Assault Rifle': 0.12, SMG: 0.32, Shotgun: 1.1, Sniper: 0.07, Pistol: 0.38, Marksman: 0.09 };
+const WIND_K: Record<string, number> = { LMG: 0.45, 'Assault Rifle': 0.45, SMG: 0.5, Shotgun: 0.3, Sniper: 1.35, Pistol: 0.5, Marksman: 0.8 };
 
 /**
  * Projectile bullets for every gun (player and bots): travel time, gravity drop, air drag that

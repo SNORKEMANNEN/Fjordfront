@@ -6,6 +6,7 @@ import { WeaponDef } from '../weapons/WeaponDefs';
 import { Effects } from '../fx/Effects';
 import { Viewmodel } from '../weapons/Viewmodel';
 import { Surface } from '../core/Physics';
+import { EQUIP_BUILDERS, setLed } from '../weapons/EquipmentModels';
 
 /** Kill-feed / damage identities for things that are not guns. */
 export const FRAG = { id: 'frag', name: 'Frag Grenade', cls: 'Explosive' } as unknown as WeaponDef;
@@ -13,10 +14,20 @@ export const MORTAR = { id: 'mortar', name: 'Mortar Strike', cls: 'Explosive' } 
 export const MELEE = { id: 'melee', name: 'Melee', cls: 'Melee' } as unknown as WeaponDef;
 export const HELI = { id: 'heli', name: 'Attack Helicopter', cls: 'Explosive' } as unknown as WeaponDef;
 export const STUN = { id: 'stun', name: 'Stun Grenade', cls: 'Explosive' } as unknown as WeaponDef;
+export const STICKY = { id: 'sticky', name: 'Sticky Grenade', cls: 'Explosive' } as unknown as WeaponDef;
+export const C4 = { id: 'c4', name: 'C4', cls: 'Explosive' } as unknown as WeaponDef;
+export const CLAYMORE = { id: 'claymore', name: 'Claymore', cls: 'Explosive' } as unknown as WeaponDef;
+export const BARREL = { id: 'barrel', name: 'Explosive Barrel', cls: 'Explosive' } as unknown as WeaponDef;
+export const VEHICLE = { id: 'vehicle', name: 'Vehicle Explosion', cls: 'Explosive' } as unknown as WeaponDef;
 
-export type GrenadeKind = 'frag' | 'flash' | 'stun' | 'smoke';
-/** fuse per kind (s): flash/stun pop fast, smoke after a short roll */
-export const FUSE: Record<GrenadeKind, number> = { frag: 3.5, flash: 1.6, stun: 1.6, smoke: 1.3 };
+export type GrenadeKind = 'frag' | 'flash' | 'stun' | 'smoke' | 'sticky' | 'snapshot' | 'decoy' | 'c4';
+/** fuse per kind (s): flash/stun pop fast, smoke after a short roll, C4 waits for its detonator */
+export const FUSE: Record<GrenadeKind, number> = { frag: 3.5, flash: 1.6, stun: 1.6, smoke: 1.3, sticky: 2.3, snapshot: 1.15, decoy: 1.1, c4: 1e9 };
+/** kinds that stick to what they hit */
+const STICKS: Partial<Record<GrenadeKind, 'all' | 'world'>> = { sticky: 'all', c4: 'world' };
+
+/** A decoy lying on the ground playing fake gunfire. */
+export interface Decoy { p: THREE.Vector3; owner: Combatant; mesh: THREE.Object3D; t: number; life: number; next: number; burst: number; gun: number }
 
 export interface SmokeCloud { p: THREE.Vector3; t: number; life: number; r: number; mesh: THREE.Object3D }
 
@@ -30,6 +41,10 @@ export interface Grenade {
   fuse: number;
   resting: boolean;
   bounces: number;
+  /** sticky / C4: what it is stuck to (null = the world) and where on it */
+  stuck?: { to: Combatant | null; off: THREE.Vector3 };
+  /** a trophy shot it down */
+  dead?: boolean;
 }
 
 export interface ExplosionHooks {
@@ -44,6 +59,14 @@ export interface ExplosionHooks {
   stun(p: THREE.Vector3, owner: Combatant): void;
   smokeStart(p: THREE.Vector3): void;
   smokeEmit(c: SmokeCloud, dt: number): void;
+  /** sticky / C4 landed and stuck (victim = the soldier it stuck to) */
+  stick?(g: Grenade, victim: Combatant | null): void;
+  snapshot?(p: THREE.Vector3, owner: Combatant): void;
+  decoyStart?(d: Decoy): void;
+  /** a decoy's fake fire: called for each fake shot */
+  decoyShot?(d: Decoy): void;
+  /** active-protection systems: return true to shoot this grenade down */
+  intercept?(g: Grenade): boolean;
 }
 
 /**
@@ -54,8 +77,12 @@ export interface ExplosionHooks {
 export class Explosives {
   grenades: Grenade[] = [];
   smokes: SmokeCloud[] = [];
+  decoys: Decoy[] = [];
   readonly fuseTime = 3.5;
-  private protos: Record<GrenadeKind, THREE.Group> = { frag: Viewmodel.makeGrenade('frag'), flash: Viewmodel.makeGrenade('flash'), stun: Viewmodel.makeGrenade('stun'), smoke: Viewmodel.makeGrenade('smoke') };
+  private protos: Record<GrenadeKind, THREE.Group> = {
+    frag: Viewmodel.makeGrenade('frag'), flash: Viewmodel.makeGrenade('flash'), stun: Viewmodel.makeGrenade('stun'), smoke: Viewmodel.makeGrenade('smoke'),
+    sticky: EQUIP_BUILDERS.sticky(), snapshot: EQUIP_BUILDERS.snapshot(), decoy: EQUIP_BUILDERS.decoy(), c4: EQUIP_BUILDERS.c4(),
+  };
 
   constructor(private scene: THREE.Scene, private physics: Physics, private fx: Effects, private hooks: ExplosionHooks, private players: () => Combatant[]) {
     for (const pr of Object.values(this.protos)) {
@@ -72,7 +99,14 @@ export class Explosives {
     if (ring) ring.visible = false;
     mesh.position.copy(from);
     this.scene.add(mesh);
-    const g: Grenade = { kind, owner, mesh, pos: from.clone(), vel: vel.clone(), spin: new THREE.Vector3(Math.random() * 12 - 6, Math.random() * 8 - 4, Math.random() * 12 - 6), fuse, resting: false, bounces: 0 };
+    // C4 is tossed flat and spins like a frisbee; the rest tumble
+    const spin = kind === 'c4' ? new THREE.Vector3(Math.random() - 0.5, 9 + Math.random() * 4, Math.random() - 0.5) : new THREE.Vector3(Math.random() * 12 - 6, Math.random() * 8 - 4, Math.random() * 12 - 6);
+    const g: Grenade = { kind, owner, mesh, pos: from.clone(), vel: vel.clone(), spin, fuse, resting: false, bounces: 0 };
+    // fresh clones share LED materials with the proto: give the blinking ones their own
+    const led = mesh.getObjectByName('led') as THREE.Mesh | undefined;
+    if (led) led.material = (led.material as THREE.Material).clone();
+    const ring2 = mesh.getObjectByName('ring') as THREE.Mesh | undefined;
+    if (ring2 && kind === 'snapshot') ring2.material = (ring2.material as THREE.Material).clone();
     this.grenades.push(g);
     return g;
   }
@@ -81,16 +115,48 @@ export class Explosives {
     for (let i = this.grenades.length - 1; i >= 0; i--) {
       const g = this.grenades[i];
       g.fuse -= dt;
-      if (!g.resting) {
+      if (g.dead || this.hooks.intercept?.(g)) {
+        // shot down by a trophy system: gone without going off
+        this.grenades.splice(i, 1);
+        this.scene.remove(g.mesh);
+        continue;
+      }
+      if (g.stuck) {
+        // riding on a soldier: follow them (dropping off when they die)
+        const to = g.stuck.to;
+        if (to) {
+          if (to.alive) g.pos.copy(to.position()).add(g.stuck.off);
+          else g.stuck.to = null;
+        }
+      } else if (!g.resting) {
         // two sub-steps keep fast throws from tunnelling through thin walls
-        for (let s = 0; s < 2; s++) this.integrate(g, dt / 2);
+        for (let s = 0; s < 2; s++) if (!g.stuck) this.integrate(g, dt / 2);
       }
       g.mesh.position.copy(g.pos);
-      g.mesh.rotation.x += g.spin.x * dt;
-      g.mesh.rotation.y += g.spin.y * dt;
-      g.mesh.rotation.z += g.spin.z * dt;
+      if (!g.stuck) {
+        g.mesh.rotation.x += g.spin.x * dt;
+        g.mesh.rotation.y += g.spin.y * dt;
+        g.mesh.rotation.z += g.spin.z * dt;
+      }
+      // armed LEDs: sticky races faster as it runs out, C4 blinks slowly, decoy/snapshot pulse
+      const led = g.mesh.getObjectByName('led');
+      if (led) {
+        const rate = g.kind === 'sticky' ? 6 + 18 * Math.max(0, 1 - g.fuse / FUSE.sticky) : g.kind === 'c4' ? 1.4 : 3;
+        g.mesh.userData.blink = (g.mesh.userData.blink ?? 0) + dt * rate;
+        setLed(led, (g.mesh.userData.blink % 1) < 0.35 ? 1 : 0.05);
+      }
+      if (g.kind === 'snapshot') {
+        const ring = g.mesh.getObjectByName('ring') as THREE.Mesh | undefined;
+        if (ring) (ring.material as THREE.MeshBasicMaterial).color.setRGB(0.15, 0.45, 0.9).multiplyScalar(1.5 + 3 * (0.5 + 0.5 * Math.sin(g.fuse * 30)));
+      }
       if (g.fuse <= 0) {
         this.grenades.splice(i, 1);
+        if (g.kind === 'decoy') {
+          const d: Decoy = { p: g.pos.clone(), owner: g.owner, mesh: g.mesh, t: 0, life: 12, next: 0.3, burst: 0, gun: Math.floor(Math.random() * 1000) };
+          this.decoys.push(d);
+          this.hooks.decoyStart?.(d);
+          continue;
+        }
         if (g.kind === 'smoke') {
           // the canister stays where it lies and pours smoke for ~20 s
           const c: SmokeCloud = { p: g.pos.clone(), t: 0, life: 20, r: 0, mesh: g.mesh };
@@ -100,8 +166,32 @@ export class Explosives {
         }
         this.scene.remove(g.mesh);
         if (g.kind === 'frag') this.explode(g.pos, g.owner, FRAG, 8.5, 160);
+        else if (g.kind === 'sticky') this.explode(g.pos, g.owner, STICKY, 7.5, 170, g.stuck?.to ?? null);
+        else if (g.kind === 'snapshot') this.hooks.snapshot?.(g.pos.clone(), g.owner);
         else if (g.kind === 'flash') this.hooks.flash(g.pos.clone(), g.owner);
         else this.hooks.stun(g.pos.clone(), g.owner);
+      }
+    }
+    for (let i = this.decoys.length - 1; i >= 0; i--) {
+      const d = this.decoys[i];
+      d.t += dt;
+      d.next -= dt;
+      // bursts of 3-9 rounds with irregular gaps, like someone fighting from cover
+      if (d.next <= 0 && d.t < d.life - 0.5) {
+        this.hooks.decoyShot?.(d);
+        if (d.burst > 0) {
+          d.burst--;
+          d.next = 0.075 + Math.random() * 0.03;
+        } else {
+          d.burst = 2 + Math.floor(Math.random() * 7);
+          d.next = 0.5 + Math.random() * 1.6;
+        }
+      }
+      const led = d.mesh.getObjectByName('led');
+      if (led) setLed(led, d.next < 0.1 ? 1 : 0.15);
+      if (d.t >= d.life) {
+        this.scene.remove(d.mesh);
+        this.decoys.splice(i, 1);
       }
     }
     for (let i = this.smokes.length - 1; i >= 0; i--) {
@@ -147,8 +237,41 @@ export class Explosives {
     if (len < 1e-5) return;
     const dir = step.clone().divideScalar(len);
     const hit = this.physics.raycast(g.pos, dir, len + 0.045);
+    const sticks = STICKS[g.kind];
+    if (sticks === 'all') {
+      // a sticky thrown at someone sticks to them
+      let best: { c: Combatant; d: number; p: THREE.Vector3 } | null = null;
+      for (const c of this.players()) {
+        if (!c.alive || c === g.owner) continue;
+        if (c.position().distanceToSquared(g.pos) > 9) continue;
+        const h = c.hitTest(g.pos, dir, hit ? hit.distance : len + 0.05);
+        if (h && (!best || h.dist < best.d)) best = { c, d: h.dist, p: h.point };
+      }
+      if (best) {
+        g.pos.copy(best.p);
+        g.stuck = { to: best.c, off: best.p.clone().sub(best.c.position()) };
+        g.vel.set(0, 0, 0);
+        this.hooks.stick?.(g, best.c);
+        return;
+      }
+    }
     if (!hit) {
       g.pos.add(step);
+      return;
+    }
+    if (sticks) {
+      // stick flat against the surface, the gel / back side down
+      const n = hit.normal.clone();
+      if (n.dot(dir) > 0) n.negate();
+      g.pos.copy(hit.point).addScaledVector(n, g.kind === 'c4' ? 0.018 : 0.012);
+      g.mesh.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), n);
+      if (g.kind === 'c4') g.mesh.rotateY(Math.random() * Math.PI * 2);
+      g.mesh.rotation.setFromQuaternion(g.mesh.quaternion);
+      g.vel.set(0, 0, 0);
+      g.spin.set(0, 0, 0);
+      g.stuck = { to: null, off: new THREE.Vector3() };
+      g.resting = true;
+      this.hooks.stick?.(g, null);
       return;
     }
     // bounce: lose most of the normal speed and some tangential speed
@@ -170,16 +293,31 @@ export class Explosives {
   }
 
   /** Blast at p; returns the number of kills. */
-  explode(p: THREE.Vector3, owner: Combatant, def: WeaponDef, radius: number, maxDmg: number) {
+  /**
+   * Blast at p. `stuckTo` takes the full blast whatever the cover; `cone` makes it directional
+   * (claymore: full damage inside the cone, only a little behind it).
+   */
+  explode(p: THREE.Vector3, owner: Combatant, def: WeaponDef, radius: number, maxDmg: number, stuckTo: Combatant | null = null, cone?: { dir: THREE.Vector3; cos: number }) {
     // area damage is simulated on every machine; each only damages what it owns (see NetFlags)
     NETF.noRoute++;
     try {
-      this.explodeInner(p, owner, def, radius, maxDmg);
+      this.explodeInner(p, owner, def, radius, maxDmg, stuckTo, cone);
     } finally {
       NETF.noRoute--;
     }
+    this.onExplode?.(p, radius, owner, def);
   }
-  private explodeInner(p: THREE.Vector3, owner: Combatant, def: WeaponDef, radius: number, maxDmg: number) {
+  /** world reaction to any blast (destructibles, deployables, chained explosives) */
+  onExplode?: (p: THREE.Vector3, radius: number, owner: Combatant, def: WeaponDef) => void;
+  /** set off a C4 charge now */
+  detonate(g: Grenade) {
+    const i = this.grenades.indexOf(g);
+    if (i < 0) return;
+    this.grenades.splice(i, 1);
+    this.scene.remove(g.mesh);
+    this.explode(g.pos, g.owner, C4, 8, 230, g.stuck?.to ?? null);
+  }
+  private explodeInner(p: THREE.Vector3, owner: Combatant, def: WeaponDef, radius: number, maxDmg: number, stuckTo: Combatant | null, cone?: { dir: THREE.Vector3; cos: number }) {
     // surface underneath for the debris colour
     const down = this.physics.raycast(p.clone().setY(p.y + 0.5), new THREE.Vector3(0, -1, 0), 2.5);
     const n = down && down.distance < 1.6 ? down.normal.clone() : new THREE.Vector3(0, 1, 0);
@@ -195,8 +333,17 @@ export class Explosives {
       const d = Math.min(chest.distanceTo(origin), feet.distanceTo(origin) + 0.4);
       if (d > radius) continue;
       let k = 1 - Math.pow(d / radius, 1.25);
+      if (c === stuckTo) k = 1;
+      else if (cone) {
+        const to = chest.clone().sub(p).setY(0).normalize();
+        if (to.dot(cone.dir) < cone.cos) {
+          // behind / beside a directional mine: only the back-blast up close
+          if (d > 2) continue;
+          k *= 0.3;
+        }
+      }
       // cover: walls between blast and body soak most of it
-      if (!this.physics.lineOfSight(origin, chest) && !this.physics.lineOfSight(origin, feet.clone().setY(feet.y + 0.3))) {
+      if (c !== stuckTo && !this.physics.lineOfSight(origin, chest) && !this.physics.lineOfSight(origin, feet.clone().setY(feet.y + 0.3))) {
         if (d > 2.2) continue;
         k *= 0.25;
       }
@@ -221,8 +368,10 @@ export class Explosives {
   clear() {
     for (const g of this.grenades) this.scene.remove(g.mesh);
     for (const c of this.smokes) this.scene.remove(c.mesh);
+    for (const d of this.decoys) this.scene.remove(d.mesh);
     this.grenades.length = 0;
     this.smokes.length = 0;
+    this.decoys.length = 0;
   }
 }
 

@@ -435,11 +435,9 @@ export class Buildings {
     // white picket fence with a gate gap in front of the door
     if (rng.chance(0.5)) {
       const fz = d / 2 + 3.4;
-      for (let i = -w / 2 - 2; i < w / 2 + 2; i += 0.14) if (Math.abs(i - doorX) > 1.3) b.box('trim', i, 0, fz, i + 0.08, 0.9 + 0.08 * ((i * 7) % 1), fz + 0.04);
-      b.box('trim', -w / 2 - 2, 0.55, fz - 0.05, doorX - 1.3, 0.62, fz, 'wood');
-      b.box('trim', doorX + 1.3, 0.55, fz - 0.05, w / 2 + 2, 0.62, fz, 'wood');
-      b.box(null, -w / 2 - 2, 0, fz - 0.05, doorX - 1.3, 0.95, fz + 0.05, 'wood', { penetrable: 1 });
-      b.box(null, doorX + 1.3, 0, fz - 0.05, w / 2 + 2, 0.95, fz + 0.05, 'wood', { penetrable: 1 });
+      // (destructible: built and broken section by section by the Destruction system)
+      b.destructible('fence', new THREE.Matrix4(), { x0: -w / 2 - 2, x1: doorX - 1.3, z: fz, style: 'picket' });
+      b.destructible('fence', new THREE.Matrix4(), { x0: doorX + 1.3, x1: w / 2 + 2, z: fz, style: 'picket' });
     }
   }
 

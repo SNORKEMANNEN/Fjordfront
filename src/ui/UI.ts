@@ -63,12 +63,22 @@ export interface HUDState {
   teamNames: [string, string];
 }
 
-export type TacticalId = 'flash' | 'smoke' | 'stun' | 'stim';
+export type TacticalId = 'flash' | 'smoke' | 'stun' | 'stim' | 'snapshot' | 'decoy';
+export type LethalId = 'frag' | 'tknife' | 'sticky' | 'claymore' | 'c4';
+export const LETHALS: { id: LethalId; name: string; count: number; desc: string }[] = [
+  { id: 'frag', name: 'FRAG GRENADE', count: 2, desc: 'Cookable (hold G). 3.5 s fuse.' },
+  { id: 'sticky', name: 'STICKY GRENADE', count: 2, desc: 'Sticks to walls, floors and people. Arms on throw, 2.3 s fuse — no cooking.' },
+  { id: 'claymore', name: 'CLAYMORE', count: 1, desc: 'Hold G to ready it, release to set it down. Tripwire lasers fire it at anyone crossing in front.' },
+  { id: 'c4', name: 'C4', count: 2, desc: 'Throw it (sticks to surfaces), detonate whenever you like: double-tap F, or G with none left.' },
+  { id: 'tknife', name: 'THROWING KNIFE', count: 2, desc: 'One-hit kill. Fast, flat throw — walk over it to pick it back up.' },
+];
 export const TACTICALS: { id: TacticalId; name: string; count: number; desc: string }[] = [
   { id: 'flash', name: 'FLASHBANG', count: 2, desc: 'Blinds and deafens anyone facing the blast. Clear a room before you push it.' },
   { id: 'stun', name: 'STUN GRENADE', count: 2, desc: 'Concussion blast: targets move and aim in slow motion for a few seconds.' },
   { id: 'smoke', name: 'SMOKE GRENADE', count: 1, desc: 'A thick smoke screen for ~20 s. Blocks sight lines for everyone, bots included.' },
   { id: 'stim', name: 'STIM', count: 1, desc: 'Auto-injector: heals you fast and boosts movement speed for 10 seconds.' },
+  { id: 'snapshot', name: 'SNAPSHOT GRENADE', count: 1, desc: 'A scan pulse that outlines every enemy within 22 m through walls for a few seconds.' },
+  { id: 'decoy', name: 'DECOY GRENADE', count: 2, desc: 'Plays fake gunfire for 12 s and puts fake contacts on the enemy minimap.' },
 ];
 
 export interface UIHandlers {
@@ -102,9 +112,10 @@ export class UI {
   primary: WeaponId = ((localStorage.getItem('fjordfront.primary') || '').replace(/^mpx$/, 'mp7') as WeaponId) || 'k416';
   secondary: WeaponId = (localStorage.getItem('fjordfront.secondary') as WeaponId) || 'p80';
   tactical: TacticalId = (localStorage.getItem('fjordfront.tactical') as TacticalId) || 'flash';
-  lethal: 'frag' | 'tknife' = (() => {
+  lethal: LethalId = (() => {
     try {
-      return localStorage.getItem('fjordfront.lethal') === 'tknife' ? 'tknife' : 'frag';
+      const v = localStorage.getItem('fjordfront.lethal') as LethalId;
+      return LETHALS.some((l) => l.id === v) ? v : 'frag';
     } catch {
       return 'frag';
     }
@@ -165,11 +176,13 @@ export class UI {
           <div><b>WASD</b> Move</div><div><b>MOUSE</b> Look / Fire / Aim</div>
           <div><b>SHIFT</b> Sprint · tap again: Tactical sprint</div><div><b>C / CTRL</b> Crouch · while sprinting: Slide</div>
           <div><b>Z</b> Prone · hold C: Prone</div><div><b>SPACE</b> Jump · Mantle · Vault (auto)</div>
-          <div><b>R</b> Reload</div><div><b>1 / 2 / Q / Wheel</b> Switch weapon</div>
-          <div><b>B</b> Fire mode</div><div><b>I / T</b> Inspect weapon</div>
-          <div><b>E</b> Open / close door · Spot enemy</div><div><b>SHIFT (scoped)</b> Hold breath</div>
+          <div><b>R</b> Reload</div><div><b>1 / 2 / Wheel</b> Switch weapon</div>
+          <div><b>B</b> Fire mode</div><div><b>I</b> Inspect weapon</div>
+          <div><b>F</b> Use: door · zipline · spot enemy</div><div><b>SHIFT (scoped)</b> Hold breath</div>
+          <div><b>Q / E</b> Lean left / right (hold)</div><div><b>H</b> Field upgrade (Trophy System)</div>
           <div><b>N</b> Night vision</div><div><b>AIM at a door</b> Peek round it</div>
-          <div><b>G</b> Frag (hold to cook)</div><div><b>F</b> Tactical</div>
+          <div><b>G</b> Lethal (hold: cook / aim / place)</div><div><b>T</b> Tactical</div>
+          <div><b>F F</b> Detonate C4</div><div><b>LMG + prone / ledge</b> Bipod deploys</div>
           <div><b>V</b> Melee</div><div><b>3 / 4 / 5</b> Killstreaks</div>
           <div><b>TAB</b> Scoreboard</div><div><b>ESC</b> Pause · Loadout · Tuning</div>
           <div><b>M</b> Tactical map · zoom, pan, ping, waypoint</div><div><b>X / MIDDLE</b> Ping</div>
@@ -200,7 +213,7 @@ export class UI {
 
   private updateMenuWeapon(e = this.menu) {
     const s = e.querySelector('.cur-weapon');
-    if (s) s.textContent = `${WEAPONS[this.primary].short} · ${WEAPONS[this.secondary].short} · Frag · ${TACTICALS.find((t) => t.id === this.tactical)!.name.toLowerCase()}`;
+    if (s) s.textContent = `${WEAPONS[this.primary].short} · ${WEAPONS[this.secondary].short} · ${(LETHALS.find((l) => l.id === this.lethal)?.name ?? '').toLowerCase()} · ${TACTICALS.find((t) => t.id === this.tactical)!.name.toLowerCase()}`;
   }
 
   showMenu(v: boolean) {
@@ -217,10 +230,10 @@ export class UI {
     this.loadoutBack = back;
     const e = this.loadoutEl;
     const CATS: { cls: WeaponDef['cls']; label: string }[] = [
-      { cls: 'Assault Rifle', label: 'ASSAULT RIFLES' }, { cls: 'SMG', label: 'SMGS' }, { cls: 'Shotgun', label: 'SHOTGUNS' },
+      { cls: 'Assault Rifle', label: 'ASSAULT RIFLES' }, { cls: 'SMG', label: 'SMGS' }, { cls: 'LMG', label: 'LMGS' }, { cls: 'Shotgun', label: 'SHOTGUNS' },
       { cls: 'Marksman', label: 'MARKSMAN RIFLES' }, { cls: 'Sniper', label: 'SNIPER RIFLES' }, { cls: 'Pistol', label: 'HANDGUNS' },
     ];
-    const CLS_NAME: Record<string, string> = { 'Assault Rifle': 'ASSAULT RIFLE', SMG: 'SUBMACHINE GUN', Shotgun: 'SHOTGUN', Marksman: 'MARKSMAN RIFLE', Sniper: 'SNIPER RIFLE', Pistol: 'HANDGUN' };
+    const CLS_NAME: Record<string, string> = { LMG: 'LIGHT MACHINE GUN', 'Assault Rifle': 'ASSAULT RIFLE', SMG: 'SUBMACHINE GUN', Shotgun: 'SHOTGUN', Marksman: 'MARKSMAN RIFLE', Sniper: 'SNIPER RIFLE', Pistol: 'HANDGUN' };
     const stats = (d: WeaponDef): [string, number][] => [
       ['Damage', (d.damage[0] * d.pellets) / 110],
       ['Fire Rate', d.rpm / 950],
@@ -251,12 +264,13 @@ export class UI {
         <div class="ldslots">
           <button data-slot="p" class="${slot === 'p' ? 'on' : ''}"><small>PRIMARY</small>${WEAPONS[this.primary].short}</button>
           <button data-slot="s" class="${slot === 's' ? 'on' : ''}"><small>SIDEARM</small>${WEAPONS[this.secondary].short}</button>
-          <button data-slot="e" class="${slot === 'e' ? 'on' : ''}"><small>EQUIPMENT</small>${this.lethal === 'tknife' ? 'KNIFE' : 'FRAG'} · ${TACTICALS.find((t) => t.id === this.tactical)?.name ?? ''}</button>
+          <button data-slot="e" class="${slot === 'e' ? 'on' : ''}"><small>EQUIPMENT</small>${LETHALS.find((l) => l.id === this.lethal)?.name.replace(' GRENADE', '') ?? ''} · ${TACTICALS.find((t) => t.id === this.tactical)?.name ?? ''}</button>
         </div></div>`;
       if (slot === 'e') {
         e.innerHTML = `<div class="ld">${top}${note ? `<div class="lnote">${note}</div>` : ''}
-          <div class="ldeq"><div class="lsec">LETHAL</div><div class="ldrow">${ecard('frag', 'FRAG GRENADE', 'Cookable (hold G). 3.5 s fuse.', 2, this.lethal === 'frag', 'l')}${ecard('tknife', 'THROWING KNIFE', 'One-hit kill. Fast, flat throw — walk over it to pick it back up.', 2, this.lethal === 'tknife', 'l')}</div>
-          <div class="lsec">TACTICAL</div><div class="ldrow">${TACTICALS.map((t) => ecard(t.id, t.name, t.desc, t.count, t.id === this.tactical, 't')).join('')}</div></div>
+          <div class="ldeq"><div class="lsec">LETHAL</div><div class="ldrow">${LETHALS.map((l) => ecard(l.id, l.name, l.desc, l.count, this.lethal === l.id, 'l')).join('')}</div>
+          <div class="lsec">TACTICAL</div><div class="ldrow">${TACTICALS.map((t) => ecard(t.id, t.name, t.desc, t.count, t.id === this.tactical, 't')).join('')}</div>
+          <div class="lsec">FIELD UPGRADE</div><div class="ldrow">${ecard('trophy', 'TROPHY SYSTEM', 'Press H to deploy. Shoots down up to 3 enemy grenades, C4, sticky grenades and throwing knives within 7.5 m. Recharges over time.', 1, true, 'f')}</div></div>
           <div class="ldbot"><button class="primary" data-a="done">CONFIRM</button></div></div>`;
       } else {
         e.innerHTML = `<div class="ld">${top}${note ? `<div class="lnote">${note}</div>` : ''}
@@ -281,7 +295,7 @@ export class UI {
           if (this.ldSlot === 'p') this.primary = id as WeaponId;
           else if (this.ldSlot === 's') this.secondary = id as WeaponId;
           else if (el.dataset.g === 't') this.tactical = id as TacticalId;
-          else if (el.dataset.g === 'l') this.lethal = id === 'tknife' ? 'tknife' : 'frag';
+          else if (el.dataset.g === 'l') this.lethal = id as LethalId;
           else return;
           try {
             localStorage.setItem('fjordfront.primary', this.primary);
@@ -713,13 +727,17 @@ export class UI {
   }
 
   /** Lethal / tactical slots next to the ammo: icon, count, key; frag cook timer. */
-  updateNades(frags: number, cooking: number, tac: TacticalId = this.tactical, tacN = 0) {
+  updateNades(frags: number, cooking: number, tac: TacticalId = this.tactical, tacN = 0, lethal: LethalId = this.lethal, field = 0, c4Out = 0) {
     const el = this.hud.querySelector('.nades') as HTMLElement;
-    const key = `${frags}|${cooking > 0 ? Math.ceil(cooking * 10) : 0}|${tac}|${tacN}|${this.lethal}`;
+    const key = `${frags}|${cooking > 0 ? Math.ceil(cooking * 10) : 0}|${tac}|${tacN}|${lethal}|${Math.floor(field * 40)}|${c4Out}`;
     if (el.dataset.k === key) return;
     el.dataset.k = key;
     const slot = (name: string, n: number, k: string) => `<div class="eqs ${n ? '' : 'empty'}">${icon(name)}<b>${n}</b><em>${k}</em></div>`;
-    el.innerHTML = slot(this.lethal, frags, 'G') + slot(tac, tacN, 'F') + (cooking > 0 ? `<div class="cook"><i style="width:${(cooking / 3.5) * 100}%"></i><b>${cooking.toFixed(1)}</b></div>` : '');
+    // field upgrade: a charge ring that fills, glowing with its key when ready
+    const ready = field >= 1;
+    const ring = `<div class="eqs fu ${ready ? 'ready' : 'empty'}" style="--fu:${Math.min(1, field) * 360}deg">${icon('trophy')}<b>${ready ? '' : Math.floor(field * 100) + '%'}</b><em>H</em></div>`;
+    const det = c4Out > 0 ? `<div class="det">${frags > 0 ? '[F][F]' : '[G]'} DETONATE · ${c4Out}</div>` : '';
+    el.innerHTML = slot(lethal, frags, 'G') + slot(tac, tacN, 'T') + ring + det + (cooking > 0 ? `<div class="cook"><i style="width:${(cooking / 3.5) * 100}%"></i><b>${cooking.toFixed(1)}</b></div>` : '');
   }
 
   /** Status effects: stim boost timer, stunned / blinded labels. */

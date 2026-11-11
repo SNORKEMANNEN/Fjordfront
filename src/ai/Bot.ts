@@ -870,6 +870,59 @@ export class Bot implements Combatant {
     return r;
   }
   /** Visual-only state touched by puppet(); saved before a replay and restored after. */
+  /**
+   * Snapshot-grenade outline: a second draw of the body sharing the skeleton, glowing and drawn
+   * through walls. Built on first use; 0 hides it.
+   */
+  private revealMeshes: THREE.SkinnedMesh[] | null = null;
+  private static revealMat: THREE.ShaderMaterial | null = null;
+  setReveal(k: number) {
+    if (k <= 0 && !this.revealMeshes) return;
+    if (!this.revealMeshes) {
+      Bot.revealMat ??= new THREE.ShaderMaterial({
+        uniforms: { uK: { value: 1 } },
+        vertexShader: `#include <common>
+          #include <skinning_pars_vertex>
+          varying float vF;
+          void main(){
+            #include <skinbase_vertex>
+            #include <begin_vertex>
+            #include <beginnormal_vertex>
+            #include <skinnormal_vertex>
+            #include <skinning_vertex>
+            vec4 mv = modelViewMatrix * vec4(transformed, 1.0);
+            vec3 n = normalize(normalMatrix * objectNormal);
+            vF = 1.0 - abs(dot(n, normalize(-mv.xyz)));
+            gl_Position = projectionMatrix * mv;
+          }`,
+        fragmentShader: `uniform float uK; varying float vF;
+          void main(){ float a = (0.18 + pow(vF, 2.0) * 0.9) * uK; gl_FragColor = vec4(vec3(1.6, 0.25, 0.12) * a, a); }`,
+        transparent: true, depthTest: false, depthWrite: false, blending: THREE.AdditiveBlending,
+      });
+      this.revealMeshes = [];
+      const src: THREE.SkinnedMesh[] = [];
+      this.model.traverse((o) => {
+        if ((o as THREE.SkinnedMesh).isSkinnedMesh) src.push(o as THREE.SkinnedMesh);
+      });
+      for (const m of src) {
+        const r = new THREE.SkinnedMesh(m.geometry, Bot.revealMat);
+        r.bind(m.skeleton, m.bindMatrix);
+        r.renderOrder = 50;
+        r.frustumCulled = false;
+        r.visible = false;
+        r.layers.set(1);
+        m.parent!.add(r);
+        r.position.copy(m.position);
+        r.quaternion.copy(m.quaternion);
+        r.scale.copy(m.scale);
+        this.revealMeshes.push(r);
+      }
+    }
+    const on = k > 0 && !this.legsOnly;
+    for (const r of this.revealMeshes) r.visible = on;
+    if (on) Bot.revealMat!.uniforms.uK.value = k;
+  }
+
   saveVisual() {
     return {
       rp: this.root.position.clone(), rr: this.root.rotation.y, rv: this.root.visible, mq: this.model.quaternion.clone(), my: this.model.position.y,

@@ -18,6 +18,18 @@ export const ICONS: Record<string, string> = {
   tknife: S(`<path d="M5.5 18.5l10.8-10.8 3.4-2.4-2.4 3.4L6.5 19.5z" fill="currentColor" fill-opacity=".25"/><path d="M8.8 15.2l2 2"/><circle cx="4.6" cy="19.4" r="1.6"/>`),
   // combat knife
   knife: S(`<path d="M3.5 20.5l6-6M9.5 14.5l2 2M11.5 16.5l8.5-11.5-11.5 8.5z" fill="currentColor" fill-opacity=".25"/>`),
+  // claymore: curved directional mine on scissor legs, two tripwire beams
+  claymore: S(`<path d="M4.5 9.5q7.5 -3 15 0v5q-7.5 -3 -15 0z" fill="currentColor" fill-opacity=".25"/><path d="M7 14.2l-1.6 5M17 14.2l1.6 5M8.5 13.5l1 5.5M15.5 13.5l-1 5.5"/><path d="M14 7.4l7-3.4M14 7.4l7.5 1" stroke-dasharray="1.6 1.4"/>`),
+  // C4: brick with a receiver and antenna
+  c4: S(`<rect x="3" y="10" width="18" height="8" rx="1" fill="currentColor" fill-opacity=".22"/><path d="M8 10v8M16 10v8"/><rect x="9.5" y="6.5" width="5" height="3.5" rx=".6"/><path d="M10.5 6.5L8.5 2.5"/><circle cx="13.2" cy="8.2" r=".6" fill="currentColor"/>`),
+  // sticky: stubby grenade with a gel pad and an arming button
+  sticky: S(`<rect x="7.5" y="7" width="9" height="11" rx="2" fill="currentColor" fill-opacity=".22"/><path d="M7.5 11h9"/><rect x="10" y="4" width="4" height="3" rx=".8"/><path d="M6.5 19.5q5.5 3 11 0" stroke-width="2.2"/><circle cx="12" cy="14.5" r="1" fill="currentColor"/>`),
+  // snapshot: puck emitting a scan ring
+  snapshot: S(`<rect x="8" y="12" width="8" height="6" rx="1.5" fill="currentColor" fill-opacity=".25"/><path d="M8 15h8"/><path d="M5 11a8 8 0 0 1 14 0M2.5 9a11.5 11.5 0 0 1 19 0" stroke-dasharray="2.2 1.6"/><circle cx="12" cy="15" r=".7" fill="currentColor"/>`),
+  // decoy: canister with sound waves
+  decoy: S(`<rect x="5" y="7" width="7" height="13" rx="1.5" fill="currentColor" fill-opacity=".22"/><path d="M5 11h7M5 13h7M5 15h7"/><path d="M15 10.5a4 4 0 0 1 0 6M17.6 8.3a7.2 7.2 0 0 1 0 10.4M20.2 6a10.5 10.5 0 0 1 0 15"/>`),
+  // trophy: sensor head on a tripod
+  trophy: S(`<path d="M7.5 8.5h9l-1 4h-7z" fill="currentColor" fill-opacity=".25"/><path d="M12 12.5v3M12 15.5l-6 5M12 15.5l6 5M12 15.5v5"/><path d="M10 8.5V6.5h4v2"/><path d="M4.5 6a9 9 0 0 1 3-3M19.5 6a9 9 0 0 0-3-3"/>`),
   uav: S(`<path d="M12 12l-7.5-3.5M12 12l7.5-3.5M12 12v7"/><circle cx="12" cy="12" r="2" fill="currentColor"/><path d="M3 8.5h3M18 8.5h3"/><path d="M7 19.5a7 7 0 0 0 10 0" stroke-dasharray="2 2"/>`),
   mortar: S(`<path d="M7 20l7-12"/><rect x="12.5" y="3" width="4.5" height="8" rx="1" transform="rotate(30 14.7 7)" fill="currentColor" fill-opacity=".22"/><path d="M4.5 20.5h9M16 20l-3-5"/>`),
   heli: S(`<path d="M3 5h18M12 5v3"/><path d="M5 12.5c0-2.5 2.5-4.5 6-4.5h2.5c2.5 0 4.5 2 4.5 4.5s-2 3.5-4.5 3.5H9" fill="currentColor" fill-opacity=".22"/><path d="M18 12.5h3.5M21.5 10.5v4M8 19h8M10 16v3M14 16v3"/>`),

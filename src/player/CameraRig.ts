@@ -148,6 +148,8 @@ export class CameraRig {
     const pitch = p.pitch + this.landPitch.value * 0.035 + this.kick.value.x + this.shotRot.value.x + shX + this.mantleDip.value * 0.05;
     const yaw = p.yaw + this.kick.value.y + this.shotRot.value.y + shY + this.bobOffset.x * 0.12;
     cam.position.copy(eye).addScaledVector(right, this.bobOffset.x + this.peekLean);
+    // leaning swings the head out from the hips, so it also drops a little
+    cam.position.y -= Math.abs(this.peekLean) * 0.12;
     // shove the eye back along the view direction a touch on each shot
     const back = this.shotBack.value;
     if (back !== 0) cam.position.add(this.tmpBack.set(Math.sin(p.yaw) * back, 0, Math.cos(p.yaw) * back));

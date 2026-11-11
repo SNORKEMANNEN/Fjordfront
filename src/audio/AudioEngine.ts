@@ -219,9 +219,93 @@ async function impact(surface: string): Promise<AudioBuffer> {
 }
 
 async function mech(kind: string): Promise<AudioBuffer> {
-  return render(kind === 'smokeHiss' ? 7 : 0.6, (ctx, out) => {
+  const LEN: Record<string, number> = { smokeHiss: 7, snapPulse: 1.6, servo: 0.9, zap: 0.8, trophyDeploy: 1.0, carFire: 3, debris: 1.2, bipod: 0.4, fireIgnite: 1.4 };
+  return render(LEN[kind] ?? 0.6, (ctx, out) => {
     const t = 0.002;
     switch (kind) {
+      // ---- Update 20 equipment ----
+      case 'beep':
+        tone(ctx, out, t, 2750, 2750, 0.07, 0.32, 'sine', 0.06);
+        tone(ctx, out, t, 5500, 5500, 0.05, 0.06, 'sine', 0.04);
+        break;
+      case 'beepLow':
+        tone(ctx, out, t, 1450, 1450, 0.09, 0.3, 'square', 0.08);
+        break;
+      case 'armChirp':
+        tone(ctx, out, t, 1800, 3400, 0.12, 0.28, 'sine', 0.11);
+        tone(ctx, out, t + 0.13, 3400, 3400, 0.06, 0.22, 'sine', 0.05);
+        break;
+      case 'clack':
+        // detonator: a stiff plastic switch
+        burst(ctx, out, t, { dur: 0.012, attack: 0.0003, decay: 0.008, gain: 0.9, type: 'bandpass', freq: 2400, q: 0.9 });
+        tone(ctx, out, t, 900, 500, 0.03, 0.4, 'triangle', 0.02);
+        burst(ctx, out, t + 0.035, { dur: 0.01, decay: 0.006, gain: 0.5, type: 'bandpass', freq: 3200, q: 1.2 });
+        break;
+      case 'stick':
+        // wet, heavy slap of the adhesive
+        burst(ctx, out, t, { dur: 0.08, attack: 0.001, decay: 0.05, gain: 0.9, type: 'lowpass', freq: 900, color: 'brown' });
+        tone(ctx, out, t, 140, 70, 0.08, 0.6, 'sine', 0.06);
+        burst(ctx, out, t + 0.01, { dur: 0.12, decay: 0.09, gain: 0.25, type: 'bandpass', freq: 2200, q: 2 });
+        break;
+      case 'legs':
+        metal(ctx, out, t, 2100, 0.14, 0.05);
+        burst(ctx, out, t, { dur: 0.015, decay: 0.01, gain: 0.5, type: 'highpass', freq: 3000 });
+        break;
+      case 'claymoreClick':
+        metal(ctx, out, t, 3100, 0.2, 0.04);
+        tone(ctx, out, t + 0.06, 2200, 2200, 0.08, 0.25, 'square', 0.07);
+        break;
+      case 'zap':
+        // trophy intercept: a sharp electrical crack, a pop and a short sizzle
+        burst(ctx, out, t, { dur: 0.03, attack: 0.0003, decay: 0.02, gain: 1.0, type: 'highpass', freq: 2500 });
+        for (let i = 0; i < 6; i++) tone(ctx, out, t + i * 0.012, 1200 + Math.random() * 2400, 300, 0.03, 0.18, 'sawtooth', 0.025);
+        burst(ctx, out, t + 0.05, { dur: 0.08, attack: 0.001, decay: 0.06, gain: 0.8, type: 'lowpass', freq: 1200, color: 'brown' });
+        tone(ctx, out, t + 0.05, 180, 60, 0.12, 0.6, 'sine', 0.1);
+        burst(ctx, out, t + 0.1, { dur: 0.6, attack: 0.01, decay: 0.45, gain: 0.18, type: 'highpass', freq: 4000 });
+        break;
+      case 'servo':
+        tone(ctx, out, t, 420, 760, 0.45, 0.12, 'sawtooth', 0.42);
+        tone(ctx, out, t, 840, 1520, 0.45, 0.05, 'square', 0.42);
+        burst(ctx, out, t, { dur: 0.45, attack: 0.05, decay: 0.38, gain: 0.08, type: 'bandpass', freq: 1800, q: 3 });
+        tone(ctx, out, t + 0.5, 1900, 1900, 0.08, 0.2, 'sine', 0.07);
+        tone(ctx, out, t + 0.6, 2500, 2500, 0.08, 0.2, 'sine', 0.07);
+        break;
+      case 'trophyDeploy':
+        // heavy set-down: thud, legs locking, then the spin-up
+        tone(ctx, out, t, 110, 55, 0.18, 0.7, 'sine', 0.15);
+        burst(ctx, out, t, { dur: 0.1, attack: 0.001, decay: 0.08, gain: 0.7, type: 'lowpass', freq: 700, color: 'brown' });
+        metal(ctx, out, t + 0.12, 1700, 0.15, 0.06);
+        metal(ctx, out, t + 0.17, 1850, 0.15, 0.06);
+        metal(ctx, out, t + 0.21, 1600, 0.15, 0.06);
+        tone(ctx, out, t + 0.3, 300, 1400, 0.55, 0.1, 'sawtooth', 0.5);
+        break;
+      case 'snapPulse':
+        // snapshot: a deep whump and a bright sweep outward
+        tone(ctx, out, t, 90, 40, 0.5, 0.8, 'sine', 0.45);
+        burst(ctx, out, t, { dur: 0.15, attack: 0.002, decay: 0.12, gain: 0.6, type: 'lowpass', freq: 600, color: 'brown' });
+        tone(ctx, out, t + 0.02, 600, 4200, 0.9, 0.14, 'sine', 0.85);
+        tone(ctx, out, t + 0.02, 603, 4230, 0.9, 0.1, 'triangle', 0.85);
+        burst(ctx, out, t + 0.05, { dur: 1.1, attack: 0.1, decay: 0.9, gain: 0.12, type: 'bandpass', freq: 3000, q: 4, freqEnd: 7000 });
+        break;
+      case 'bipod':
+        metal(ctx, out, t, 1500, 0.2, 0.08);
+        burst(ctx, out, t, { dur: 0.04, decay: 0.03, gain: 0.5, type: 'bandpass', freq: 1800, q: 1 });
+        metal(ctx, out, t + 0.09, 1250, 0.25, 0.1);
+        tone(ctx, out, t + 0.09, 160, 90, 0.08, 0.4, 'sine', 0.07);
+        break;
+      case 'debris':
+        // wood / metal bits landing
+        for (let i = 0; i < 9; i++) burst(ctx, out, t + Math.random() * 0.8, { dur: 0.04, decay: 0.03, gain: 0.2 + Math.random() * 0.3, type: 'bandpass', freq: 600 + Math.random() * 2400, q: 1.5 });
+        break;
+      case 'fireIgnite':
+        burst(ctx, out, t, { dur: 1.2, attack: 0.02, decay: 1.0, gain: 0.7, type: 'lowpass', freq: 900, freqEnd: 400, color: 'brown' });
+        burst(ctx, out, t, { dur: 0.6, attack: 0.01, decay: 0.5, gain: 0.3, type: 'bandpass', freq: 2500, q: 0.6 });
+        break;
+      case 'carFire':
+        // crackling fire bed (looped while a vehicle burns)
+        burst(ctx, out, 0, { dur: 3, attack: 0.001, decay: 3, gain: 0.25, type: 'lowpass', freq: 700, color: 'brown' });
+        for (let i = 0; i < 70; i++) burst(ctx, out, Math.random() * 2.9, { dur: 0.02, decay: 0.012, gain: 0.15 + Math.random() * 0.4, type: 'bandpass', freq: 1500 + Math.random() * 4000, q: 1.2 });
+        break;
       case 'magOut':
         metal(ctx, out, t, 1400, 0.1, 0.06);
         burst(ctx, out, t + 0.02, { dur: 0.12, decay: 0.09, gain: 0.35, type: 'bandpass', freq: 1800, q: 1.2 });
@@ -709,7 +793,7 @@ export class AudioEngine {
     // (weapon audio is recorded only: see the firearm library load below)
     for (const s of ['grass', 'dirt', 'gravel', 'concrete', 'wood', 'metal', 'water']) for (let v = 0; v < 4; v++) jobs.push([`step_${s}`, () => footstep(s, v)]);
     for (const s of ['concrete', 'metal', 'wood', 'glass', 'flesh', 'water', 'dirt']) for (let v = 0; v < 2; v++) jobs.push([`imp_${s}`, () => impact(s)]);
-    for (const k of ['click', 'cloth', 'adsIn', 'adsOut', 'lowAmmo', 'breathIn', 'breathOut', 'whiz', 'jump', 'land', 'mantle', 'tac', 'medal', 'flagWon', 'flagLost', 'capTick', 'streak', 'radio', 'uavPing', 'heartbeat', 'whistle', 'swish', 'pin', 'smokeHiss', 'stimHiss'])
+    for (const k of ['click', 'cloth', 'adsIn', 'adsOut', 'lowAmmo', 'breathIn', 'breathOut', 'whiz', 'jump', 'land', 'mantle', 'tac', 'medal', 'flagWon', 'flagLost', 'capTick', 'streak', 'radio', 'uavPing', 'heartbeat', 'whistle', 'swish', 'pin', 'smokeHiss', 'stimHiss', 'beep', 'beepLow', 'armChirp', 'clack', 'stick', 'legs', 'claymoreClick', 'zap', 'servo', 'trophyDeploy', 'snapPulse', 'bipod', 'debris', 'fireIgnite', 'carFire'])
       jobs.push([k, () => mech(k)]);
     for (const k of ['wind', 'waves', 'rain', 'slide', 'heli', 'snowwind'] as const) jobs.push([`loop_${k}`, () => loopBuffer(k)]);
     for (let i = 0; i < 3; i++) jobs.push(['gull', () => bird('gull')]);
@@ -1056,6 +1140,21 @@ export class AudioEngine {
     for (const k of ['magOut', 'magIn', 'magTouch', 'boltBack', 'boltRelease', 'slideBack', 'dry', 'rattle']) {
       if (this.bank[`${k}@k416`]) this.bank[`${k}@ks17`] = this.bank[`${k}@k416`];
     }
+    // KVL-7 LMG: the carbine report with a big open receiver chug — pitched down a touch, a driven
+    // low body and a little of the .338's crack and tail for weight
+    const snp = this.bank['shot@skv338'] ?? [];
+    if (ar.length) {
+      await set('shot_lmg', ar.map((buf, i) => () => render([
+        { buf, rate: 0.9, gain: 1.0, drive: 1.5 },
+        { buf, rate: 0.66, gain: 0.55, lp: 480, drive: 2.3 },
+        ...(snp.length ? [{ buf: snp[i % snp.length], rate: 1.25, gain: 0.22, lp: 3000, drive: 1.2 }] : []),
+      ], 1.8, 1.0)));
+      if (this.bank['far@k416']) this.bank['far_lmg'] = this.bank['far@k416'];
+    }
+    // handling: rifle charging handle, sniper mag thunk for the box going in / out
+    for (const [k, src] of [['magOut', 'magOut@skv338'], ['magIn', 'magIn@skv338'], ['magTouch', 'magTouch@k416'], ['boltBack', 'boltBack@k416'], ['boltRelease', 'boltRelease@k416'], ['dry', 'dry@k416'], ['rattle', 'rattle@k416'], ['boltOpen', 'boltOpen@skv338'], ['boltClose', 'boltClose@skv338']] as const) {
+      if (this.bank[src]) this.bank[`${k}@lmg`] = this.bank[src];
+    }
     // UMS-45: .45 ACP is slower and fatter than the PDW's 4.6 — the PDW report pitched down with the
     // 9 mm pistol's punch underneath and a driven low thump
     const pdw = this.bank['shot@mp7'] ?? [], pst = this.bank['shot@p80'] ?? [];
@@ -1296,6 +1395,59 @@ export class AudioEngine {
       l.panner.positionY.value = pos.y;
       l.panner.positionZ.value = pos.z;
     }
+  }
+
+  /**
+   * Positional looping emitters (burning vehicles, tunnel shaft wind): created on first use, then
+   * gain / position / filter are steered every frame; a gain of 0 for a while stops and frees it.
+   */
+  private emitters = new Map<string, { src: AudioBufferSourceNode; gain: GainNode; lp: BiquadFilterNode; pan: PannerNode; idle: number }>();
+  emitter(key: string, buf: string, gain: number, pos: THREE.Vector3, opts: { ref?: number; lowpass?: number; rate?: number; bus?: 'sfx' | 'amb' } = {}) {
+    if (!this.ready || this.ctx.state !== 'running' || !Number.isFinite(gain) || !Number.isFinite(pos.x)) return;
+    let e = this.emitters.get(key);
+    if (!e) {
+      if (gain < 0.002) return;
+      const b = this.bank[buf]?.[0];
+      if (!b) return;
+      const src = this.ctx.createBufferSource();
+      src.buffer = b;
+      src.loop = true;
+      src.playbackRate.value = opts.rate ?? 1;
+      const lp = this.ctx.createBiquadFilter();
+      lp.type = 'lowpass';
+      lp.frequency.value = opts.lowpass ?? 20000;
+      const pan = this.ctx.createPanner();
+      pan.panningModel = 'equalpower';
+      pan.distanceModel = 'inverse';
+      pan.refDistance = opts.ref ?? 4;
+      pan.rolloffFactor = 1.2;
+      const g = this.ctx.createGain();
+      g.gain.value = 0;
+      src.connect(lp).connect(pan).connect(g).connect(opts.bus === 'sfx' ? this.sfx : this.amb);
+      // start somewhere random in the loop so two emitters of one buffer never phase
+      src.start(this.ctx.currentTime, Math.random() * b.duration);
+      e = { src, gain: g, lp, pan, idle: 0 };
+      this.emitters.set(key, e);
+    }
+    const t = this.ctx.currentTime;
+    e.gain.gain.setTargetAtTime(Math.min(3, gain), t, 0.25);
+    e.pan.positionX.value = pos.x;
+    e.pan.positionY.value = pos.y;
+    e.pan.positionZ.value = pos.z;
+    if (opts.lowpass) e.lp.frequency.setTargetAtTime(opts.lowpass, t, 0.15);
+    if (opts.rate) e.src.playbackRate.setTargetAtTime(opts.rate, t, 0.3);
+    e.idle = gain < 0.002 ? e.idle + 1 : 0;
+    if (e.idle > 120) this.stopEmitter(key);
+  }
+  stopEmitter(key: string) {
+    const e = this.emitters.get(key);
+    if (!e) return;
+    this.emitters.delete(key);
+    try {
+      e.src.stop();
+      e.src.disconnect();
+      e.gain.disconnect();
+    } catch { /* ignore */ }
   }
 
   /** Ambience director: wind, waves near the shore, birds, gulls by the harbour, rain. */

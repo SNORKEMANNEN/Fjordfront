@@ -88,7 +88,7 @@ export class Combat {
       lastWorld = wh;
       if (!visualOnly) this.ev.onImpact(wh, def, shooter);
       // power: how hard the round hits (shotgun pellets and the .338 shatter glass outright)
-      wh.info.onHit?.(wh.point, dir, def.cls === 'Sniper' ? 3 : def.cls === 'Shotgun' || def.cls === 'Marksman' ? 2 : 1);
+      wh.info.onHit?.(wh.point, dir, def.cls === 'Sniper' ? 3 : def.cls === 'Shotgun' || def.cls === 'Marksman' ? 2 : 1, shooter);
       // penetration through thin/soft materials
       const pen = wh.info.penetrable ?? (wh.info.surface === 'wood' ? 0.35 : wh.info.surface === 'glass' ? 1 : wh.info.surface === 'metal' ? 0.1 : wh.info.surface === 'fabric' ? 0.8 : 0);
       if (pen <= 0 || def.penetration <= 0) return { victim: null, part: null, point: wh.point, killed: false, damage: 0, worldHit: wh, end: wh.point };

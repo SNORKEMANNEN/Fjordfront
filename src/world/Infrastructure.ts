@@ -504,6 +504,13 @@ export class Infrastructure {
     this.carCount++;
     b.push([x, y, z], rot);
     const L = 4.6, W = 1.8;
+    // intact cars can be shot / blown up (Destruction): remember their geometry and route hits
+    const id = 'car:' + this.carCount;
+    if (!wreck) {
+      b.tag = id;
+      b.hitHook = (p, d, pw, by) => GeoBuilder.onCarHit?.(id, p, d, pw ?? 1, by);
+      this.cars.push({ id, m: b.m.clone(), paint });
+    }
     // body
     b.box(paint, -L / 2, 0.32, -W / 2, L / 2, 0.95, W / 2, 'metal');
     b.box(paint, -L / 2 + 0.25, 0.95, -W / 2 + 0.08, L / 2 - 1.25, 1.02, W / 2 - 0.08);
@@ -524,9 +531,13 @@ export class Infrastructure {
         b.box('tail', -L / 2 - 0.01, 0.75, sz * 0.66 - 0.12, -L / 2 + 0.02, 0.88, sz * 0.66 + 0.12);
       }
     }
+    b.tag = null;
+    b.hitHook = null;
     b.pop();
     this.coverPoints.push(new THREE.Vector3(x, y, z));
   }
+  /** intact (destructible) cars: id, world transform, paint */
+  cars: { id: string; m: THREE.Matrix4; paint: string }[] = [];
 
   sandbags(x: number, z: number, rot: number, len: number, rows = 3) {
     const b = this.b;
@@ -652,7 +663,7 @@ export class Infrastructure {
       if (this.bld.footprints.some((f) => x > f.min.x - 2 && x < f.max.x + 2 && z > f.min.z - 2 && z < f.max.z + 2)) continue;
       const y = this.h(x, z);
       if (this.rng.chance(0.5)) this.b.box('pallet', x - 0.6, y, z - 0.6, x + 0.6, y + 0.15 + this.rng.range(0.2, 1.2), z + 0.6, 'wood');
-      else for (let k = 0; k < this.rng.int(1, 4); k++) this.b.cyl(this.rng.chance(0.5) ? 'redSteel' : 'contBlue', x + k * 0.65, y, z, 0.3, 0.9, 12, 'metal');
+      else for (let k = 0; k < this.rng.int(1, 4); k++) this.b.destructible('barrel', new THREE.Matrix4().setPosition(x + k * 0.65, this.h(x + k * 0.65, z), z), { mat: this.rng.chance(0.5) ? 'redSteel' : 'contBlue' });
     }
     // power line poles along Strandvegen
     const poles: THREE.Vector3[] = [];

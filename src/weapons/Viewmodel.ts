@@ -4,10 +4,12 @@ import { Arm, POSES, FingerPose } from './Arms';
 import { RiggedArms } from './RiggedArms';
 import { ReloadClip, ReloadKind, buildReloadClip, SPECS } from './ReloadClips';
 import { breakAction, BreakData } from './BreakAction';
+import { lmgReload } from './LmgAnim';
 import { knifeAction, knifeCarry } from './KnifeAnim';
 import { WeaponModel } from './WeaponModels';
 import { WeaponDef } from './WeaponDefs';
 import { newRevState, revolverAction, revolverIdle, revolverLate, revolverReset, revolverShot } from './RevolverAnim';
+import { EQUIP_BUILDERS, setLed } from './EquipmentModels';
 import { Spring3, Spring, clamp, damp, smoothstep, lerp, easeInOutCubic, easeOutCubic, easeOutBack } from '../core/math';
 
 /** Keyframes: [t, value] pairs (t normalized 0..1), smooth cubic interpolation. */
@@ -158,7 +160,8 @@ function localBox(o: THREE.Object3D) {
   return box;
 }
 
-export type ActionType = 'reload' | 'reloadEmpty' | 'inspect' | 'inspectMag' | 'draw' | 'holster' | 'pump' | 'bolt' | 'shellStart' | 'shell' | 'shellEnd' | 'melee' | 'throw' | 'stim' | 'uav' | 'designate' | 'nvg' | 'breakReload' | 'knifeSlash' | 'knifeStab' | 'knifeKill';
+export type ActionType = 'reload' | 'reloadEmpty' | 'inspect' | 'inspectMag' | 'draw' | 'holster' | 'pump' | 'bolt' | 'shellStart' | 'shell' | 'shellEnd' | 'melee' | 'throw' | 'stim' | 'uav' | 'designate' | 'nvg' | 'breakReload' | 'knifeSlash' | 'knifeStab' | 'knifeKill'
+  | 'claymore' | 'c4Throw' | 'detonate' | 'stickyThrow' | 'snapshotThrow' | 'decoyThrow' | 'trophy';
 
 export interface Action {
   type: ActionType;
@@ -197,6 +200,8 @@ export interface VMContext {
   cant?: number;
   /** -1..1 door peek: leaning round a door edge while aiming (sign = lean direction) */
   peek?: number;
+  /** -1..1 Q/E lean (the view rolls with it; the gun counter-settles so the sights stay put) */
+  lean?: number;
 }
 
 /** Hand orientation (camera space) while holding the UAV tablet: fingers right and a little up, palm to the camera. */
@@ -251,6 +256,16 @@ export class Viewmodel {
   poses = POSES;
   private cantBlend = 0;
   private peekBlend = 0;
+  /** LMG bipod: target set by the weapon system (0 folded, 1 deployed); bipodBlend animates */
+  bipod = 0;
+  private bipodBlend = 0;
+  private bipodSettle = new Spring(160, 11);
+  private leanBlend = 0;
+  /** lean swing: the gun lags the body as it swings out and overshoots a touch on arrival */
+  private leanSwing = new Spring(150, 13);
+  leanKick(dir: number) {
+    this.leanSwing.impulse(dir * 0.9);
+  }
   /** authored pose offsets (exposed for live tuning) */
   pose = {
     hipR: [0.025, 0.14, -0.07],
@@ -273,6 +288,9 @@ export class Viewmodel {
     this.items.stim = Viewmodel.makeInjector();
     this.items.phone = Viewmodel.makePhone();
     this.items.laser = Viewmodel.makeDesignator();
+    for (const [k, build] of Object.entries(EQUIP_BUILDERS)) this.items[k] = build();
+    this.items.claymore.userData.twoHand = true;
+    this.items.trophy.userData.twoHand = true;
     for (const it of Object.values(this.items)) {
       it.visible = false;
       this.root.add(it);
@@ -372,6 +390,11 @@ export class Viewmodel {
     // across the back and round the right edge, thumb by the LAUNCH button (see PHONE_HAND)
     phone: Viewmodel.phoneHold(),
     // designator rests across the palm (palm up), lens forward, held like a flashlight
+    // C4 brick lying along the palm, receiver on top; the detonator in a fist, button up past the thumb
+    c4: { off: 0.017, e: [0, Math.PI / 2, 0] },
+    detonator: { off: 0.016, e: [0, 0, -Math.PI / 2], p: new THREE.Vector3(0.004, 0, 0.026) },
+    // sticky: cupped like a canister; snapshot puck flat in the palm, cap out; decoy like a smoke can
+    sticky: { off: 0.022, e: [Math.PI / 2, 0, 0.3] }, snapshot: { off: 0.025, e: [Math.PI, 0, 0] }, decoy: { off: 0.021, e: [Math.PI / 2, 0, 0.3] },
     laser: { off: 0.024, e: [0, 0, 0], q: new THREE.Quaternion().setFromRotationMatrix(new THREE.Matrix4().makeBasis(new THREE.Vector3(0, 0, -1), new THREE.Vector3(0, -1, 0), new THREE.Vector3(-1, 0, 0))) },
   };
   static PHONE_HAND = PHONE_HAND;
@@ -648,6 +671,29 @@ export class Viewmodel {
   }
   /** free firing-hand target (ladders) */
   private freeR = { b: 0, p: new THREE.Vector3(), q: new THREE.Quaternion() };
+  private freeRPose: FingerPose = POSES.hold;
+  /** Wrist pose that puts a palm on `anchor` (root space) with orientation q, r off the surface. */
+  private wristAt(side: 'L' | 'R', anchor: THREE.Vector3, q: THREE.Quaternion, r: number) {
+    const palm = this.rig ? this.rig.palmOffset(side, new THREE.Vector3()) : new THREE.Vector3(side === 'R' ? -0.003 : 0.003, -0.007, -0.072);
+    palm.y -= (this.rig ? this.rig.palmDepth(side) : 0.014) + r;
+    return anchor.clone().sub(palm.applyQuaternion(q));
+  }
+  /**
+   * Two-handed item (claymore, trophy): put a hand on one of the item's grip markers. Finger and
+   * palm directions are given in item space so the grip turns with the item.
+   */
+  private gripItem(side: 'L' | 'R', item: THREE.Object3D, markerName: string, fingers: THREE.Vector3, palmN: THREE.Vector3, r: number, pose: FingerPose, slide = new THREE.Vector3()) {
+    item.updateMatrix();
+    const mk = item.getObjectByName(markerName);
+    if (!mk) return;
+    const anchor = mk.position.clone().add(slide).applyMatrix4(item.matrix);
+    const q = handQ(fingers.clone().applyQuaternion(item.quaternion), palmN.clone().applyQuaternion(item.quaternion));
+    const f = side === 'L' ? this.freeL : this.freeR;
+    f.p.copy(this.wristAt(side, anchor, q, r));
+    f.q.copy(q);
+    if (side === 'L') this.freeL.pose = pose;
+    else this.freeRPose = pose;
+  }
   private climbBlend = 0;
   /** free support hand target in root (camera) space, set by actions that leave the gun */
   private freeL = { b: 0, p: new THREE.Vector3(), q: new THREE.Quaternion(), pose: POSES.hold as FingerPose };
@@ -677,8 +723,14 @@ export class Viewmodel {
       if (k === 'frag') return sphereSDF(g.getWorldPosition(new THREE.Vector3()), 0.031);
       const dims: Record<string, [number, number, number]> = {
         flash: [0.022, 0.0425, 0], stun: [0.022, 0.0425, 0], smoke: [0.026, 0.055, 0], stim: [0.011, 0.055, 0],
+        sticky: [0.025, 0.032, 0], snapshot: [0.03, 0.025, 0], decoy: [0.022, 0.05, 0],
       };
       if (dims[k]) return cylSDF(g.matrixWorld, dims[k][0], dims[k][1]);
+      const boxes: Record<string, [number, number, number, number]> = {
+        c4: [0, 0.055, 0.017, 0.028], detonator: [0, 0.018, 0.046, 0.012], claymore: [0, 0.108, 0.042, 0.022], trophy: [0.04, 0.085, 0.04, 0.085],
+      };
+      const bx = boxes[k];
+      if (bx) return boxSDF(g.matrixWorld, new THREE.Vector3(0, bx[0], 0), new THREE.Vector3(bx[1], bx[2], bx[3]));
       if (k === 'phone') return boxSDF(g.matrixWorld, new THREE.Vector3(), new THREE.Vector3(0.039, 0.07, 0.0068));
       if (k === 'laser') return boxSDF(g.matrixWorld, new THREE.Vector3(0, -0.01, 0), new THREE.Vector3(0.025, 0.03, 0.06));
     }
@@ -943,6 +995,11 @@ export class Viewmodel {
     if (p.shell) p.shell.visible = false;
     if (this.spareMag) this.spareMag.visible = false;
     if (p.charge) p.charge.position.copy(this.chargeHome);
+    if (p.cover) p.cover.rotation.x = 0;
+    if (p.belt) {
+      p.belt.visible = true;
+      p.belt.position.set(0, 0, 0);
+    }
     if (p.barrels) p.barrels.rotation.x = 0;
     if (p.lever) p.lever.rotation.y = 0;
     if (p.handShells) p.handShells.visible = false;
@@ -1027,7 +1084,7 @@ export class Viewmodel {
     const tcSwing = Math.sin(c.stepPhase * Math.PI) * (c.foot === 0 ? 1 : -1);
     const pistolCls = def.cls === 'Pistol';
     // long guns sit further out and lower so the receiver does not fill the screen
-    const longGun = def.cls === 'Assault Rifle' || def.cls === 'Sniper' || def.cls === 'Shotgun' || def.cls === 'Marksman';
+    const longGun = def.cls === 'Assault Rifle' || def.cls === 'Sniper' || def.cls === 'Shotgun' || def.cls === 'Marksman' || def.cls === 'LMG';
     const tp = pistolCls ? this.pose.tacPistolP : longGun ? [0.1, -0.03, -0.12] : this.pose.tacP;
     const tr = pistolCls ? this.pose.tacPistolR : longGun ? [0.85, 0.28, -0.75] : this.pose.tacR;
     pos.x += tp[0] * tc; pos.y += tp[1] * tc; pos.z += tp[2] * tc;
@@ -1061,7 +1118,24 @@ export class Viewmodel {
     this.bobR.y = damp(this.bobR.y, -bx * 0.8 * bobScale, 18, dt);
     // idle breathing
     const br = Math.sin(this.t * 1.3) * 0.0018 + Math.sin(this.t * 0.71) * 0.0011;
-    const breathe = lerp(1, c.ads > 0.9 && def.scope ? 0.35 : 0.25, ads);
+    // LMG on its bipod: legs swing down, the gun settles onto them and stops breathing around
+    const bipT = def.id === 'lmg' ? this.bipod : 0;
+    if (Math.abs(bipT - this.bipodBlend) > 0.001 || bipT > 0) {
+      const prev = this.bipodBlend;
+      this.bipodBlend = damp(this.bipodBlend, bipT, bipT > prev ? 7 : 9, dt);
+      if (prev < 0.85 && this.bipodBlend >= 0.85) this.bipodSettle.impulse(-1.2);
+    }
+    this.bipodSettle.update(dt);
+    const bip = easeInOutCubic(clamp(this.bipodBlend, 0, 1));
+    (this.model.root.userData.setBipod as ((k: number) => void) | undefined)?.(easeOutBack(clamp(this.bipodBlend * 1.15, 0, 1)));
+    pos.y += -0.006 * bip * nonAds + this.bipodSettle.value * 0.004;
+    rot.x += this.bipodSettle.value * 0.01;
+    // the LMG is heavy: it hangs lower at the hip and sags with each step
+    if (def.cls === 'LMG') {
+      pos.y -= 0.006 * nonAds * (1 - bip);
+      rot.z += 0.03 * nonAds * (1 - bip);
+    }
+    const breathe = lerp(1, c.ads > 0.9 && def.scope ? 0.35 : 0.25, ads) * (1 - 0.85 * bip);
     pos.y += br * breathe;
     rot.x += Math.sin(this.t * 1.1) * 0.004 * breathe;
     rot.y += Math.sin(this.t * 0.6) * 0.003 * breathe;
@@ -1107,6 +1181,20 @@ export class Viewmodel {
       rot.y += -0.02 * pk;
     }
 
+    // ---------------- Q/E lean: weight rolls onto one leg, the gun rides the shoulder ----------------
+    this.leanBlend = damp(this.leanBlend, c.lean ?? 0, 9, dt);
+    this.leanSwing.update(dt);
+    const ln = this.leanBlend, lsw = this.leanSwing.value;
+    if (Math.abs(ln) > 1e-4 || Math.abs(lsw) > 1e-4) {
+      const hipK = 1 - ads * 0.8;
+      // hip: the gun tips further into the lean and draws in toward the chest; ADS keeps the sight on axis
+      rot.z += (-0.07 * ln - 0.05 * lsw) * hipK;
+      rot.y += -0.025 * ln * hipK + 0.012 * lsw;
+      pos.x += (0.008 * ln - 0.01 * lsw) * hipK;
+      pos.y += -0.006 * Math.abs(ln) * hipK - 0.004 * Math.abs(lsw);
+      pos.z += 0.01 * Math.abs(ln) * hipK;
+    }
+
     // ---------------- weapon life: full-auto shake & post-burst settle ----------------
     this.shake = damp(this.shake, this.sprayShake, 14, dt);
     if (this.shake > 0.01) {
@@ -1139,7 +1227,16 @@ export class Viewmodel {
     rot.z += this.recoilR.value.z + this.driftR.value.z;
     pos.y += this.land.value * 0.012 * lerp(1, 0.4, ads);
     rot.x += this.land.value * 0.012 * lerp(1, 0.4, ads);
-    pos.add(this.bobP).add(this.swayP.value);
+    {
+      // a bipod-mounted gun barely moves with the body (bob and mouse sway mostly soaked up)
+      const still = 1 - 0.8 * easeInOutCubic(clamp(this.bipodBlend, 0, 1));
+      const heavyBob = def.cls === 'LMG' ? 1.3 : 1;
+      pos.addScaledVector(this.bobP, still * heavyBob).addScaledVector(this.swayP.value, still);
+      if (still < 1) {
+        rot.addScaledVector(this.bobR, still * heavyBob - 1);
+        rot.addScaledVector(this.swayR.value, still - 1);
+      }
+    }
     rot.add(this.bobR).add(this.swayR.value);
 
     // ---------------- ladder & mantle: the gun drops away, the hands do the climbing ----------------
@@ -1269,7 +1366,8 @@ export class Viewmodel {
     if (this.rig) {
       this.rig.solve('R', wr.distanceTo(this.shoulderR) > 0.56 ? this.shoulderR.clone().lerp(wr, (wr.distanceTo(this.shoulderR) - 0.56) / wr.distanceTo(this.shoulderR)) : this.shoulderR, wr, wq, poleR);
       // fingers wrap the actual grip; the trigger finger keeps its authored place
-      const wrapR = this.freeR.b > 0.5 ? poseR : { ...this.cachedWrap('R', sockR, poseR, ['index']), index: poseR.index };
+      const heldR = this.freeR.b > 0.5 && this.grenade.visible && this.grenade.userData.twoHand ? this.heldSDF() : null;
+      const wrapR = this.freeR.b > 0.5 ? (heldR ? this.rig.wrapPose('R', heldR, this.freeRPose) : poseR) : { ...this.cachedWrap('R', sockR, poseR, ['index']), index: poseR.index };
       this.rig.pose('R', wrapR, rightFree > 0 ? POSES.pinch : undefined, rightFree);
     } else {
       this.right.solve(this.shoulderR, wr, wq, poleR);
@@ -1307,7 +1405,7 @@ export class Viewmodel {
       }
     }
     // grenade sits in the left palm
-    if (this.grenade.visible) {
+    if (this.grenade.visible && !this.grenade.userData.twoHand) {
       const hold = Viewmodel.HOLD[this.grenade.userData.kind ?? 'frag'] ?? Viewmodel.HOLD.frag;
       const palm = this.rig ? this.rig.palmOffset('L', new THREE.Vector3()) : new THREE.Vector3(0.003, -0.007, -0.072);
       palm.y -= (this.rig ? this.rig.palmDepth('L') : 0.014) + hold.off;
@@ -1609,6 +1707,230 @@ export class Viewmodel {
         this.grenade.visible = t > 0.05 && t < 0.92;
         break;
       }
+      case 'claymore': {
+        // Two hands: the gun drops away, the mine comes up off the vest and is held out at chest
+        // height (thumbs flick the scissor legs out, the tripwire module wakes up). It holds there
+        // while [G] is held; on release you crouch into it, set it down on its legs, press it into
+        // the ground and the hands come back to the gun.
+        const it = this.grenade;
+        const away = kf(t, [[0, 0], [0.14, 1], [0.78, 1], [0.97, 0]]);
+        pos.y -= 0.36 * away;
+        pos.x += 0.1 * away;
+        pos.z += 0.05 * away;
+        rot.x -= 0.95 * away;
+        rot.z -= 0.5 * away;
+        rot.y += 0.25 * away;
+        const hb = kf(t, [[0, 0], [0.15, 1], [0.7, 1], [0.86, 0]]);
+        this.freeL.b = hb;
+        this.freeR.b = hb;
+        const ip = kv(t, [[0, [0.02, -0.42, -0.26]], [0.16, [0, -0.108, -0.33]], [0.3, [0, -0.1, -0.335]], [0.36, [0, -0.103, -0.34]], [0.46, [0, -0.18, -0.41]], [0.57, [0, -0.36, -0.5]], [0.64, [0, -0.38, -0.5]], [1, [0, -0.38, -0.5]]]);
+        // breathing while it is held out, and the little settle as the legs snap open
+        const holding = win(t, 0.3, 0.34) * (1 - win(t, 0.36, 0.4));
+        ip.y += Math.sin(this.t * 2.1) * 0.0035 * holding;
+        ip.x += Math.sin(this.t * 1.3) * 0.002 * holding;
+        const snap = win(t, 0.27, 0.29) * (1 - win(t, 0.29, 0.34));
+        ip.y -= 0.006 * snap;
+        it.position.copy(ip);
+        const rx = kf(t, [[0, 0.55], [0.16, 0.14], [0.36, 0.1], [0.5, -0.06], [0.6, 0], [1, 0]]);
+        const ry = kf(t, [[0, -0.45], [0.16, 0.05], [0.3, 0], [1, 0]]);
+        const rz = kf(t, [[0, 0.4], [0.16, -0.04], [0.3, 0], [1, 0]]);
+        it.quaternion.setFromEuler(new THREE.Euler(rx, ry, rz, 'YXZ'));
+        (it.userData.setLegs as (k: number) => void)(kf(t, [[0, 0], [0.18, 0], [0.29, 1], [1, 1]]));
+        it.visible = t > 0.02 && t < 0.7;
+        setLed(it.getObjectByName('led'), t > 0.33 ? (Math.sin(this.t * 12) > 0 ? 1 : 0.15) : 0);
+        // palms on the ends, fingers over the front face, thumbs on top; the thumbs squeeze in to
+        // kick the legs out, both hands press down on the plant, then open and lift off
+        const press = win(t, 0.55, 0.59) * (1 - win(t, 0.61, 0.66));
+        const squeeze = win(t, 0.19, 0.23) * (1 - win(t, 0.27, 0.3));
+        const rel = win(t, 0.63, 0.72);
+        const pose = rel > 0.3 ? POSES.open : POSES.hold;
+        this.gripItem('L', it, 'gripL', new THREE.Vector3(0.12, -0.3, -1), new THREE.Vector3(1, 0, 0), 0, pose, new THREE.Vector3(-0.01 * rel + 0.004 * squeeze, 0.012 * press, 0));
+        this.gripItem('R', it, 'gripR', new THREE.Vector3(-0.12, -0.3, -1), new THREE.Vector3(-1, 0, 0), 0, pose, new THREE.Vector3(0.01 * rel - 0.004 * squeeze, 0.012 * press, 0));
+        this.freeL.p.y += 0.05 * rel;
+        this.freeR.p.y += 0.05 * rel;
+        this.freeL.p.z += 0.03 * rel;
+        this.freeR.p.z += 0.03 * rel;
+        break;
+      }
+      case 'c4Throw': {
+        // One hand: the brick comes up off the chest rig face-up, the thumb presses the receiver
+        // (LED goes from blinking to solid), the hand drops back for an underhand swing and lets it
+        // go flat and spinning. The gun just tips out of the way.
+        const away = kf(t, [[0, 0], [0.12, 1], [0.78, 1], [1, 0]]);
+        pos.x += 0.03 * away;
+        pos.y -= 0.03 * away;
+        rot.z -= 0.12 * away;
+        rot.x -= 0.06 * away;
+        this.freeL.b = kf(t, [[0, 0], [0.13, 1], [0.84, 1], [1, 0]]);
+        kv(t, [
+          [0, [-0.14, -0.34, -0.24]], [0.2, [-0.11, -0.15, -0.3]], [0.36, [-0.105, -0.145, -0.305]],
+          [0.47, [-0.13, -0.27, -0.2]], [0.53, [-0.13, -0.3, -0.17]], [0.64, [-0.06, -0.09, -0.5]], [0.76, [-0.08, -0.2, -0.44]], [1, [-0.14, -0.34, -0.24]],
+        ], this.freeL.p);
+        const press = win(t, 0.28, 0.31) * (1 - win(t, 0.32, 0.36));
+        this.freeL.p.y -= 0.006 * press;
+        // palm up, fingers forward; it rolls to palm-forward through the underhand swing
+        const fd = kv(t, [[0, [0.3, -0.3, -1]], [0.2, [0.25, 0.15, -1]], [0.36, [0.25, 0.15, -1]], [0.53, [0.3, -0.7, -0.6]], [0.64, [0.1, 0.45, -1]], [1, [0.3, -0.3, -1]]]);
+        const nr = kv(t, [[0, [0.5, 0.8, 0]], [0.2, [0.15, 1, 0.1]], [0.36, [0.15, 1, 0.1]], [0.53, [0.3, 0.4, -0.8]], [0.64, [0.1, 0.5, -1]], [1, [0.5, 0.8, 0]]]);
+        this.freeL.q.copy(handQ(fd, nr));
+        this.freeL.pose = t > 0.62 ? POSES.open : POSES.hold;
+        this.grenade.visible = t > 0.05 && t < 0.64;
+        setLed(this.grenade.getObjectByName('led'), t < 0.3 ? (Math.sin(this.t * 18) > 0.4 ? 1 : 0) : 1);
+        break;
+      }
+      case 'detonate': {
+        // Remote up in the left fist, thumb flips the safety cover, clacks the button twice
+        // (the second one is the shot), then the hand drops away.
+        const away = kf(t, [[0, 0], [0.15, 1], [0.75, 1], [1, 0]]);
+        pos.x += 0.012 * away;
+        pos.y -= 0.012 * away;
+        rot.z -= 0.05 * away;
+        this.freeL.b = kf(t, [[0, 0], [0.16, 1], [0.8, 1], [1, 0]]);
+        kv(t, [[0, [-0.16, -0.36, -0.22]], [0.2, [-0.12, -0.125, -0.29]], [0.5, [-0.118, -0.122, -0.29]], [0.62, [-0.12, -0.13, -0.29]], [1, [-0.16, -0.36, -0.22]]], this.freeL.p);
+        const clack = win(t, 0.4, 0.43) * (1 - win(t, 0.44, 0.5));
+        this.freeL.p.y -= 0.007 * clack;
+        this.freeL.p.z += 0.004 * clack;
+        this.freeL.q.copy(handQ(new THREE.Vector3(0.35, 0.2, -1), new THREE.Vector3(1, 0.1, 0.35)));
+        this.freeL.pose = POSES.grip;
+        const it = this.grenade;
+        it.visible = t > 0.05 && t < 0.9;
+        const cover = it.getObjectByName('cover');
+        if (cover) cover.rotation.x = 1.9 * easeOutBack(win(t, 0.24, 0.32));
+        const btn = it.getObjectByName('button');
+        if (btn) btn.position.y = 0.0485 - 0.003 * clack;
+        setLed(it.getObjectByName('led'), t > 0.42 ? 1 : 0.4);
+        if (t > 0.24 && t < 0.28) this.freeL.p.x += 0.004; // thumb flick
+        break;
+      }
+      case 'stickyThrow': {
+        // Thumb arms it (button sinks, LED starts racing), a quick look at the gel side, then a
+        // high over-the-shoulder wind-up (holds here while [G] is held to aim) and a snappy
+        // overhand throw with a wrist flick.
+        const away = kf(t, [[0, 0], [0.12, 1], [0.8, 1], [1, 0]]);
+        pos.x += 0.07 * away;
+        pos.y -= 0.12 * away;
+        pos.z += 0.03 * away;
+        rot.x -= 0.42 * away;
+        rot.z -= 0.3 * away;
+        this.freeL.b = kf(t, [[0, 0], [0.14, 1], [0.84, 1], [1, 0]]);
+        kv(t, [
+          [0, [-0.08, -0.3, -0.3]], [0.18, [-0.1, -0.13, -0.32]], [0.28, [-0.1, -0.125, -0.32]], [0.38, [-0.13, -0.14, -0.3]],
+          [0.5, [-0.2, 0.05, -0.12]], [0.55, [-0.21, 0.07, -0.1]], [0.66, [-0.02, 0.0, -0.62]], [0.8, [-0.06, -0.24, -0.42]], [1, [-0.08, -0.3, -0.3]],
+        ], this.freeL.p);
+        const fdir = kv(t, [[0, [0.3, 0.2, -1]], [0.28, [0.2, 0.4, -1]], [0.38, [0.6, 0.2, -0.8]], [0.55, [0.3, 0.9, -0.2]], [0.66, [0.1, -0.2, -1]], [1, [0.2, -0.3, -1]]]);
+        const nrm = kv(t, [[0, [0.7, 0.6, 0]], [0.28, [0.6, 0.7, 0.2]], [0.38, [0.3, 0.9, 0.3]], [0.55, [0.7, 0, 0.7]], [0.66, [0.1, 0.5, -1]], [1, [0.6, 0.6, 0]]]);
+        this.freeL.q.copy(handQ(fdir, nrm));
+        this.freeL.pose = POSES.hold;
+        const press = win(t, 0.22, 0.25) * (1 - win(t, 0.26, 0.3));
+        this.freeL.p.y -= 0.005 * press;
+        const it = this.grenade;
+        it.visible = t > 0.06 && t < 0.66;
+        const btn = it.getObjectByName('btn');
+        if (btn) btn.position.y = 0.046 - 0.003 * press;
+        setLed(it.getObjectByName('led'), t > 0.24 ? (Math.sin(this.t * 30) > 0 ? 1 : 0.1) : 0);
+        break;
+      }
+      case 'snapshotThrow': {
+        // Puck flat in the palm: a firm wrist roll twists the cap a quarter turn (detent clicks,
+        // the sensor band lights up and pulses), then a low underhand bowl along the ground.
+        const away = kf(t, [[0, 0], [0.12, 1], [0.8, 1], [1, 0]]);
+        pos.x += 0.04 * away;
+        pos.y -= 0.06 * away;
+        rot.z -= 0.18 * away;
+        rot.x -= 0.15 * away;
+        this.freeL.b = kf(t, [[0, 0], [0.13, 1], [0.84, 1], [1, 0]]);
+        kv(t, [
+          [0, [-0.12, -0.34, -0.26]], [0.18, [-0.1, -0.15, -0.31]], [0.42, [-0.1, -0.15, -0.31]],
+          [0.52, [-0.14, -0.3, -0.16]], [0.57, [-0.13, -0.33, -0.14]], [0.67, [-0.05, -0.18, -0.55]], [0.8, [-0.08, -0.24, -0.42]], [1, [-0.12, -0.34, -0.26]],
+        ], this.freeL.p);
+        // the twist: the hand rolls ~60° outward and back while the cap turns 90°
+        const tw = win(t, 0.22, 0.36);
+        const roll = Math.sin(tw * Math.PI) * 1.0;
+        const fd = kv(t, [[0, [0.3, -0.2, -1]], [0.18, [0.2, 0.1, -1]], [0.42, [0.2, 0.1, -1]], [0.57, [0.2, -0.8, -0.4]], [0.67, [0.05, 0.3, -1]], [1, [0.3, -0.2, -1]]]);
+        const nr = kv(t, [[0, [0.4, 0.9, 0]], [0.18, [0.1, 1, 0.1]], [0.42, [0.1, 1, 0.1]], [0.57, [0.2, 0.3, -1]], [0.67, [0.0, 0.4, -1]], [1, [0.4, 0.9, 0]]]);
+        nr.applyAxisAngle(fd.clone().normalize(), roll);
+        this.freeL.q.copy(handQ(fd, nr));
+        this.freeL.pose = t > 0.66 ? POSES.open : POSES.hold;
+        const it = this.grenade;
+        it.visible = t > 0.06 && t < 0.67;
+        const cap = it.getObjectByName('cap');
+        if (cap) cap.rotation.y = -Math.PI / 2 * easeInOutCubic(tw);
+        const ring = it.getObjectByName('ring') as THREE.Mesh | undefined;
+        if (ring) (ring.material as THREE.MeshBasicMaterial).color.setRGB(0.15, 0.45, 0.9).multiplyScalar(t > 0.34 ? 1.5 + 2.5 * (0.5 + 0.5 * Math.sin(this.t * 14)) : 0.4);
+        break;
+      }
+      case 'decoyThrow': {
+        // Thumb taps the program button three times (LED blinks each time), a glance, then a flat
+        // side-arm flick across the body.
+        const away = kf(t, [[0, 0], [0.12, 1], [0.8, 1], [1, 0]]);
+        pos.x += 0.05 * away;
+        pos.y -= 0.07 * away;
+        rot.z -= 0.22 * away;
+        rot.x -= 0.12 * away;
+        this.freeL.b = kf(t, [[0, 0], [0.13, 1], [0.84, 1], [1, 0]]);
+        kv(t, [
+          [0, [-0.1, -0.32, -0.28]], [0.18, [-0.1, -0.13, -0.31]], [0.42, [-0.1, -0.13, -0.31]],
+          [0.5, [-0.24, -0.1, -0.22]], [0.54, [-0.25, -0.1, -0.21]], [0.62, [0.02, -0.08, -0.5]], [0.78, [-0.06, -0.22, -0.42]], [1, [-0.1, -0.32, -0.28]],
+        ], this.freeL.p);
+        let tap = 0;
+        for (const tt of [0.22, 0.29, 0.36]) tap = Math.max(tap, win(t, tt, tt + 0.02) * (1 - win(t, tt + 0.025, tt + 0.05)));
+        this.freeL.p.y -= 0.004 * tap;
+        const fd = kv(t, [[0, [0.3, 0.2, -1]], [0.18, [0.25, 0.35, -1]], [0.42, [0.25, 0.35, -1]], [0.54, [-0.5, 0.3, -0.8]], [0.62, [1, 0.1, -0.6]], [1, [0.2, -0.3, -1]]]);
+        const nr = kv(t, [[0, [0.7, 0.6, 0]], [0.18, [0.8, 0.5, 0.2]], [0.42, [0.8, 0.5, 0.2]], [0.54, [0.6, 0.2, 0.7]], [0.62, [0.2, 0.3, -1]], [1, [0.6, 0.6, 0]]]);
+        this.freeL.q.copy(handQ(fd, nr));
+        this.freeL.pose = t > 0.6 ? POSES.open : POSES.hold;
+        const it = this.grenade;
+        it.visible = t > 0.06 && t < 0.6;
+        const btn = it.getObjectByName('btn');
+        if (btn) btn.position.y = 0.064 - 0.0025 * tap;
+        setLed(it.getObjectByName('led'), tap > 0.2 ? 1 : t > 0.4 ? 0.6 : 0);
+        break;
+      }
+      case 'trophy': {
+        // Heavy two-handed deploy: the gun swings down out of the way, both hands haul the trophy
+        // up by its side handles (the weight drags it down on arrival), legs snap out, then both
+        // arms shove it forward and down onto the ground in front; arms recover, gun comes back.
+        const it = this.grenade;
+        const away = kf(t, [[0, 0], [0.13, 1], [0.76, 1], [0.97, 0]]);
+        pos.y -= 0.4 * away;
+        pos.x += 0.12 * away;
+        pos.z += 0.06 * away;
+        rot.x -= 1.05 * away;
+        rot.z -= 0.55 * away;
+        rot.y += 0.3 * away;
+        const hb = kf(t, [[0, 0], [0.13, 1], [0.66, 1], [0.84, 0]]);
+        this.freeL.b = hb;
+        this.freeR.b = hb;
+        const ip = kv(t, [
+          [0, [0, -0.55, -0.3]], [0.2, [0, -0.2, -0.42]], [0.25, [0, -0.222, -0.425]], [0.3, [0, -0.207, -0.425]], [0.42, [0, -0.21, -0.43]],
+          [0.5, [0, -0.25, -0.36]], [0.6, [0, -0.32, -0.78]], [0.68, [0, -0.5, -0.95]], [1, [0, -0.5, -0.95]],
+        ]);
+        // weight: a dip as it arrives, a slow heave while held
+        ip.y += Math.sin(this.t * 1.8) * 0.002 * win(t, 0.3, 0.34) * (1 - win(t, 0.42, 0.46));
+        it.position.copy(ip);
+        const rx = kf(t, [[0, 0.3], [0.2, -0.42], [0.3, -0.45], [0.42, -0.45], [0.5, -0.2], [0.6, -0.6], [1, -0.6]]);
+        const ry = kf(t, [[0, 0.5], [0.2, -0.04], [0.3, 0], [1, 0]]);
+        const rz = kf(t, [[0, -0.3], [0.2, 0.03], [0.3, 0], [1, 0]]);
+        it.quaternion.setFromEuler(new THREE.Euler(rx, ry, rz, 'YXZ'));
+        (it.userData.setLegs as (k: number) => void)(easeOutBack(win(t, 0.32, 0.42)));
+        const head = it.getObjectByName('head');
+        if (head) head.rotation.y = t > 0.4 ? (t - 0.4) * 9 : 0;
+        setLed(it.getObjectByName('lamp'), t > 0.42 ? (Math.sin(this.t * 10) > 0 ? 1 : 0.2) : 0);
+        it.visible = t > 0.02 && t < 0.64;
+        // palms on the side handles, fingers hooked under and forward; on the shove the palms
+        // flatten behind it, then open and pull back
+        const shove = win(t, 0.5, 0.6);
+        const rel = win(t, 0.6, 0.7);
+        const pose = rel > 0.3 ? POSES.open : POSES.hold;
+        const fL = new THREE.Vector3(0.1, -0.6, -1).lerp(new THREE.Vector3(0.2, 0.5, -1), shove);
+        const fR = new THREE.Vector3(-0.1, -0.6, -1).lerp(new THREE.Vector3(-0.2, 0.5, -1), shove);
+        this.gripItem('L', it, 'gripL', fL, new THREE.Vector3(1, 0.1 * shove, 0.3 * shove), 0.004, pose);
+        this.gripItem('R', it, 'gripR', fR, new THREE.Vector3(-1, 0.1 * shove, 0.3 * shove), 0.004, pose);
+        this.freeL.p.z += 0.08 * rel;
+        this.freeR.p.z += 0.08 * rel;
+        this.freeL.p.y += 0.12 * rel;
+        this.freeR.p.y += 0.12 * rel;
+        break;
+      }
       case 'pump': {
         const back = kf(t, [[0, 0], [0.42, 1], [0.55, 1], [1, 0]]);
         if (parts.pump) parts.pump.position.z = this.pumpHome.z + 0.085 * back;
@@ -1641,7 +1963,11 @@ export class Viewmodel {
       case 'reload':
       case 'reloadEmpty': {
         if (t < 0.02) this.reloadFired.clear();
-        if (this.clip) this.animateClip(t, pos, rot, h);
+        if (def.id === 'lmg') {
+          lmgReload(t, a.type === 'reloadEmpty', pos, rot, parts, h, this.magHome, this.chargeHome, (an, q, r) => this.wristFor(an, q, r),
+            (n) => (n.startsWith('cam') ? this.clipEvent(n) : this.onEvent(n)), this.reloadFired, (u, r, b) => this.jolt(u, r, b));
+          this.camRoll = rot.z * 0.03;
+        } else if (this.clip) this.animateClip(t, pos, rot, h);
         else this.animateReload(a, t, pos, rot, h);
         break;
       }
