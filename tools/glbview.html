@@ -1,0 +1,26 @@
+<!doctype html><html><body style="margin:0;background:#333">
+<canvas id="c" width="960" height="540"></canvas>
+<script type="module">
+import * as THREE from 'three';
+import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
+const r = new THREE.WebGLRenderer({ canvas: document.getElementById('c'), antialias: true, preserveDrawingBuffer: true });
+r.outputColorSpace = THREE.SRGBColorSpace;
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0x6a7480);
+scene.add(new THREE.HemisphereLight(0xffffff, 0x445566, 2.2));
+const sun = new THREE.DirectionalLight(0xffffff, 2.5); sun.position.set(1, 2, 1); scene.add(sun);
+window.load = async (url) => {
+  const gltf = await new GLTFLoader().loadAsync(url);
+  scene.add(gltf.scene);
+  const cam = gltf.cameras[0] ?? new THREE.PerspectiveCamera(40, 16 / 9, 0.01, 10);
+  if (!gltf.cameras[0]) { cam.position.set(0, 0, 0.35); }
+  cam.aspect = 16 / 9; cam.updateProjectionMatrix();
+  const mixer = new THREE.AnimationMixer(gltf.scene);
+  const clip = gltf.animations[0];
+  if (clip) mixer.clipAction(clip).play();
+  window.at = (t) => { if (clip) mixer.setTime(t); gltf.scene.updateMatrixWorld(true); r.render(scene, cam); return document.getElementById('c').toDataURL('image/jpeg', 0.85); };
+  let skinned = 0, meshes = 0; gltf.scene.traverse((o) => { if (o.isSkinnedMesh) skinned++; if (o.isMesh) meshes++; });
+  return { clips: gltf.animations.map((a) => a.name + ':' + a.duration.toFixed(2) + 's/' + a.tracks.length), cameras: gltf.cameras.length, meshes, skinned };
+};
+window.ready = true;
+</script></body></html>

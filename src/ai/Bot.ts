@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import { NETF } from '../net/NetFlags';
-import { bakeFlat } from '../render/Batch';
+import { bakeFlat, bakeProxy } from '../render/Batch';
 import { clone as cloneSkinned } from 'three/examples/jsm/utils/SkeletonUtils.js';
 import { CharacterBody } from '../player/CharacterBody';
 import { Physics } from '../core/Physics';
@@ -146,6 +146,9 @@ export class Bot implements Combatant {
   private hitbox = { head: new THREE.Vector3(), neck: new THREE.Vector3(), hips: new THREE.Vector3(), lf: new THREE.Vector3(), rf: new THREE.Vector3(), lh: new THREE.Vector3(), rh: new THREE.Vector3(), ls: new THREE.Vector3(), rs: new THREE.Vector3() };
   armband: THREE.Mesh[] = [];
   gunMesh: THREE.Mesh | null = null;
+  /** low-poly stand-in drawn beyond ~12 m */
+  gunProxy: THREE.Mesh | null = null;
+  private gunNear = true;
   visibleToPlayer = false;
 
   constructor(public id: number, public name: string, public team: 0 | 1, asset: BotAsset, weaponModel: WeaponModel, defId: keyof typeof WEAPONS, private w: BotWorld, teamMat: THREE.Material) {
@@ -187,7 +190,16 @@ export class Bot implements Combatant {
     });
     // third-person guns never animate their parts: bake ~25 meshes (5-7 materials, lens shaders)
     // into ONE vertex-coloured mesh — one draw + one shadow draw per bot gun
-    this.gunMesh = bakeFlat(this.weapon.root, 'botgun');
+    // distance stand-in (~200 triangles instead of 20-40k) built from the same parts
+    const proxyGeo = bakeProxy(this.weapon.root, 'botgun:' + defId);
+    this.gunMesh = bakeFlat(this.weapon.root, 'botgun', 'botgun:' + defId);
+    if (this.gunMesh) {
+      this.gunProxy = new THREE.Mesh(proxyGeo, this.gunMesh.material);
+      this.gunProxy.name = 'gunProxy';
+      this.gunProxy.visible = false;
+      this.gunProxy.castShadow = false;
+      this.weapon.root.add(this.gunProxy);
+    }
     // team armbands on both upper arms
     const bandGeo = new THREE.CylinderGeometry(6.2, 6.2, 5, 10, 1, true);
     const bandMat = new THREE.MeshStandardMaterial({ color: team === 0 ? 0x2a6ad8 : 0xc8281c, emissive: team === 0 ? 0x0a1a40 : 0x400806, roughness: 0.6, side: THREE.DoubleSide });
@@ -216,6 +228,12 @@ export class Bot implements Combatant {
   private visLod = -1;
   /** Render LOD by camera distance: shadows only near, armbands only where they can be read. */
   visualLod(d: number) {
+    const near = d < (this.gunNear ? 13 : 11);
+    if (near !== this.gunNear && this.gunMesh && this.gunProxy) {
+      this.gunNear = near;
+      this.gunMesh.visible = near;
+      this.gunProxy.visible = !near;
+    }
     const lv = d < 32 ? 0 : d < 60 ? 1 : 2;
     if (lv === this.visLod) return;
     this.visLod = lv;
@@ -373,7 +391,12 @@ export class Bot implements Combatant {
     get('LeftArm', this.hitbox.ls);
     get('RightArm', this.hitbox.rs);
     this.hitbox.head.y += 0.07;
+    this.hbAt.copy(this.root.position);
   }
+  /** where the root was when the hitbox was taken (animation LOD updates it at 15-30 Hz for far
+   *  soldiers; hit tests shift it by how far the body has moved since, so it never lags) */
+  private hbAt = new THREE.Vector3();
+  private hbO = new THREE.Vector3();
 
   hitTest(o: THREE.Vector3, d: THREE.Vector3, max: number): { dist: number; part: HitPart; point: THREE.Vector3 } | null {
     if (!this.alive) return null;
@@ -384,6 +407,8 @@ export class Bot implements Combatant {
     if (t < 0 || t > max + 2) return null;
     if (toC.clone().addScaledVector(d, -t).lengthSq() > 2.5) return null;
     const h = this.hitbox;
+    // ray origin in the hitbox's frame (the body may have moved since it was taken)
+    o = this.hbO.copy(o).sub(this.root.position).add(this.hbAt);
     let best: { dist: number; part: HitPart } | null = null;
     const test = (dist: number | null, part: HitPart) => {
       if (dist !== null && dist <= max && (!best || dist < best.dist)) best = { dist, part };
@@ -396,7 +421,7 @@ export class Bot implements Combatant {
     test(rayCapsule(o, d, h.rs, h.rh, 0.08), 'limb');
     if (!best) return null;
     const bb = best as { dist: number; part: HitPart };
-    return { dist: bb.dist, part: bb.part, point: o.clone().addScaledVector(d, bb.dist) };
+    return { dist: bb.dist, part: bb.part, point: o.clone().addScaledVector(d, bb.dist).add(this.root.position).sub(this.hbAt) };
   }
 
   // ---------------------------------------------------------------- AI

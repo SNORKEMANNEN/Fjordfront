@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { Settings } from '../game/Settings';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import { MaterialLib } from '../render/Materials';
 import { Physics } from '../core/Physics';
@@ -517,8 +518,13 @@ export class Vegetation {
 
     // ---------------- grass field near the camera ----------------
     const blades: THREE.BufferGeometry[] = [];
-    for (let i = 0; i < 16; i++) {
-      const g = new THREE.PlaneGeometry(0.05, 0.24, 1, 3);
+    // (blade count and grass range scale with the quality preset; two segments per blade is
+    // enough for the bend at this size)
+    const q = Settings.data.quality;
+    const nBlades = q === 'low' ? 10 : q === 'medium' ? 12 : 16;
+    this.grassRadius = q === 'low' ? 18 : q === 'medium' ? 23 : q === 'ultra' ? 32 : 28;
+    for (let i = 0; i < nBlades; i++) {
+      const g = new THREE.PlaneGeometry(0.05, 0.24, 1, 2);
       g.translate(0, 0.12, 0);
       const pos = g.getAttribute('position') as THREE.BufferAttribute;
       const lean = this.rng.range(0.1, 0.35);
@@ -583,6 +589,15 @@ export class Vegetation {
         this.grassPool.push(m);
         this.grassTiles.delete(k);
       }
+    }
+    // distance thinning: the far tiles draw a random subset of their clumps (instances are
+    // shuffled at build time, so a shorter count thins evenly); the shrink-fade hides the rest
+    for (const [k, m] of this.grassTiles) {
+      const [tx, tz] = k.split(',').map(Number);
+      const d = Math.hypot((tx + 0.5) * T - cam.x, (tz + 0.5) * T - cam.z);
+      const f = d < 13 ? 1 : d < R * 0.65 ? 0.55 : 0.3;
+      const full = m.userData.full as number;
+      m.count = Math.max(1, Math.round(full * f));
     }
     // build the nearest missing tiles (a small, steady amount of work per frame)
     const want: [number, number, number][] = [];
@@ -651,6 +666,16 @@ export class Vegetation {
         n++;
       }
     }
+    // shuffle so that drawing the first N instances is an even, random thinning
+    const ma = mesh.instanceMatrix.array as Float32Array, ca = mesh.instanceColor?.array as Float32Array | undefined;
+    let seed = (tx * 73856093) ^ (tz * 19349663);
+    for (let i = n - 1; i > 0; i--) {
+      seed = (seed * 1103515245 + 12345) & 0x7fffffff;
+      const j = seed % (i + 1);
+      for (let e = 0; e < 16; e++) { const t = ma[i * 16 + e]; ma[i * 16 + e] = ma[j * 16 + e]; ma[j * 16 + e] = t; }
+      if (ca) for (let e = 0; e < 3; e++) { const t = ca[i * 3 + e]; ca[i * 3 + e] = ca[j * 3 + e]; ca[j * 3 + e] = t; }
+    }
+    mesh.userData.full = n;
     mesh.count = n;
     mesh.instanceMatrix.needsUpdate = true;
     if (mesh.instanceColor) mesh.instanceColor.needsUpdate = true;

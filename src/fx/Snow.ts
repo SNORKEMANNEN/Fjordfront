@@ -137,6 +137,11 @@ export class Snowfall {
   private mat: THREE.ShaderMaterial;
   private offset = new THREE.Vector3();
   intensity = 0;
+  private n = 0;
+  /** draw only a fraction of the flakes (quality preset) */
+  setBudget(f: number) {
+    this.points.geometry.setDrawRange(0, Math.round(this.n * f));
+  }
 
   constructor(scene: THREE.Scene) {
     const N = 7000;
@@ -175,6 +180,7 @@ export class Snowfall {
       depthWrite: false,
     });
     this.points = new THREE.Points(g, this.mat);
+    this.n = N;
     this.points.frustumCulled = false;
     this.points.renderOrder = 30;
     this.points.visible = false;

@@ -332,6 +332,7 @@ export class UI {
       </div>
       <div class="tab hidden" data-t="v">
         ${select('quality', 'Quality preset', [['low', 'Low'], ['medium', 'Medium'], ['high', 'High'], ['ultra', 'Ultra']])}
+        <div class="opt"><span></span><small style="color:var(--dim);grid-column:span 2">Lights, grass, terrain detail and weather particles follow the preset after reloading the page.</small></div>
         ${slider('renderScale', 'Render scale', 0.5, 1, 0.05)}
         ${toggle('dynamicRes', 'Dynamic resolution (hold 60 fps)')}
         ${toggle('hiDpi', 'Full HiDPI resolution (sharper, much slower on 4K / laptop screens)')}
@@ -346,7 +347,7 @@ export class UI {
         ${slider('grassDensity', 'Grass density (next match)', 0.2, 1.5, 0.1)}
         ${select('mapVariant', 'Map variant', [['random', 'Random per match'], ['autumn', 'Autumn'], ['winter', 'Winter (snow-covered)']])}
         ${select('weather', 'Weather', [['auto', 'Random'], ['clear', 'Broken clouds'], ['overcast', 'Overcast'], ['rain', 'Rain'], ['snow', 'Snow showers']])}
-        ${select('timeOfDay', 'Time of day', [['dynamic', 'Dynamic (time passes)'], ['dawn', 'Morning'], ['day', 'Midday'], ['golden', 'Golden hour'], ['night', 'Night — northern lights']])}
+        ${select('timeOfDay', 'Time of day', [['dynamic', 'Dynamic (time passes)'], ['dawn', 'Morning'], ['day', 'Midday'], ['golden', 'Golden hour'], ['blue', 'Blue hour'], ['night', 'Night — northern lights']])}
         ${toggle('godRays', 'Sun shafts (god rays)')}
         ${toggle('showFps', 'Show FPS')}
       </div>

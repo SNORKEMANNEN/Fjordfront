@@ -131,7 +131,7 @@ export class NightVision {
       this.vis = this.power = this.flash = 0;
     }
     // ---- automatic gain: lots at night, compressed in daylight ----
-    const want = THREE.MathUtils.lerp(60, 2.4, Math.pow(THREE.MathUtils.clamp(env.day, 0, 1), 0.6));
+    const want = THREE.MathUtils.lerp(72, 2.6, Math.pow(THREE.MathUtils.clamp(env.day, 0, 1), 0.6));
     this.gain += (want - this.gain) * (1 - Math.exp(-dt * 2.5));
     // ---- IR illuminator on the goggles ----
     const on = this.active ? Math.min(1, this.power) : 0;
@@ -139,7 +139,7 @@ export class NightVision {
     const fwd = new THREE.Vector3(0, 0, -1).applyQuaternion(camera.quaternion);
     // (done in the grade shader: lights the near scene in a cone around the view centre, by depth;
     // no real light in the scene, so it costs nothing to every other shader)
-    this.illum = 1.0 * on * (1 - env.day * 0.85);
+    this.illum = 1.35 * on * (1 - env.day * 0.85);
     void cam;
     void fwd;
     // ---- people glow ----

@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { Settings } from '../game/Settings';
 import { MaterialLib } from '../render/Materials';
 import { Physics } from '../core/Physics';
 import { terrainHeight, forestDensity, nearestRoad, PLAY_HALF, TERRAIN_EXTENT, getPads, TUNNEL, TUNNEL_EXIT, tunnelCapHeight, tunnelShafts } from './MapLayout';
@@ -21,6 +22,9 @@ function axisCoords(): number[] {
   const neg = pos.slice(1).map((v) => -v).reverse();
   return neg.concat(pos);
 }
+
+/** terrain tile LOD distances (full res, half res; quarter beyond) per quality preset */
+const LOD_DIST: Record<string, [number, number]> = { low: [30, 130], medium: [45, 190], high: [60, 240], ultra: [80, 300] };
 
 export class Terrain {
   mesh: THREE.Group;
@@ -181,7 +185,8 @@ export class Terrain {
       const dx = Math.max(t.box.min.x - cam.x, 0, cam.x - t.box.max.x);
       const dz = Math.max(t.box.min.z - cam.z, 0, cam.z - t.box.max.z);
       const d = Math.hypot(dx, dz);
-      const want = Math.min(t.levels.length - 1, d < 70 ? 0 : d < 260 ? 1 : 2);
+      const [l0, l1] = LOD_DIST[Settings.data.quality] ?? LOD_DIST.high;
+      const want = Math.min(t.levels.length - 1, d < l0 ? 0 : d < l1 ? 1 : 2);
       if (want === t.lv) continue;
       t.levels[t.lv].visible = false;
       t.levels[want].visible = true;
@@ -348,7 +353,7 @@ export class Terrain {
       shader.vertexShader = shader.vertexShader
         .replace('#include <common>', '#include <common>\nvarying vec3 vTW; varying vec3 vTN;')
         .replace('#include <worldpos_vertex>', '#include <worldpos_vertex>\nvTW = (modelMatrix * vec4(transformed,1.0)).xyz; vTN = normalize(mat3(modelMatrix) * objectNormal);');
-      shader.fragmentShader = shader.fragmentShader
+      shader.fragmentShader = (Settings.data.quality === 'low' ? '#define TERRAIN_LOW\n' : '') + shader.fragmentShader
         .replace(
           '#include <common>',
           `#include <common>
@@ -359,8 +364,11 @@ export class Terrain {
           float hash2(vec2 p){ return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
           float vnoise(vec2 p){ vec2 i = floor(p), f = fract(p); f = f*f*(3.0-2.0*f);
             return mix(mix(hash2(i), hash2(i+vec2(1,0)), f.x), mix(hash2(i+vec2(0,1)), hash2(i+vec2(1,1)), f.x), f.y); }
-          // Stochastic-ish anti tiling: blend two rotated/offset samples
+          // Stochastic-ish anti tiling: blend two rotated/offset samples (one sample on Low)
           vec4 sampleAT(sampler2D t, vec2 uv){
+          #ifdef TERRAIN_LOW
+            return texture2D(t, uv);
+          #endif
             float k = vnoise(uv * 0.11);
             vec2 uv2 = mat2(0.8, -0.6, 0.6, 0.8) * uv + vec2(0.37, 0.71);
             return mix(texture2D(t, uv), texture2D(t, uv2), smoothstep(0.3, 0.7, k));
@@ -377,21 +385,36 @@ export class Terrain {
             float tile = mix(4.0, 28.0, far);
             vec2 uv = wp.xz / tile;
             float macro = vnoise(wp.xz * 0.02) * 0.6 + vnoise(wp.xz * 0.07) * 0.4;
-            vec4 gA = sampleAT(tGrassA, uv); vec4 gN = sampleAT(tGrassN, uv);
-            vec4 fA = sampleAT(tForestA, uv * 1.3); vec4 fN = sampleAT(tForestN, uv * 1.3);
-            vec4 vA = sampleAT(tGravelA, uv * 1.3); vec4 vN = sampleAT(tGravelN, uv * 1.3);
-            // triplanar rock
-            vec3 bw = pow(abs(N), vec3(4.0)); bw /= (bw.x + bw.y + bw.z);
-            float rt = mix(6.0, 40.0, far);
-            vec4 rAx = texture2D(tRockA, wp.zy / rt), rAy = texture2D(tRockA, wp.xz / rt), rAz = texture2D(tRockA, wp.xy / rt);
-            vec4 rNx = texture2D(tRockN, wp.zy / rt), rNy = texture2D(tRockN, wp.xz / rt), rNz = texture2D(tRockN, wp.xy / rt);
-            vec4 rA = rAx * bw.x + rAy * bw.y + rAz * bw.z;
-            float rH = rNx.a * bw.x + rNy.a * bw.y + rNz.a * bw.z;
+            vec4 gA = sampleAT(tGrassA, uv);
+            vec4 fA = sampleAT(tForestA, uv * 1.3);
+            vec4 vA = sampleAT(tGravelA, uv * 1.3);
+          #ifdef TERRAIN_LOW
+            vec4 gN = vec4(0.5, 0.5, 1.0, 0.5), fN = gN, vN = gN;
+          #else
+            vec4 gN = sampleAT(tGrassN, uv);
+            vec4 fN = sampleAT(tForestN, uv * 1.3);
+            vec4 vN = sampleAT(tGravelN, uv * 1.3);
+          #endif
             // weights
             float slope = 1.0 - N.y;
             float h = wp.y;
             float rockW = smoothstep(0.24, 0.42, slope + (macro - 0.5) * 0.12);
             rockW = max(rockW, smoothstep(140.0, 260.0, h + macro * 80.0));
+            // triplanar rock: only where there is rock (a coherent branch: most flat ground skips 6 reads)
+            vec3 bw = pow(abs(N), vec3(4.0)); bw /= (bw.x + bw.y + bw.z);
+            float rt = mix(6.0, 40.0, far);
+            vec4 rA = vec4(0.0); float rH = 0.0;
+            vec4 rNx = vec4(0.5, 0.5, 1.0, 0.0), rNy = rNx, rNz = rNx;
+            if (rockW > 0.001) {
+              vec4 rAx = texture2D(tRockA, wp.zy / rt), rAy = texture2D(tRockA, wp.xz / rt), rAz = texture2D(tRockA, wp.xy / rt);
+              rA = rAx * bw.x + rAy * bw.y + rAz * bw.z;
+            #ifndef TERRAIN_LOW
+              rNx = texture2D(tRockN, wp.zy / rt); rNy = texture2D(tRockN, wp.xz / rt); rNz = texture2D(tRockN, wp.xy / rt);
+              rH = rNx.a * bw.x + rNy.a * bw.y + rNz.a * bw.z;
+            #else
+              rH = 0.5;
+            #endif
+            }
             float shore = 1.0 - smoothstep(0.9, 2.0, h + (macro - 0.5) * 0.8);
             float gravelW = max(sp.g, shore);
             float forestW = max(sp.r, sp.b);

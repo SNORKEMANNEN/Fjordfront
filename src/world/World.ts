@@ -39,13 +39,12 @@ export class World {
     this.buildings = new Buildings(physics, this.mats, (x, z) => this.terrain.heightAt(x, z), this.group);
     this.infra = new Infrastructure(this.buildings.builder, this.buildings, this.terrain, this.group, this.mats);
     this.buildings.finish(this.group);
-    for (const l of this.infra.lights) {
-      const pl = new THREE.PointLight(l.color, l.intensity, l.dist, 1.6);
-      pl.position.copy(l.pos);
-      this.group.add(pl);
-      this.lights.push(pl);
-    }
-    this.pool = new LightPool(this.group, 4); // 4 forward lights: every lit pixel loops over them
+    // Forward lighting: every lit pixel loops over every point light in the scene, so the map's
+    // fixtures (interiors, street lamps, the tunnel) share a small pool of real lights that is
+    // handed to the fixtures nearest the camera. (Low quality: two; the count is fixed at load,
+    // changing it would recompile every shader.)
+    this.pool = new LightPool(this.group, Settings.data.quality === 'low' ? 2 : 4);
+    for (const l of this.infra.lights) this.pool.add(l.pos, l.color, l.intensity, l.dist, false);
     this.shootable = new ShootableLights(this.group, this.pool);
     for (const f of this.buildings.fixtures) {
       const a = this.pool.add(f.p, f.color, f.intensity, f.dist, false);

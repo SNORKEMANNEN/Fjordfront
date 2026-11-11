@@ -2,9 +2,7 @@ import * as THREE from 'three';
 import { EffectComposer } from 'three/examples/jsm/postprocessing/EffectComposer.js';
 import { RenderPass } from 'three/examples/jsm/postprocessing/RenderPass.js';
 import { Pass, FullScreenQuad } from 'three/examples/jsm/postprocessing/Pass.js';
-import { UnrealBloomPass } from 'three/examples/jsm/postprocessing/UnrealBloomPass.js';
 import { SMAAPass } from 'three/examples/jsm/postprocessing/SMAAPass.js';
-import { OutputPass } from 'three/examples/jsm/postprocessing/OutputPass.js';
 // @ts-ignore - n8ao ships without types
 import { N8AOPass } from 'n8ao';
 import { Settings } from '../game/Settings';
@@ -119,7 +117,101 @@ class WorldPostPass extends Pass {
   }
 }
 
-/** Filmic tonemapping + colour grade + lens effects. Outputs display-referred linear. */
+
+/**
+ * Cheap bloom: bright parts thresholded into a quarter-resolution target, blurred there and again
+ * at an eighth, and added by the grade pass (no separate composite). ~6 tiny passes instead of the
+ * ~12 (from half resolution) of UnrealBloomPass.
+ */
+class LiteBloomPass extends Pass {
+  strength = 0.35;
+  threshold = 2.2;
+  private rtA: THREE.WebGLRenderTarget[] = [];
+  private rtB: THREE.WebGLRenderTarget[] = [];
+  private pre: FullScreenQuad;
+  private blur: FullScreenQuad;
+  private preMat: THREE.ShaderMaterial;
+  private blurMat: THREE.ShaderMaterial;
+  constructor(private grade: { mat: THREE.ShaderMaterial }) {
+    super();
+    this.needsSwap = false;
+    const opts = { type: THREE.HalfFloatType, depthBuffer: false } as const;
+    for (let i = 0; i < 2; i++) {
+      this.rtA.push(new THREE.WebGLRenderTarget(1, 1, opts));
+      this.rtB.push(new THREE.WebGLRenderTarget(1, 1, opts));
+    }
+    const vs = `varying vec2 vUv; void main(){ vUv = uv; gl_Position = vec4(position.xy, 0.0, 1.0); }`;
+    this.preMat = new THREE.ShaderMaterial({
+      uniforms: { tSrc: { value: null }, uTexel: { value: new THREE.Vector2() }, uThr: { value: 2.2 } },
+      vertexShader: vs,
+      fragmentShader: /* glsl */ `uniform sampler2D tSrc; uniform vec2 uTexel; uniform float uThr; varying vec2 vUv;
+        void main(){
+          // 4-tap box downsample, then a soft-knee threshold
+          vec3 c = texture2D(tSrc, vUv + uTexel * vec2(-1.0, -1.0)).rgb + texture2D(tSrc, vUv + uTexel * vec2(1.0, -1.0)).rgb
+                 + texture2D(tSrc, vUv + uTexel * vec2(-1.0, 1.0)).rgb + texture2D(tSrc, vUv + uTexel * vec2(1.0, 1.0)).rgb;
+          c *= 0.25;
+          float br = max(c.r, max(c.g, c.b));
+          float k = clamp((br - uThr * 0.6) / (uThr * 0.8), 0.0, 1.0);
+          gl_FragColor = vec4(min(c * k * k, vec3(40.0)), 1.0);
+        }`,
+      depthTest: false, depthWrite: false,
+    });
+    this.blurMat = new THREE.ShaderMaterial({
+      uniforms: { tSrc: { value: null }, uDir: { value: new THREE.Vector2() } },
+      vertexShader: vs,
+      fragmentShader: /* glsl */ `uniform sampler2D tSrc; uniform vec2 uDir; varying vec2 vUv;
+        void main(){
+          // 9-tap gaussian folded into 5 linear-filtered fetches
+          vec3 c = texture2D(tSrc, vUv).rgb * 0.227;
+          c += (texture2D(tSrc, vUv + uDir * 1.385).rgb + texture2D(tSrc, vUv - uDir * 1.385).rgb) * 0.316;
+          c += (texture2D(tSrc, vUv + uDir * 3.231).rgb + texture2D(tSrc, vUv - uDir * 3.231).rgb) * 0.0703;
+          gl_FragColor = vec4(c, 1.0);
+        }`,
+      depthTest: false, depthWrite: false,
+    });
+    this.pre = new FullScreenQuad(this.preMat);
+    this.blur = new FullScreenQuad(this.blurMat);
+  }
+  setSize(w: number, h: number) {
+    for (let i = 0; i < 2; i++) {
+      const d = i === 0 ? 4 : 8;
+      const ww = Math.max(1, Math.round(w / d)), hh = Math.max(1, Math.round(h / d));
+      this.rtA[i].setSize(ww, hh);
+      this.rtB[i].setSize(ww, hh);
+    }
+  }
+  render(renderer: THREE.WebGLRenderer, _w: THREE.WebGLRenderTarget, readBuffer: THREE.WebGLRenderTarget) {
+    const g = this.grade.mat.uniforms;
+    g.uBloom.value = this.strength;
+    if (this.strength <= 0.001) return;
+    this.preMat.uniforms.uThr.value = this.threshold;
+    let src: THREE.Texture = readBuffer.texture;
+    let texel = new THREE.Vector2(1 / readBuffer.width, 1 / readBuffer.height);
+    for (let i = 0; i < 2; i++) {
+      const a = this.rtA[i], b = this.rtB[i];
+      // level 0 thresholds the scene; level 1 downsamples level 0
+      this.preMat.uniforms.tSrc.value = src;
+      this.preMat.uniforms.uTexel.value.copy(texel);
+      this.preMat.uniforms.uThr.value = i === 0 ? this.threshold : 0;
+      renderer.setRenderTarget(a);
+      this.pre.render(renderer);
+      this.blurMat.uniforms.tSrc.value = a.texture;
+      this.blurMat.uniforms.uDir.value.set(1 / a.width, 0);
+      renderer.setRenderTarget(b);
+      this.blur.render(renderer);
+      this.blurMat.uniforms.tSrc.value = b.texture;
+      this.blurMat.uniforms.uDir.value.set(0, 1 / a.height);
+      renderer.setRenderTarget(a);
+      this.blur.render(renderer);
+      src = a.texture;
+      texel = new THREE.Vector2(1 / a.width, 1 / a.height);
+    }
+    g.tBloom0.value = this.rtA[0].texture;
+    g.tBloom1.value = this.rtA[1].texture;
+  }
+}
+
+/** Filmic tonemapping + colour grade + lens effects + bloom composite + sRGB output (no separate output pass). */
 class GradePass extends Pass {
   quad: FullScreenQuad;
   mat: THREE.ShaderMaterial;
@@ -144,17 +236,25 @@ class GradePass extends Pass {
         uNVGGain: { value: 10 },
         uNVGFlash: { value: 0 },
         uNVGIllum: { value: 0 },
+        uHasDepth: { value: 0 },
         tDepth: { value: null },
         uNear: { value: 0.05 },
         uFar: { value: 3000 },
+        tBloom0: { value: null },
+        tBloom1: { value: null },
+        uBloom: { value: 0 },
+        uTint: { value: new THREE.Color(1, 1, 1) },
+        uSatBoost: { value: 1 },
       },
       vertexShader: `varying vec2 vUv; void main(){ vUv = uv; gl_Position = vec4(position.xy, 0.0, 1.0); }`,
       fragmentShader: /* glsl */ `
+        uniform sampler2D tBloom0; uniform sampler2D tBloom1; uniform float uBloom;
+        uniform vec3 uTint; uniform float uSatBoost;
         uniform sampler2D tDiffuse; uniform float uExposure; uniform float uTime; uniform float uVignette;
         uniform float uDamage; uniform float uFlash; uniform float uCA; uniform float uGrain; uniform float uSat;
         uniform float uSuppression; uniform vec2 uRes; uniform float uUnderwater;
         uniform float uNVG; uniform float uNVGPower; uniform float uNVGGain; uniform float uNVGFlash;
-        uniform float uNVGIllum; uniform sampler2D tDepth; uniform float uNear; uniform float uFar;
+        uniform float uNVGIllum; uniform float uHasDepth; uniform sampler2D tDepth; uniform float uNear; uniform float uFar;
         varying vec2 vUv;
         // AgX-like filmic curve (Troy Sobotka's AgX, approximated - Benjamin Wrensch fit)
         vec3 agxContrast(vec3 x){ vec3 x2 = x*x; vec3 x4 = x2*x2;
@@ -185,11 +285,13 @@ class GradePass extends Pass {
           c.r = texture2D(tDiffuse, uv - dc * ca * 4.0 * r2 * 4.0).r;
           c.g = texture2D(tDiffuse, uv).g;
           c.b = texture2D(tDiffuse, uv + dc * ca * 4.0 * r2 * 4.0).b;
+          if (uBloom > 0.001) c += (texture2D(tBloom0, uv).rgb * 0.6 + texture2D(tBloom1, uv).rgb * 0.8) * uBloom;
           c *= uExposure;
           c = agx(c);
           // grade: cool shadows, neutral-warm highlights, slight desaturation
           float l = dot(c, vec3(0.2126, 0.7152, 0.0722));
-          c = mix(vec3(l), c, uSat * (1.0 - uSuppression * 0.4) * (1.0 - uDamage * 0.5));
+          c = mix(vec3(l), c, uSat * uSatBoost * (1.0 - uSuppression * 0.4) * (1.0 - uDamage * 0.5));
+          c *= uTint;
           vec3 shadowTint = vec3(0.95, 1.0, 1.06);
           vec3 highTint = vec3(1.03, 1.0, 0.96);
           c *= mix(shadowTint, highTint, smoothstep(0.0, 0.7, l));
@@ -206,36 +308,43 @@ class GradePass extends Pass {
             float h = dot(texture2D(tDiffuse, uv + vec2(px.x, 0.0)).rgb + texture2D(tDiffuse, uv - vec2(px.x, 0.0)).rgb
                         + texture2D(tDiffuse, uv + vec2(0.0, px.y)).rgb + texture2D(tDiffuse, uv - vec2(0.0, px.y)).rgb, vec3(0.125, 0.1, 0.025)) * uExposure;
             L = L * 0.8 + h * 0.2 + max(h - L, 0.0) * 0.35;
+            // starlight floor: even unlit ground shows a little structure through the tube
+            L += 0.0009 + raw.g * 0.002;
             // IR illuminator on the goggles: a soft cone around the view centre lighting near surfaces
             if (uNVGIllum > 0.0) {
-              float zd = texture2D(tDepth, uv).x;
-              if (zd < 0.99999) {
-                float zn = zd * 2.0 - 1.0;
-                float dist = 2.0 * uNear * uFar / (uFar + uNear - zn * (uFar - uNear));
-                vec2 cq = dc * vec2(uRes.x / uRes.y, 1.0);
-                float cone = 1.0 - smoothstep(0.12, 0.62, length(cq));
-                float fall = 1.0 / (1.0 + dist * dist * 0.006);
-                L += uNVGIllum * cone * fall * (0.012 + L * 1.5);
+              vec2 cq = dc * vec2(uRes.x / uRes.y, 1.0);
+              float cone = 1.0 - smoothstep(0.2, 0.85, length(cq));
+              if (uHasDepth > 0.5) {
+                float zd = texture2D(tDepth, uv).x;
+                if (zd < 0.99999) {
+                  float zn = zd * 2.0 - 1.0;
+                  float dist = 2.0 * uNear * uFar / (uFar + uNear - zn * (uFar - uNear));
+                  float fall = 1.0 / (1.0 + dist * dist * 0.0025);
+                  L += uNVGIllum * cone * fall * (0.02 + L * 1.8);
+                }
+              } else {
+                // (no depth buffer on the lowest preset: a flat lift of what is in the cone)
+                L += uNVGIllum * cone * (0.006 + L * 1.4);
               }
             }
             // intensifier with automatic brightness control (soft saturation)
             float I = 1.0 - exp(-L * uNVGGain);
             I = I / (1.0 + I * 0.15) * 1.15;
             // tube contrast: deep shadows stay dark, lit surfaces and lights pop
-            I = pow(I, 1.45) * 1.08;
+            I = pow(I, 1.32) * 1.1;
             // scintillation: sparkling noise, strongest in the dark parts of the image
             float n1 = rand(floor(uv * uRes * 0.7) + fract(uTime * 37.0) * 91.0) - 0.5;
             float n2 = rand(uv * uRes + fract(uTime * 53.0) * 17.0) - 0.5;
-            float spark = step(0.996, rand(floor(uv * uRes * 0.5) + floor(uTime * 30.0)));
-            I += (n1 * 0.13 + n2 * 0.07) * (1.0 - I * 0.75) + spark * 0.35 * (1.0 - I);
+            float spark = step(0.9985, rand(floor(uv * uRes * 0.5) + floor(uTime * 30.0)));
+            I += (n1 * 0.06 + n2 * 0.035) * (1.0 - I * 0.75) + spark * 0.18 * (1.0 - I);
             I *= (0.97 + 0.03 * sin(uTime * 73.0)) * uNVGPower;
             vec3 phos = vec3(0.24, 1.0, 0.38) * max(I, 0.0) + vec3(0.004, 0.018, 0.008) * uNVGPower;
             // binocular eyepiece mask: two overlapping circles, dark rim falloff inside each tube
             vec2 q = dc * vec2(uRes.x / uRes.y, 1.0);
-            float dl = length(q - vec2(-0.17, 0.0)), dr = length(q - vec2(0.17, 0.0));
+            float dl = length(q - vec2(-0.2, 0.0)), dr = length(q - vec2(0.2, 0.0));
             float d = min(dl, dr);
-            float tube = smoothstep(0.53, 0.47, d);
-            phos *= tube * (0.72 + 0.28 * smoothstep(0.5, 0.18, d));
+            float tube = smoothstep(0.63, 0.57, d);
+            phos *= tube * (0.86 + 0.14 * smoothstep(0.6, 0.22, d));
             phos += vec3(0.45, 1.0, 0.55) * uNVGFlash * tube;
             c = mix(c, phos, uNVG);
           }
@@ -249,7 +358,10 @@ class GradePass extends Pass {
           // film grain
           float g = rand(uv * uRes + fract(uTime) * 100.0) - 0.5;
           c += g * uGrain * (1.0 - l * 0.6);
-          gl_FragColor = vec4(max(c, 0.0), 1.0);
+          // display encoding (sRGB) done here instead of a separate output pass
+          c = max(c, 0.0);
+          c = mix(c * 12.92, 1.055 * pow(c, vec3(1.0 / 2.4)) - 0.055, step(0.0031308, c));
+          gl_FragColor = vec4(c, 1.0);
         }`,
       depthTest: false,
       depthWrite: false,
@@ -269,10 +381,9 @@ export class Pipeline {
   plainRender: RenderPass;
   world: WorldPostPass;
   vm: ViewmodelPass;
-  bloom: UnrealBloomPass;
+  bloom: LiteBloomPass;
   grade: GradePass;
   smaa: SMAAPass;
-  output: OutputPass;
   private prevViewProj = new THREE.Matrix4();
   private tmpM = new THREE.Matrix4();
   renderScale = 1;
@@ -303,10 +414,9 @@ export class Pipeline {
     this.plainRender = new RenderPass(scene, camera);
     this.world = new WorldPostPass();
     this.vm = new ViewmodelPass(vmScene, vmCamera);
-    this.bloom = new UnrealBloomPass(new THREE.Vector2(size.x, size.y), 0.35, 0.55, 2.2);
     this.grade = new GradePass();
+    this.bloom = new LiteBloomPass(this.grade);
     this.smaa = new SMAAPass(size.x, size.y);
-    this.output = new OutputPass();
     this.rebuild();
   }
 
@@ -318,10 +428,12 @@ export class Pipeline {
     c.addPass(useAO ? this.ao : this.plainRender);
     if (useAO) c.addPass(this.world);
     c.addPass(this.vm);
+    // (bloom writes its own small targets; the grade adds it and encodes sRGB; SMAA, when on,
+    // works on the encoded image and is the last pass)
     if (q.bloom) c.addPass(this.bloom);
+    else this.grade.mat.uniforms.uBloom.value = 0;
     c.addPass(this.grade);
     if (q.antialias) c.addPass(this.smaa);
-    c.addPass(this.output);
   }
 
   setSize(w: number, h: number) {
@@ -333,6 +445,7 @@ export class Pipeline {
     this.composer.setPixelRatio(Math.min(window.devicePixelRatio, Settings.data.hiDpi ? 2 : 1) * s);
     this.composer.setSize(w, h);
     const pr = this.renderer.getPixelRatio();
+    this.bloom.setSize(w * pr, h * pr);
     this.grade.mat.uniforms.uRes.value.set(w * pr, h * pr);
     this.world.mat.uniforms.uRes.value.set(w * pr, h * pr);
   }

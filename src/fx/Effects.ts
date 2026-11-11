@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { Settings } from '../game/Settings';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import { TextureBaker } from '../render/TextureBaker';
 import { Surface } from '../core/Physics';
@@ -6,6 +7,9 @@ import { Surface } from '../core/Physics';
 const MAX_P = 3000;
 
 /** CPU-simulated particle pool rendered as one Points draw call. */
+/** largest particle on screen in px, by quality (overdraw in smoke is the cost) */
+const MAX_PX = ({ low: 220, medium: 320, high: 420, ultra: 512 } as Record<string, number>)[Settings.data.quality] ?? 420;
+
 class ParticlePool {
   points: THREE.Points;
   private pos: Float32Array;
@@ -41,16 +45,17 @@ class ParticlePool {
     g.setAttribute('rot', new THREE.BufferAttribute(this.rot, 1).setUsage(THREE.DynamicDrawUsage));
     g.boundingSphere = new THREE.Sphere(new THREE.Vector3(), 1e6);
     const m = new THREE.ShaderMaterial({
-      uniforms: { tMap: { value: tex }, uScale: { value: 600 }, fogColor: { value: new THREE.Color() }, fogNear: { value: 0 }, fogFar: { value: 0 } },
+      uniforms: { tMap: { value: tex }, uScale: { value: 600 }, uMaxPx: { value: MAX_PX }, fogColor: { value: new THREE.Color() }, fogNear: { value: 0 }, fogFar: { value: 0 } },
       vertexShader: /* glsl */ `
         attribute vec4 color; attribute float size; attribute float rot;
         varying vec4 vC; varying float vR;
-        uniform float uScale;
+        uniform float uScale; uniform float uMaxPx;
         void main(){
           vC = color; vR = rot;
           vec4 mv = modelViewMatrix * vec4(position, 1.0);
           gl_Position = projectionMatrix * mv;
-          gl_PointSize = clamp(size * uScale / -mv.z, 0.0, 512.0);
+          // (capped: a smoke puff right at the camera would otherwise be a screen-sized quad of overdraw)
+          gl_PointSize = clamp(size * uScale / -mv.z, 0.0, uMaxPx);
         }`,
       fragmentShader: /* glsl */ `
         uniform sampler2D tMap; varying vec4 vC; varying float vR;
@@ -199,7 +204,7 @@ export class Effects {
     // only a little brighter at night than by day); every tracer is one instance of ONE draw
     const tg2 = tg.clone().rotateZ(Math.PI / 2);
     const cross = mergeGeometries([tg.toNonIndexed(), tg2.toNonIndexed()])!;
-    const tm = new THREE.MeshBasicMaterial({ color: new THREE.Color(1.9, 1.2, 0.55), transparent: true, opacity: 0.5, blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide, toneMapped: false });
+    const tm = new THREE.MeshBasicMaterial({ color: new THREE.Color(1.05, 0.78, 0.45), transparent: true, opacity: 0.3, blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide, toneMapped: false });
     this.tracerMesh = new THREE.InstancedMesh(cross, tm, 64);
     this.tracerMesh.frustumCulled = false;
     this.tracerMesh.count = 0;
@@ -232,14 +237,14 @@ export class Effects {
   muzzleWorld(p: THREE.Vector3, dir: THREE.Vector3, suppressed: boolean, scale = 1) {
     if (!suppressed) {
       this.worldFlashLight.position.copy(p).addScaledVector(dir, 0.3);
-      this.worldFlashLight.intensity = 14 * scale;
-      this.worldFlashLight.distance = 9;
+      this.worldFlashLight.intensity = 5 * scale;
+      this.worldFlashLight.distance = 6;
       this.worldFlashT = 0.05;
     }
-    // smoke puff drifting from the muzzle
-    for (let i = 0; i < (suppressed ? 1 : 3); i++) {
-      const v = dir.clone().multiplyScalar(0.6 + Math.random() * 0.8).add(new THREE.Vector3((Math.random() - 0.5) * 0.3, 0.25 + Math.random() * 0.2, (Math.random() - 0.5) * 0.3));
-      this.smoke.spawn(p.clone().addScaledVector(dir, 0.15 + i * 0.1), v, [0.62, 0.62, 0.6], 0.16 * scale, 0.12 + Math.random() * 0.08, 1.4 + Math.random(), { drag: 1.8, grav: -0.12, grow: 0.5 });
+    // a faint wisp drifting from the muzzle (one puff; two for the big guns)
+    for (let i = 0; i < (scale > 1.2 && !suppressed ? 2 : 1); i++) {
+      const v = dir.clone().multiplyScalar(0.5 + Math.random() * 0.6).add(new THREE.Vector3((Math.random() - 0.5) * 0.25, 0.2 + Math.random() * 0.15, (Math.random() - 0.5) * 0.25));
+      this.smoke.spawn(p.clone().addScaledVector(dir, 0.15 + i * 0.1), v, [0.66, 0.66, 0.64], (suppressed ? 0.03 : 0.055) * scale, 0.09 + Math.random() * 0.05, 0.9 + Math.random() * 0.6, { drag: 1.8, grav: -0.12, grow: 0.45 });
     }
   }
 
@@ -481,14 +486,14 @@ export class Effects {
     for (const t of this.tracers) {
       if (!t.alive) continue;
       t.dist += t.speed * dt;
-      const len = Math.min(2.2, t.maxDist - t.dist, t.dist);
+      const len = Math.min(1.1, t.maxDist - t.dist, t.dist);
       if (t.dist >= t.maxDist || len <= 0) {
         t.alive = false;
         continue;
       }
       to.position.copy(t.from).addScaledVector(t.dir, t.dist);
       to.quaternion.setFromUnitVectors(Z_NEG, t.dir);
-      to.scale.set(0.0085, 1, len);
+      to.scale.set(0.0045, 1, len);
       to.updateMatrix();
       this.tracerMesh.setMatrixAt(tn++, to.matrix);
     }
@@ -533,11 +538,12 @@ export class MuzzleFlash {
   private planes: THREE.Mesh[] = [];
   private t = 0;
   constructor(tex: THREE.Texture) {
-    const mat = new THREE.MeshBasicMaterial({ map: tex, color: new THREE.Color(3.2, 2.4, 1.6), transparent: true, blending: THREE.AdditiveBlending, depthWrite: false, toneMapped: false, side: THREE.DoubleSide });
+    // subtle: barely above white, so it reads as a quick flicker at the muzzle, not a bloom flare
+    const mat = new THREE.MeshBasicMaterial({ map: tex, color: new THREE.Color(1.35, 1.0, 0.68), transparent: true, opacity: 0.75, blending: THREE.AdditiveBlending, depthWrite: false, toneMapped: false, side: THREE.DoubleSide });
     // side-on petals
     for (let i = 0; i < 3; i++) {
-      const g = new THREE.PlaneGeometry(0.09, 0.2);
-      g.translate(0, 0.08, 0);
+      const g = new THREE.PlaneGeometry(0.055, 0.13);
+      g.translate(0, 0.052, 0);
       g.rotateX(-Math.PI / 2);
       const m = new THREE.Mesh(g, mat);
       m.rotation.z = (i * Math.PI) / 3;
@@ -545,13 +551,13 @@ export class MuzzleFlash {
       this.planes.push(m);
     }
     // front star
-    const f = new THREE.Mesh(new THREE.PlaneGeometry(0.13, 0.13), mat);
+    const f = new THREE.Mesh(new THREE.PlaneGeometry(0.075, 0.075), mat);
     this.group.add(f);
     this.planes.push(f);
     this.group.visible = false;
   }
   fire(scale: number) {
-    this.t = 0.045;
+    this.t = 0.032;
     this.group.visible = true;
     this.group.rotation.z = Math.random() * Math.PI;
     const s = scale * (0.8 + Math.random() * 0.45);

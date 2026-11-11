@@ -6,9 +6,9 @@ import { Settings } from '../game/Settings';
 import { clamp, lerp, smoothstep } from '../core/math';
 
 export type Weather = 'clear' | 'overcast' | 'rain' | 'snow';
-export type TimePreset = 'dynamic' | 'dawn' | 'day' | 'golden' | 'night';
+export type TimePreset = 'dynamic' | 'dawn' | 'day' | 'golden' | 'blue' | 'night';
 
-const PRESET_HOUR: Record<Exclude<TimePreset, 'dynamic'>, number> = { dawn: 9.0, day: 12.6, golden: 16.25, night: 23.2 };
+const PRESET_HOUR: Record<Exclude<TimePreset, 'dynamic'>, number> = { dawn: 9.0, day: 12.6, golden: 16.25, blue: 17.35, night: 23.2 };
 
 const lerpC = (a: THREE.Color, b: THREE.Color, t: number) => a.clone().lerp(b, clamp(t, 0, 1));
 const C = (r: number, g: number, b: number) => new THREE.Color(r, g, b);
@@ -115,10 +115,16 @@ export class Environment {
     }
   }
 
-  setTime(p: TimePreset) {
+  setTime(p: TimePreset): void {
+    this.blueHour = p === 'blue' ? 1 : 0;
     if (p === 'dynamic') {
-      // mostly daylight; one match in five is a night op (goggles: N)
-      this.hour = Math.random() < 0.2 ? 22.8 : [10.5, 13.5, 14.8, 15.2][Math.floor(Math.random() * 4)];
+      // mostly daylight; one match in five is a night op (goggles: N), one in seven the blue hour
+      const r = Math.random();
+      if (r < 0.14) {
+        this.setTime('blue');
+        return;
+      }
+      this.hour = r < 0.34 ? 22.8 : [10.5, 13.5, 14.8, 15.2][Math.floor(Math.random() * 4)];
       this.timeScale = 1 / 180; // one game hour every three minutes
     } else {
       this.hour = PRESET_HOUR[p] ?? 12.6; // unknown preset (e.g. a bad URL / stored value): daytime, never NaN
@@ -234,8 +240,65 @@ export class Environment {
     this.rays = (w === 'clear' ? 1 : w === 'overcast' ? 0.45 : 0) * day * (0.35 + golden * 0.9);
     this.cloudShadow = (w === 'clear' ? 0.55 : w === 'overcast' ? 0.35 : 0) * day;
 
-    if (forceEnv || Math.abs(el - this.lastEnvElev) > 1.0) this.updateEnvMap();
+    this.gradeTint.setRGB(1, 1, 1);
+    this.gradeSat = 1;
+    if (this.blueHour > 0) this.applyBlueHour(az);
+    // (re-baking the sky probe is a frame spike: only every 2.5° of sun travel, ~30 s in dynamic time)
+    if (forceEnv || Math.abs(el - this.lastEnvElev) > 2.5) this.updateEnvMap();
     this.onLighting();
+  }
+
+  /** Blue hour preset (strength 0..1): the sun just gone, everything a deep saturated blue */
+  blueHour = 0;
+  /** colour grade for the current light (the blue hour pushes saturation and a cold tint) */
+  gradeTint = new THREE.Color(1, 1, 1);
+  gradeSat = 1;
+  /**
+   * The Nordic blue hour: sky and snow a deep, saturated blue, a soft cold light from the whole
+   * sky, the lamps and windows already lit warm (night factor high enough for every fixture),
+   * a few stars, no aurora, calm water.
+   */
+  private applyBlueHour(az: number) {
+    const k = this.blueHour;
+    const u = this.sky.uniforms;
+    const w = this.weather;
+    const veil = w === 'clear' ? 1 : w === 'overcast' ? 0.75 : 0.6;
+    u.uZenith.value.lerp(C(0.006, 0.022, 0.13).multiplyScalar(veil), k);
+    u.uHorizon.value.lerp(C(0.05, 0.12, 0.42).multiplyScalar(0.6 + 0.4 * veil), k);
+    u.uNight.value = lerp(u.uNight.value, 0.45, k); // a few stars come out
+    u.uAurora.value *= 1 - k;
+    u.uSunColor.value.multiplyScalar(1 - k);
+    // lamps, windows, street lights: on (they key off `night`)
+    this.night = lerp(this.night, 0.86, k);
+    this.day = lerp(this.day, 0.0, k);
+    this.golden *= 1 - k;
+    // key light: the bright western sky after sunset, cold and soft
+    this.dirFrom(az + 10, 22, this.lightDir);
+    this.sun.color.lerp(C(0.38, 0.52, 1.0), k);
+    this.sun.intensity = lerp(this.sun.intensity, 0.32, k);
+    // ambient: blue from above, blue snow light from below
+    this.hemi.color.lerp(C(0.28, 0.45, 1.0), k);
+    this.hemi.groundColor.lerp(this.winter ? C(0.2, 0.32, 0.7) : C(0.08, 0.12, 0.26), k);
+    this.hemi.intensity = lerp(this.hemi.intensity, this.winter ? 0.5 : 0.48, k);
+    // fog: a blue haze that swallows the far fjord walls
+    const fog = C(0.035, 0.085, 0.27).multiplyScalar(0.7 + 0.3 * veil);
+    this.fog.color.lerp(fog, k);
+    u.uFogColor.value.lerp(fog.clone().multiplyScalar(1.05), k);
+    this.baseFog = lerp(this.baseFog, w === 'clear' ? 0.0026 : 0.004, k);
+    this.fog.density = Math.min(0.09, this.baseFog * this.fogBoost);
+    this.fog.scatter *= 1 - k;
+    this.fog.sync();
+    const wu = (this.water.material as THREE.ShaderMaterial).uniforms;
+    wu.sunColor.value.lerp(C(0.15, 0.25, 0.55), k);
+    wu.waterColor.value.lerp(C(0.004, 0.02, 0.07), k);
+    this.exposure = lerp(this.exposure, this.winter ? 1.18 : 1.32, k);
+    // the tone curve washes deep blues toward grey: push them back (cold tint, more saturation)
+    this.gradeTint.setRGB(1, 1, 1).lerp(C(0.78, 0.92, 1.22), k);
+    this.gradeSat = lerp(1, 1.45, k);
+    // a clearer sky: thin, dim cloud
+    u.uCover.value = Math.min(u.uCover.value, w === 'clear' ? 0.2 : 0.5);
+    this.rays *= 1 - k;
+    this.cloudShadow *= 1 - k;
   }
 
   /** Bake the sky into a PMREM environment for image-based lighting. */
@@ -252,7 +315,7 @@ export class Environment {
     this.envRT?.dispose();
     this.envRT = this.pmrem.fromScene(envScene, 0, 1, 20000);
     this.scene.environment = this.envRT.texture;
-    (this.scene as any).environmentIntensity = (this.weather === 'rain' ? 0.6 : 0.85) * lerp(1, 0.08, this.night);
+    (this.scene as any).environmentIntensity = (this.weather === 'rain' ? 0.6 : 0.85) * lerp(1, 0.08, this.night) * (this.blueHour > 0 ? 3.2 : 1);
     ground.geometry.dispose();
   }
 

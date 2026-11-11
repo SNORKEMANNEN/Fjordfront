@@ -281,6 +281,76 @@ URL options: `?quality=low|medium|high|ultra`, `?weather=clear|overcast|rain|sno
 - **Rifle:** support hand moved so it no longer shows through the optic window.
 - **Pistol:** hold reworked.
 
+## Update 19: performance pass, blue hour, quieter guns, clearer night vision
+
+**Performance.** I measured where every frame goes (draw calls, triangles and passes per frame, CPU per system) and cut the biggest costs:
+- **Lights (biggest GPU win).** Three.js lights forward: every lit pixel loops over every light in the scene.
+  - The tunnel (Update 17) had added 20 permanent point lights, so the whole map was paying for 22–24 lights at all times.
+  - They now share the map's small light pool, which hands 4 real lights to the fixtures nearest you (2 on Low).
+  - Lights in the scene: 24 → 7.
+- **Bot guns.** Every soldier carried a full first-person-quality rifle (20–40k triangles each, ~550k in total).
+  - Beyond ~12 m they now hold a ~200-triangle stand-in built from the same parts and colours.
+  - Soldiers with the same weapon share one model in GPU memory.
+- **Grass:** 827k → ~200k triangles.
+  - Two segments per blade instead of three.
+  - Far tiles draw an even, random subset of their clumps.
+  - Range and blade count follow the preset (Low 18 m and 10 blades; Ultra 32 m and 16).
+- **Terrain:**
+  - The rock layer's six texture reads now only happen where there is rock, which skips them on most flat ground.
+  - Low uses single-sample texturing without detail normal maps.
+  - Level-of-detail distances follow the preset.
+- **Post-processing:**
+  - The separate output pass is folded into the colour grade.
+  - Bloom is a new two-level quarter/eighth-resolution bloom (6 tiny passes instead of ~12 from half resolution), added straight in the grade.
+  - SMAA runs last.
+  - Low is now a single full-screen pass after the scene.
+- **Shadows.** The sun's shadow map used to re-render every frame whenever the game ran below 75 fps, so the slower the machine, the more shadow work it did.
+  - It now refreshes at a fixed rate: 12 Hz Low, 20 Medium, 30 High, every frame on Ultra.
+  - Static shadows stay exact between refreshes; only moving soldiers' shadows step.
+- **Bots (CPU):**
+  - Hit tests now follow the body between pose updates, so distant soldiers can update their pose less often without costing any accuracy (on screen: full rate within 26 m, then 30 / 20 / 12 Hz).
+  - Character-controller sweeps run every frame only within 14 m.
+  - Your first-person legs are only posed when you look down.
+- **Weather and effects:**
+  - Rain, snow and fog-bank budgets follow the preset (Low: 35% of the particles, a third of the fog-bank sprites).
+  - Particles are capped in on-screen size (smoke right at the camera was a screen-sized quad of overdraw).
+  - Smoke grenades emit fewer, slightly larger puffs on Low / Medium.
+  - The sky lighting probe is re-baked every 2.5° of sun travel instead of every 1° (a frame spike every ~12 s in dynamic time).
+- **Presets:**
+  - **Low:** 72% resolution, dynamic resolution aiming for 120 fps, no AO, bloom, SMAA, god rays or depth of field.
+  - **Medium:** 85% resolution.
+  - **High** and **Ultra:** full resolution, aiming for 60 fps.
+  - The light pool, grass, terrain shader and weather budgets switch on the next page load.
+- **Measured** (same view, High; per frame):
+  - lights 24 → 7;
+  - draw calls ~318 → ~191;
+  - triangles ~1.37M → ~0.64M;
+  - full-screen passes ~25 → 18 (Low: 1).
+  - I can only test in a software renderer here, so I can't promise exact frame rates on your laptop. Tell me what you get (F3 shows the performance overlay).
+
+**Blue hour** (Settings → Time of day → *Blue hour*, and about one match in seven in dynamic time):
+- The sun has just gone. The sky, the snow and the far fjord walls are a deep, saturated blue.
+- Every window, street lamp and fixture is lit warm, and a few stars are out. There's no aurora and no god rays.
+- A cold, soft light comes from the whole sky, with a light blue haze in the distance.
+- A dedicated grade (more saturation, a cold tint) keeps the blues from going grey.
+- With the random map variant, blue-hour matches are almost always winter, mostly clear or with light snow.
+
+**Guns look quieter:**
+- **Muzzle flash:** smaller, shorter and only just above white, so it no longer flares into the bloom. The light it casts is about a third as strong.
+- **Muzzle smoke:** one faint wisp (two for the big guns) instead of three dense puffs.
+- **Tracers:** half as thick, half as long, dimmer and less orange.
+
+**Night vision:**
+- **Brighter:** more gain, and a faint starlight floor so unlit ground still shows structure.
+- **Cleaner:** less contrast crush, and about half the noise and sparkle.
+- **Wider:** larger eyepieces with less edge darkening.
+- **Stronger IR illuminator:** wider and reaching further. It now also works on Low, where it used to need the AO depth buffer.
+
+**Tests:**
+- A 180 s 12 v 12 match runs clean, with kills per minute in line with earlier runs.
+- The two-tab multiplayer test passes.
+- The production build is clean.
+
 ## Update 18: multiplayer (bots fill the slots) and publishing
 
 **Play with friends.** Main menu → **MULTIPLAYER**:

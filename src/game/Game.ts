@@ -769,7 +769,9 @@ export class Game {
           objectiveFor: (t, _from, b) => this.objectiveFor(t, b),
           animInterval: (b) => this.animInterval(b),
           viewDist: () => 160 / (1 + this.wxEvent.fog * 3.5 + this.weather.storm * 3 + this.weather.inBank * 2),
-          moveInterval: (b) => { const ai = this.animInterval(b); return ai >= 1 / 8 ? 1 / 20 : ai >= 1 / 15 ? 1 / 30 : 0; },
+          // character-controller sweeps: every frame only up close; 30 Hz further out (drawn
+          // dead-reckoned in between), 15-20 Hz off screen
+          moveInterval: (b) => { const ai = this.animInterval(b); return ai >= 1 / 8 ? 1 / 15 : ai >= 1 / 15 ? 1 / 20 : b.position().distanceTo(this.camera.position) < 14 ? 0 : 1 / 30; },
           dwellAt: (p, b) => {
             const f = this.dom?.flagAt(p);
             // Domination: hold the zone until it flips (re-evaluated every few seconds), or guard it a while
@@ -856,11 +858,12 @@ export class Game {
     const p = b.position();
     const d = p.distanceTo(this.camera.position);
     const onScreen = this.frustum.containsPoint(this.tmpAnimP.set(p.x, p.y + 1, p.z));
-    // 12v12 budget: full rate only where you can tell the difference
-    if (d < 12) return 0;
-    if (!onScreen) return d < 30 ? 1 / 15 : 1 / 8;
-    if (d < 32) return 0;
-    return d < 75 ? 1 / 30 : 1 / 15;
+    // 12v12 budget: full rate only where you can tell the difference (hit tests follow the body
+    // between updates, so a lower pose rate never costs accuracy)
+    if (d < 14) return 0;
+    if (!onScreen) return d < 30 ? 1 / 10 : 1 / 6;
+    if (d < 26) return 0;
+    return d < 50 ? 1 / 30 : d < 90 ? 1 / 20 : 1 / 12;
   }
   private tmpAnimP = new THREE.Vector3();
 
@@ -930,15 +933,18 @@ export class Game {
     this.deathStreak = 0;
     const w = Settings.data.weather;
     const mv = Settings.data.mapVariant ?? 'random';
-    const winter = mv === 'winter' || (mv === 'random' && this.rng.next() < 0.4);
+    this.env.setTime(Settings.data.timeOfDay ?? 'dynamic');
+    const blue = this.env.blueHour > 0;
+    // the blue hour is a winter thing: deep blue snow, warm windows (random map: mostly winter)
+    const winter = mv === 'winter' || (mv === 'random' && this.rng.next() < (blue ? 0.85 : 0.4));
     this.winter = winter;
     this.env.winter = winter;
     this.terrain.winter = winter;
     this.world.veg.grass.visible = !winter;
-    this.env.setTime(Settings.data.timeOfDay ?? 'dynamic');
     const r = this.rng.next();
     let wx: 'clear' | 'overcast' | 'rain' | 'snow' = w === 'auto'
-      ? winter ? (r < 0.5 ? 'snow' : r < 0.75 ? 'overcast' : 'clear') : r < 0.25 ? 'rain' : r < 0.37 ? 'snow' : r < 0.67 ? 'overcast' : 'clear'
+      ? blue ? (r < 0.6 ? 'clear' : r < 0.85 ? 'snow' : 'overcast')
+      : winter ? (r < 0.5 ? 'snow' : r < 0.75 ? 'overcast' : 'clear') : r < 0.25 ? 'rain' : r < 0.37 ? 'snow' : r < 0.67 ? 'overcast' : 'clear'
       : w;
     if (winter && wx === 'rain') wx = 'snow';
     this.env.setWeather(wx);
@@ -1226,7 +1232,7 @@ export class Game {
     // ---------------- world & fx ----------------
     this.env.update(dt, this.camera);
     // viewmodel key light follows the real sun / moon relative to the camera
-    this.vm.daylight = Math.min(1.2, this.env.sun.intensity / 3.0);
+    this.vm.daylight = Math.max(Math.min(1.2, this.env.sun.intensity / 3.0), 0.42 * this.env.blueHour);
     this.vm.lighting.color.copy(this.env.sun.color);
     this.vm.lighting.position.copy(this.env.lightDir).applyQuaternion(this.camera.quaternion.clone().invert());
     this.fx.update(dt);
@@ -1345,6 +1351,7 @@ export class Game {
   }
 
   private shadowFrame = 0;
+  private shadowT = 0;
   renderFrame(dt: number) {
     // world matrices once per frame (three otherwise walks the whole scene graph again inside
     // every render() call: scope, AO beauty + its two transparency passes, water reflection)
@@ -1353,10 +1360,16 @@ export class Game {
     const cp = this.camera.position;
     for (const b of this.bots) if (b.root.visible) b.visualLod(b.position().distanceTo(cp));
     this.terrain.updateLod(cp);
-    // sun shadows refresh on alternate frames once the game runs fast (the light matrices are
-    // only updated together with the map, so a skipped frame just reuses last frame's shadows)
+    // sun shadows refresh at a fixed rate per preset (the light matrices only change together
+    // with the map, so between refreshes the last map stays exact for everything static; only
+    // moving soldiers' shadows step). Never "more often when slow": that is when it hurts most.
     this.shadowFrame++;
-    if (this.fps < 75 || (this.shadowFrame & 1) === 0) this.renderer.shadowMap.needsUpdate = true;
+    this.shadowT -= dt;
+    if (this.shadowT <= 0) {
+      const q = Settings.data.quality;
+      this.shadowT = q === 'low' ? 1 / 12 : q === 'medium' ? 1 / 20 : q === 'high' ? 1 / 30 : 0;
+      this.renderer.shadowMap.needsUpdate = true;
+    }
     const w = this.weapons;
     const def = w.cur.def;
     const playing = this.state === 'playing';
@@ -1608,13 +1621,15 @@ export class Game {
     }
     this.nvg.update(dt, this.env, this.camera, laser);
     const u = this.pipeline.grade.mat.uniforms;
+    u.uTint.value.copy(this.env.gradeTint);
+    u.uSatBoost.value = this.env.gradeSat;
     u.uNVG.value = this.nvg.vis;
     u.uNVGPower.value = this.nvg.power;
     u.uNVGGain.value = this.nvg.gain;
     u.uNVGFlash.value = this.nvg.flash;
     u.uNVGIllum.value = this.nvg.illum;
     u.tDepth.value = Settings.data.ao ? this.pipeline.ao.beautyRenderTarget.depthTexture : null;
-    if (!u.tDepth.value) u.uNVGIllum.value = 0;
+    u.uHasDepth.value = u.tDepth.value ? 1 : 0;
     u.uNear.value = this.camera.near;
     u.uFar.value = this.camera.far;
     this.pipeline.bloom.strength = 0.35 + 0.45 * this.nvg.vis * Math.min(1.2, this.nvg.power);
@@ -2151,7 +2166,10 @@ export class Game {
   /** Thick, rolling smoke: big soft puffs swelling out of the canister and drifting with the wind. */
   private smokeAcc = new Map<SmokeCloud, number>();
   private emitSmoke(c: SmokeCloud, dt: number) {
-    const acc = (this.smokeAcc.get(c) ?? 0) + dt * (c.t < 3 ? 16 : 7);
+    // (fewer, slightly bigger puffs on the lower presets: same cover, less overdraw)
+    const q = Settings.data.quality;
+    const rate = q === 'low' ? 0.5 : q === 'medium' ? 0.75 : 1;
+    const acc = (this.smokeAcc.get(c) ?? 0) + dt * (c.t < 3 ? 16 : 7) * rate;
     let n = Math.floor(acc);
     this.smokeAcc.set(c, acc - n);
     const wind = this.weather.wind;
@@ -2160,7 +2178,7 @@ export class Game {
       const p = c.p.clone().add(new THREE.Vector3(Math.cos(a) * r, 0.3 + Math.random() * Math.min(2.5, c.r * 0.4), Math.sin(a) * r));
       const v = new THREE.Vector3((Math.random() - 0.5) * 0.8 + wind.x * 0.05, 0.25 + Math.random() * 0.3, (Math.random() - 0.5) * 0.8 + wind.z * 0.05);
       const g = 0.7 + Math.random() * 0.12;
-      this.fx.smokePuff(p, v, [g, g, g * 1.02], 2.2 + Math.random() * 1.8, 9 + Math.random() * 4);
+      this.fx.smokePuff(p, v, [g, g, g * 1.02], (2.2 + Math.random() * 1.8) / Math.sqrt(rate), 9 + Math.random() * 4);
     }
   }
 
@@ -3024,7 +3042,8 @@ export class Game {
    *  camera never sits inside it; hidden whenever the body would need poses it does not have. */
   private updateLegs(dt: number) {
     const pl = this.player;
-    const show = this.avatar.alive && !this.killcam && pl.stance === 'stand' && !pl.sliding && !pl.diving && !pl.mantle && !pl.ladder;
+    // (only posed when you can see them: looking down; it's a whole skinned soldier)
+    const show = this.avatar.alive && !this.killcam && pl.stance === 'stand' && !pl.sliding && !pl.diving && !pl.mantle && !pl.ladder && pl.pitch < -0.32;
     this.legs.root.visible = show;
     if (!show) return;
     const s = this.legsBuf;

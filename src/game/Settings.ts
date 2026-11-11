@@ -35,7 +35,7 @@ export interface SettingsData {
   weather: 'auto' | 'clear' | 'overcast' | 'rain' | 'snow';
   /** map variant: autumn, winter (snow-covered), or random per match */
   mapVariant: 'autumn' | 'winter' | 'random';
-  timeOfDay: 'dynamic' | 'dawn' | 'day' | 'golden' | 'night';
+  timeOfDay: 'dynamic' | 'dawn' | 'day' | 'golden' | 'blue' | 'night';
   godRays: boolean;
   masterVolume: number;
   sfxVolume: number;
@@ -45,11 +45,13 @@ export interface SettingsData {
   botDifficulty: 'recruit' | 'regular' | 'veteran';
 }
 
+// Low aims for 120 fps on integrated graphics (dynamic resolution targets it); the others for 60.
+// (Light pool, grass blades, terrain shader and weather budgets follow the preset on the next load.)
 const PRESETS: Record<Quality, Partial<SettingsData>> = {
-  low: { renderScale: 0.75, shadows: true, shadowRes: 1024, ao: false, bloom: false, antialias: false, grassDensity: 0.3 },
-  medium: { renderScale: 0.9, shadows: true, shadowRes: 2048, ao: true, bloom: true, antialias: false, grassDensity: 0.6 },
-  high: { renderScale: 1, shadows: true, shadowRes: 2048, ao: true, bloom: true, antialias: true, grassDensity: 1 },
-  ultra: { renderScale: 1, shadows: true, shadowRes: 4096, ao: true, bloom: true, antialias: true, grassDensity: 1.5 },
+  low: { renderScale: 0.72, shadows: true, shadowRes: 1024, ao: false, bloom: false, antialias: false, grassDensity: 0.3, godRays: false, dof: false, motionBlur: false, targetFps: 120 },
+  medium: { renderScale: 0.85, shadows: true, shadowRes: 2048, ao: true, bloom: true, antialias: false, grassDensity: 0.6, godRays: true, dof: true, targetFps: 60 },
+  high: { renderScale: 1, shadows: true, shadowRes: 2048, ao: true, bloom: true, antialias: true, grassDensity: 1, godRays: true, dof: true, targetFps: 60 },
+  ultra: { renderScale: 1, shadows: true, shadowRes: 4096, ao: true, bloom: true, antialias: true, grassDensity: 1.4, godRays: true, dof: true, targetFps: 60 },
 };
 
 const DEFAULTS: SettingsData = {

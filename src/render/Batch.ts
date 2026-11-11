@@ -72,7 +72,74 @@ const flatMats = new Map<string, THREE.MeshStandardMaterial>();
  * of one per material. Shader / transparent parts (optic lenses, laser beams, reticles) are dropped:
  * at third-person distances they're invisible anyway. Sockets (empty Object3Ds) are kept.
  */
-export function bakeFlat(root: THREE.Object3D, key = 'prop') {
+const flatGeos = new Map<string, THREE.BufferGeometry>();
+const proxyGeos = new Map<string, THREE.BufferGeometry>();
+
+/**
+ * A distance stand-in for a baked prop: one box per sizeable part (in the root's space), vertex
+ * coloured like the part. A rifle that is ~20-40k triangles up close becomes ~150-300 at range.
+ * Call BEFORE bakeFlat (which removes the source meshes). Cached by `geoKey`.
+ */
+export function bakeProxy(root: THREE.Object3D, geoKey: string, maxParts = 22) {
+  let geo = proxyGeos.get(geoKey);
+  if (!geo) {
+    root.updateMatrixWorld(true);
+    const inv = new THREE.Matrix4().copy(root.matrixWorld).invert();
+    const parts: { box: THREE.Box3; vol: number; c: THREE.Color }[] = [];
+    root.traverse((o) => {
+      const m = o as THREE.Mesh;
+      if (!m.isMesh || !m.visible) return;
+      const mat = (Array.isArray(m.material) ? m.material[0] : m.material) as THREE.MeshStandardMaterial;
+      if (!mat || !mat.color || mat.transparent) return;
+      let p: THREE.Object3D | null = m.parent;
+      while (p && p !== root) {
+        if (!p.visible) return;
+        p = p.parent;
+      }
+      if (!m.geometry.boundingBox) m.geometry.computeBoundingBox();
+      const box = m.geometry.boundingBox!.clone().applyMatrix4(new THREE.Matrix4().multiplyMatrices(inv, m.matrixWorld));
+      const sz = box.getSize(new THREE.Vector3());
+      const vol = Math.max(sz.x, 0.004) * Math.max(sz.y, 0.004) * Math.max(sz.z, 0.004);
+      if (Math.max(sz.x, sz.y, sz.z) < 0.03) return;
+      parts.push({ box, vol, c: mat.color.clone() });
+    });
+    parts.sort((a, b) => b.vol - a.vol);
+    const geos: THREE.BufferGeometry[] = [];
+    for (const pt of parts.slice(0, maxParts)) {
+      const sz = pt.box.getSize(new THREE.Vector3()).max(new THREE.Vector3(0.006, 0.006, 0.006));
+      const g = new THREE.BoxGeometry(sz.x, sz.y, sz.z);
+      g.translate(...pt.box.getCenter(new THREE.Vector3()).toArray());
+      g.deleteAttribute('uv');
+      const n = g.attributes.position.count;
+      const col = new Float32Array(n * 3);
+      for (let i = 0; i < n; i++) col.set([pt.c.r, pt.c.g, pt.c.b], i * 3);
+      g.setAttribute('color', new THREE.BufferAttribute(col, 3));
+      geos.push(g.toNonIndexed());
+    }
+    geo = (geos.length ? mergeGeometries(geos, false) : null) ?? new THREE.BoxGeometry(0.05, 0.05, 0.6);
+    geo.computeBoundingSphere();
+    proxyGeos.set(geoKey, geo);
+  }
+  return geo;
+}
+
+export function bakeFlat(root: THREE.Object3D, key = 'prop', geoKey?: string) {
+  const cached = geoKey ? flatGeos.get(geoKey) : undefined;
+  if (cached) {
+    // same model as one already baked: drop the parts, share the merged geometry
+    const drop: THREE.Object3D[] = [];
+    root.traverse((o) => {
+      const m = o as THREE.Mesh;
+      if (m.isMesh && !(m as any).isSkinnedMesh && !(m as any).isInstancedMesh) drop.push(m);
+    });
+    for (const m of drop) m.removeFromParent();
+    const mesh = new THREE.Mesh(cached, flatMats.get(key)!);
+    mesh.castShadow = true;
+    mesh.receiveShadow = true;
+    mesh.name = 'baked';
+    root.add(mesh);
+    return mesh;
+  }
   root.updateMatrixWorld(true);
   const inv = new THREE.Matrix4().copy(root.matrixWorld).invert();
   const geos: THREE.BufferGeometry[] = [];
@@ -116,6 +183,7 @@ export function bakeFlat(root: THREE.Object3D, key = 'prop') {
   const merged = mergeGeometries(geos, false);
   if (!merged) return null;
   merged.computeBoundingSphere();
+  if (geoKey) flatGeos.set(geoKey, merged);
   let mat = flatMats.get(key);
   if (!mat) {
     mat = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: Math.min(0.75, rough / n), metalness: Math.min(0.5, metal / n), name: 'flat:' + key });

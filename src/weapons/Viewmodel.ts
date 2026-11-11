@@ -473,28 +473,35 @@ export class Viewmodel {
   static makePhone() {
     // rugged tactical tablet: olive polymer shell, raised bumper frame, thick corner guards
     const g = new THREE.Group();
+    g.name = 'UAV_Tablet';
     const shell = new THREE.MeshStandardMaterial({ color: 0x4a4c3e, roughness: 0.78, metalness: 0.05 });
     const frame = new THREE.MeshStandardMaterial({ color: 0x5c5e4c, roughness: 0.7, metalness: 0.05 });
     const dark = new THREE.MeshStandardMaterial({ color: 0x1a1c1a, roughness: 0.55, metalness: 0.2 });
     const W = 0.078, H = 0.14, D = 0.013;
-    g.add(new THREE.Mesh(new RoundedBoxGeometry(W, H, D, 3, 0.006), shell));
+    const body = new THREE.Mesh(new RoundedBoxGeometry(W, H, D, 3, 0.006), shell);
+    body.name = 'body';
+    g.add(body);
     // bezel ring around the glass (four bars standing proud of the face)
-    for (const [w, h, x, y] of [[W - 0.004, 0.009, 0, H / 2 - 0.006], [W - 0.004, 0.016, 0, -H / 2 + 0.009], [0.007, H - 0.02, -W / 2 + 0.0045, 0], [0.007, H - 0.02, W / 2 - 0.0045, 0]] as const) {
+    for (const [w, h, x, y, nm] of [[W - 0.004, 0.009, 0, H / 2 - 0.006, 'top'], [W - 0.004, 0.016, 0, -H / 2 + 0.009, 'bottom'], [0.007, H - 0.02, -W / 2 + 0.0045, 0, 'left'], [0.007, H - 0.02, W / 2 - 0.0045, 0, 'right']] as const) {
       const bar = new THREE.Mesh(new RoundedBoxGeometry(w, h, 0.004, 2, 0.0015), frame);
+      bar.name = `bezel_${nm}`;
       bar.position.set(x, y, D / 2 + 0.0008);
       g.add(bar);
     }
     for (const sx of [-1, 1]) for (const sy of [-1, 1]) {
       const b = new THREE.Mesh(new RoundedBoxGeometry(0.018, 0.018, D + 0.005, 2, 0.004), dark);
+      b.name = `corner_guard_${sy > 0 ? 'top' : 'bottom'}_${sx > 0 ? 'right' : 'left'}`;
       b.position.set(sx * (W / 2 - 0.006), sy * (H / 2 - 0.006), 0);
       g.add(b);
     }
     // antenna nub + side keys
     const ant = new THREE.Mesh(new THREE.CylinderGeometry(0.004, 0.005, 0.018, 10), dark);
+    ant.name = 'antenna';
     ant.position.set(W / 2 - 0.016, H / 2 + 0.008, -0.002);
     g.add(ant);
     for (const ky of [0.02, 0.035]) {
       const key = new THREE.Mesh(new THREE.BoxGeometry(0.003, 0.01, 0.005), dark);
+      key.name = ky < 0.03 ? 'side_key_lower' : 'side_key_upper';
       key.position.set(-W / 2 - 0.001, ky, 0);
       g.add(key);
     }
@@ -1359,7 +1366,7 @@ export class Viewmodel {
     const muz = new THREE.Vector3();
     this.model.sockets.muzzle.getWorldPosition(muz);
     this.flashLight.position.copy(muz);
-    this.flashLight.intensity = this.muzzleFlashT > 0 && !def.sound.suppressed ? 6 * this.muzzleFlashT : 0;
+    this.flashLight.intensity = this.muzzleFlashT > 0 && !def.sound.suppressed ? 2.4 * this.muzzleFlashT : 0;
     // indoor dims sunlight on the viewmodel
     this.lighting.intensity = lerp(2.6, 0.35, c.indoor) * this.daylight;
     this.ambient.intensity = lerp(0.55, 0.3, c.indoor) * (0.35 + 0.65 * this.daylight);

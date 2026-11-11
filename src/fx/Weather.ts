@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { Settings } from '../game/Settings';
 import { TextureBaker } from '../render/TextureBaker';
 import { Snowfall, SNOW } from './Snow';
 import { coastX } from '../world/MapLayout';
@@ -79,6 +80,11 @@ export class Weather {
       transparent: true,
       depthWrite: false,
     });
+    // (particle budgets scale with the quality preset: random seeds, so a shorter draw range
+    // thins the rain evenly)
+    const q = Settings.data.quality;
+    const qk = q === 'low' ? 0.35 : q === 'medium' ? 0.6 : q === 'high' ? 0.8 : 1;
+    g.setDrawRange(0, Math.round(N * qk) * 2);
     this.rain = new THREE.LineSegments(g, this.rainMat);
     this.rain.frustumCulled = false;
     this.rain.renderOrder = 30;
@@ -115,7 +121,13 @@ export class Weather {
       scene.add(sp);
       sprites.push(sp);
     }
-    this.bank = { sprites, front: -400, speed: 3, life: 0, active: false };
+    // fog banks are big transparent layers (overdraw): fewer, slightly denser ones on the lower presets
+    const keep = q === 'low' ? 3 : q === 'medium' ? 2 : 1;
+    const used = sprites.filter((_, i) => i % keep === 0);
+    for (const sp of sprites) if (!used.includes(sp)) scene.remove(sp);
+    for (const sp of used) sp.userData.o = Math.min(0.6, sp.userData.o * (1 + (keep - 1) * 0.35));
+    this.snow.setBudget(qk);
+    this.bank = { sprites: used, front: -400, speed: 3, life: 0, active: false };
   }
 
   /** Map variant / match start. */
