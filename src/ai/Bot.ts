@@ -1572,17 +1572,70 @@ export class Bot implements Combatant {
 
   // ---------------------------------------------------------------- network puppet
   /** latest replicated state [x, y, z, yaw, aimYaw, aimPitch, speed, alive, crouch, deathT, engaging] */
-  netState(s: ArrayLike<number>) {
+  /**
+   * A replicated pose with the time it was taken (this machine's clock: the sender's timestamp
+   * mapped through the measured clock offset). Kept in a short buffer and drawn ~100 ms in the
+   * past, *between* two real snapshots (snapshot interpolation) — smooth and exact instead of
+   * chasing the latest one; briefly extrapolated along the velocity if packets are late.
+   */
+  netState(s: ArrayLike<number>, t = performance.now() / 1000) {
+    const buf = this.netBuf;
+    // drop a sample older than the newest (unreliable channel: out of order)
+    if (buf.length && t <= buf[buf.length - 1].t) {
+      if (t < buf[buf.length - 1].t - 0.5) buf.length = 0; // a clock reset (rejoin / migration)
+      else return;
+    }
+    const e = this.netPool.pop() ?? { t: 0, s: new Float32Array(POSE_N) };
+    e.t = t;
+    e.s.set(s as ArrayLike<number>);
+    buf.push(e);
+    while (buf.length > 12) this.netPool.push(buf.shift()!);
     if (!this.netTarget) {
       this.netTarget = new Float32Array(POSE_N);
-      this.netTarget.set(s as ArrayLike<number>);
-      this.netCur.set(this.netTarget);
-    } else this.netTarget.set(s as ArrayLike<number>);
+      this.netCur.set(e.s);
+    }
+    this.netTarget.set(e.s);
+  }
+  private netBuf: { t: number; s: Float32Array }[] = [];
+  private netPool: { t: number; s: Float32Array }[] = [];
+  /** render time for interpolated puppets (set by the network layer each frame) */
+  static netRenderT = 0;
+  /** sample the buffer at time t into out (false: nothing yet) */
+  private netSample(t: number, out: Float32Array) {
+    const b = this.netBuf;
+    if (!b.length) return false;
+    if (t <= b[0].t) {
+      out.set(b[0].s);
+      return true;
+    }
+    let i = 1;
+    while (i < b.length && b[i].t < t) i++;
+    if (i >= b.length) {
+      // starved: extrapolate the newest along its velocity, at most 250 ms
+      const last = b[b.length - 1];
+      out.set(last.s);
+      const ex = Math.min(0.25, t - last.t);
+      out[0] += last.s[16] * ex;
+      out[2] += last.s[17] * ex;
+      return true;
+    }
+    const A = b[i - 1], B = b[i];
+    const k = (t - A.t) / Math.max(1e-4, B.t - A.t);
+    // teleports (respawn): snap
+    const jump = Math.hypot(B.s[0] - A.s[0], B.s[2] - A.s[2]) > 6;
+    for (let j = 0; j < POSE_N; j++) {
+      const a = A.s[j], c = B.s[j];
+      if (jump || j === 7 || j === 8 || j === 10 || j === 11 || j === 12 || j === 14) out[j] = k < 0.5 && !jump ? a : c;
+      else if (j === 3 || j === 4) out[j] = a + wrapAngle(c - a) * k;
+      else out[j] = a + (c - a) * k;
+    }
+    return true;
   }
   /** this slot is now (or no longer) owned elsewhere */
   setPuppet(v: boolean) {
     this.netPuppet = v;
     this.netTarget = null;
+    this.netBuf.length = 0;
     if (v) {
       this.target = null;
       this.path = [];
@@ -1626,15 +1679,11 @@ export class Bot implements Combatant {
       if (this.netDeadT > 0.6) this.netKill(new THREE.Vector3(Math.sin(s[3]), 0, Math.cos(s[3])), 'body');
     } else this.netDeadT = 0;
     const c = this.netCur;
-    const k = 1 - Math.exp(-dt * 14);
-    const far = Math.hypot(s[0] - c[0], s[2] - c[2]) > 6;
-    for (const i of SMOOTH_I) c[i] = far ? s[i] : c[i] + (s[i] - c[i]) * k;
-    for (const i of [3, 4]) c[i] = c[i] + wrapAngle(s[i] - c[i]) * (far ? 1 : k);
+    if (!this.netSample(Bot.netRenderT || performance.now() / 1000 - 0.1, c)) c.set(s);
     c[7] = 1;
     c[9] = 0;
-    for (const i of COPY_I) c[i] = s[i];
-    this.body.teleport(new THREE.Vector3(c[0], c[1], c[2]));
-    this.vel.set((s[0] - c[0]) * 10, 0, (s[2] - c[2]) * 10);
+    this.body.teleport(this.sT1.set(c[0], c[1], c[2]));
+    this.vel.set(c[16], c[18], c[17]);
     this.puppet(c, dt);
     this.updateHitbox();
   }
@@ -1669,8 +1718,6 @@ export class Bot implements Combatant {
 }
 
 // ---------------------------------------------------------------- helpers
-const SMOOTH_I = [0, 1, 2, 5, 6, 8, 11, 13, 15, 16, 17, 18];
-const COPY_I = [10, 12, 14];
 const _q = new THREE.Quaternion();
 const _q2 = new THREE.Quaternion();
 const _v = new THREE.Vector3();

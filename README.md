@@ -52,7 +52,11 @@ URL options: `?quality=low|medium|high|ultra`, `?weather=clear|overcast|rain|sno
 | Climb ladder | walk into it, W/S, Space to let go. From the top, walk over the edge towards the ladder to climb down |
 | Tactical map | M. Scroll to zoom at the cursor, drag to pan, left click (or X) to ping, right click for a waypoint (right click it again to clear), R to re-centre. You can still move while it is open, but not shoot or aim |
 | Scoreboard | Tab |
-| Chat / commands (multiplayer) | Enter, or / for a command. `/help` lists them |
+| Chat / commands (multiplayer) | Enter, or / for a command. `/help` lists them. U = team chat |
+| Voice chat (multiplayer) | `/voice` to turn on, hold K to talk (or open mic in Settings) |
+| Spectate / free camera | F6 (fly with WASD, SPACE / C, SHIFT; fire = follow next player) |
+| Loadout for next life | 1–5 on the death screen |
+| Controller | Plug in any gamepad: see Update 28 |
 | Squad orders | Hold Y, flick the mouse at an order, release |
 | AI debug overlay | F4 |
 | Pause, settings, movement tuning | Esc |
@@ -285,6 +289,143 @@ URL options: `?quality=low|medium|high|ultra`, `?weather=clear|overcast|rain|sno
 - **MP7:** sprint and jump clutter reduced.
 - **Rifle:** support hand moved so it no longer shows through the optic window.
 - **Pistol:** hold reworked.
+
+## Update 28: multiplayer netcode, lobby, voice, controller, rebinding, saved loadouts
+
+### Bug fix: bots losing their guns
+
+After a few minutes many bots lost their gun and their arms twitched back and forth.
+
+- **Cause:** the soldier's recoil spring was integrated in one explicit step per pose. Far and off-screen bots are animated at a few Hz, so that step was 0.1–0.3 s. At that step size a stiff spring gains energy on every step. Each shot pumped it: first it wobbled (the twitching arms), then it threw the gun off to infinity / NaN (the vanishing guns).
+- **Fix:** the spring is sub-stepped at 120 Hz whatever the frame step, clamped, and NaN-guarded. The gun placement also refuses non-finite positions.
+- **Test:** `tools/gunprobe.cjs` plays a 4-minute 12 v 12 match. It checks every bot's gun (parenting, visibility, hand-to-grip distance, NaN) every 30 s. Before the fix: 18–21 broken bots. After: none.
+
+### Netcode (`src/net/NetGame.ts`, `src/net/Net.ts`)
+
+**Two channels per player**
+- Reliable JSON for events: hits, deaths, chat, roster.
+- Unreliable binary for poses. A late pose is useless, so it is never resent.
+
+**Binary, delta-compressed snapshots**
+- Each soldier's 20 pose values are quantised to 16-bit integers.
+- A pose field is only sent when it changed in the last 3 packets. Losing a packet is covered by the next two. A full keyframe goes out every second.
+- Soldiers more than 150 m from a player update at a third of the rate for that player (interest management).
+- Flags, score and clock go at 10 Hz. Shots go out immediately.
+- Host upload is about **6 KB/s per player**, down from about 17 KB/s.
+
+**Snapshot interpolation**
+- Puppets are drawn about 100 ms in the past, between two real snapshots. The delay adapts: two intervals plus 3× the measured jitter.
+- Each sender's clock is mapped through a measured offset.
+- When packets are late, motion is extrapolated along the velocity for at most 250 ms.
+- Respawn teleports snap instead of sliding across the map.
+
+**Host checks and lag compensation**
+- The host keeps 2 s of everyone's positions.
+- Each hit a client reports carries the client's render time and where it saw the victim and itself. The host rewinds to that moment and rejects hits more than 3 m off.
+- Movement faster than 20 m/s is ignored. Several bad samples in a row resync instead of freezing the player.
+- Shots beyond the gun's fire rate (token bucket at 1.6×) or magazine are dropped.
+- Damage over 400 is refused.
+- Repeated failures remove the player.
+
+**Host migration**
+- If the host leaves (or goes silent for 6 s), the lowest-slot player takes the room over under the same code.
+- The match, clock, score, flags and bots carry on from there.
+- The other players reconnect automatically and get their own slots back. Players who don't return within 20 s become bots.
+- A host tab in the background sends a keepalive, so alt-tabbing does not trigger a migration.
+
+### Connectivity
+- **Settings → Multiplayer:**
+  - **TURN relay** (address, login, *relay only* to hide your IP). Use it for strict school, office or mobile networks.
+  - **TEST CONNECTION** checks local, STUN (direct through NAT) and TURN, and says what to expect.
+- **`/net`** shows how you are connected (same network, direct through NAT, or relayed), the protocol, round trip, loss, jitter, interpolation delay and bandwidth.
+- A dedicated server is not included. The host's browser runs the match, and migration covers it leaving.
+
+### Lobby and social
+
+**Finding and starting games**
+- **Room browser and QUICK PLAY** (Multiplayer screen). Public rooms are listed without a server: the first public host claims a well-known registry id on the broker, and other hosts announce to it. Quick play joins the fullest room, or opens a public room if there is none.
+- **Public or private rooms** (`/public` toggles in game).
+- **Party invites:** the invite link (`/code`) puts friends on your team.
+
+**Teams and matches**
+- **Teams:** auto-balanced at every match start. `/balance` (host) evens them out at any time; `/team` switches sides.
+- **Ready-up:** after a match, PLAY AGAIN or `/ready`. The next match starts 3 s after everyone is ready. The host can still `/restart`.
+- **Spectator / free camera** (F6 or `/spec`, also in single player):
+  - Fly: WASD, SPACE / C up and down, SHIFT faster.
+  - Fire follows the next player in a chase camera. Aim returns to free flight.
+  - F6 drops you back in.
+
+**Voice chat** (`/voice`, needs the microphone)
+- Peer-to-peer WebRTC audio between players.
+- Push to talk (**K**) or open mic with a voice gate.
+- **Team** channel, or **proximity** (everyone near you, fading out by 50 m).
+- Per-player volume, speaking indicator on the HUD and scoreboard.
+
+**Chat**
+- Enter = everyone, **U = team chat**.
+- `/mute name` hides a player's chat and voice.
+- A swear-word filter is on by default (English and Norwegian), with a setting to turn it off.
+
+**Network info**
+- **Ping and packet loss** for every player on the scoreboard.
+- **F3** now includes a **network graph**: round trip, interpolation delay, upload / download and loss over the last 20 s.
+
+### Controls
+
+**Key rebinding** (Settings → Controls)
+- Click an action, press the new key or mouse button. Esc cancels, Backspace clears.
+- A key used elsewhere is moved, not duplicated.
+- RESET KEYS restores the defaults.
+
+**Controller** (any standard-mapping gamepad)
+
+| Control | Action |
+| --- | --- |
+| Left stick | Move (analog) |
+| Right stick | Look (response curve) |
+| LT / RT | Aim / fire |
+| A | Jump |
+| B | Crouch (hold: prone) |
+| X | Reload |
+| Y | Swap weapon |
+| LB / RB | Tactical / lethal |
+| L3 | Sprint |
+| R3 | Melee |
+| D-pad | NVG / ping / killstreak / map |
+| View | Scoreboard |
+| Menu | Pause |
+
+- Look speed, deadzone and invert are in Settings → Controls.
+- **Aim assist** (controller only, never with a mouse, can be turned off):
+  - The look slows down over a visible enemy near the crosshair.
+  - While you move or turn, the view is drawn a little along with them.
+  - It never turns the camera by itself when the sticks are centred.
+
+**Sensitivity converter**
+- Type your sensitivity from CS2 / Apex, Valorant or Overwatch 2 / Call of Duty to get the same turn per mouse movement here.
+- It also shows cm per 360°.
+
+### Loadouts
+- **Five saved, named loadouts** (bar at the top of the loadout screen; double-click to rename).
+- **On the death screen, keys 1–5** pick the loadout for your next life.
+
+### New keys
+
+| Action | Key |
+| --- | --- |
+| Team chat | U |
+| Push to talk | K |
+| Spectate / free camera | F6 |
+| Loadout for next life (death screen) | 1–5 |
+
+### Tested
+- `tools/mptest.cjs` (2 tabs): sync, chat, a client killing a host bot, bots killing the client, `/bots`, `/team`.
+- `tools/migtest.cjs` (3 tabs, fake microphones):
+  - Bandwidth per player.
+  - Voice calls established between both clients.
+  - Host tab closed: the next player takes over, the third reconnects, bots keep moving on both.
+- `tools/gunprobe.cjs`: 4-minute match, bots keep their guns.
+- `match12`: 12 v 12 smoke test.
 
 ## Update 27: smarter bots — perception, decisions, cover, fireteams, squad orders
 

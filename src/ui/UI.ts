@@ -1,4 +1,6 @@
 import { Settings, SettingsData, Quality } from '../game/Settings';
+import { ACTION_LABELS, keysFor, keyLabel, applyKeybinds, Action } from '../core/Input';
+import { loadIce, saveIce, testIce } from '../net/Net';
 import { WEAPONS, PRIMARIES, SECONDARIES, WeaponDef } from '../weapons/WeaponDefs';
 import type { WeaponPreview } from './WeaponPreview';
 import { icon } from './Icons';
@@ -120,6 +122,11 @@ export class UI {
       return 'frag';
     }
   })();
+  /** five saved loadouts (named); the active one tracks every change made in the loadout screen */
+  presets: { name: string; p: WeaponId; s: WeaponId; l: LethalId; t: TacticalId }[] = [];
+  activePreset = 0;
+  /** multiplayer: per-row ping / speaking for the scoreboard (null offline) */
+  sbExtra: ((id: number) => { ping: string; talk: boolean } | null) | null = null;
   private settingsBack: 'menu' | 'pause' = 'menu';
   private loadoutBack: 'menu' | 'pause' = 'menu';
 
@@ -128,6 +135,7 @@ export class UI {
     if (!PRIMARIES.includes(this.primary)) this.primary = 'k416';
     if (!SECONDARIES.includes(this.secondary)) this.secondary = 'p80';
     if (!TACTICALS.some((t) => t.id === this.tactical)) this.tactical = 'flash';
+    this.loadPresets();
     this.loading = this.buildLoading();
     this.menu = this.buildMenu();
     this.hud = this.buildHUD();
@@ -263,6 +271,60 @@ export class UI {
   private ldSlot: 'p' | 's' | 'e' = 'p';
   private ldCat = '';
 
+  private loadPresets() {
+    const DEF: [string, WeaponId, WeaponId, LethalId, TacticalId][] = [
+      ['ASSAULT', 'k416', 'p80', 'frag', 'flash'], ['CLOSE QUARTERS', 'mp7', 'p80', 'semtex' as LethalId, 'stun'],
+      ['LONG RANGE', 'ks17' as WeaponId, 'p80', 'claymore' as LethalId, 'smoke'], ['SUPPORT', 'k416', 'p80', 'frag', 'smoke'], ['CUSTOM', 'k416', 'p80', 'frag', 'flash'],
+    ];
+    let saved: any[] = [];
+    try {
+      saved = JSON.parse(localStorage.getItem('ff.loadouts') || '[]');
+      this.activePreset = Math.max(0, Math.min(4, parseInt(localStorage.getItem('ff.loadout') || '0', 10) || 0));
+    } catch {
+      /* fresh */
+    }
+    const okW = (id: string, pool: readonly string[], d: WeaponId) => (pool.includes(id) ? (id as WeaponId) : d);
+    const okL = (id: string) => (LETHALS.some((l) => l.id === id) ? (id as LethalId) : 'frag');
+    const okT = (id: string) => (TACTICALS.some((t) => t.id === id) ? (id as TacticalId) : 'flash');
+    this.presets = DEF.map((d, i) => {
+      const v = saved[i];
+      if (v) return { name: String(v.name || d[0]).slice(0, 16), p: okW(v.p, PRIMARIES, 'k416'), s: okW(v.s, SECONDARIES, 'p80'), l: okL(v.l), t: okT(v.t) };
+      return { name: d[0], p: okW(d[1], PRIMARIES, 'k416'), s: okW(d[2], SECONDARIES, 'p80'), l: okL(d[3]), t: okT(d[4]) };
+    });
+    // no saved loadouts yet: the current single loadout becomes the first one
+    if (!saved.length) Object.assign(this.presets[0], { p: this.primary, s: this.secondary, l: this.lethal, t: this.tactical });
+    const a = this.presets[this.activePreset];
+    this.primary = a.p;
+    this.secondary = a.s;
+    this.lethal = a.l;
+    this.tactical = a.t;
+  }
+  private savePresets() {
+    try {
+      localStorage.setItem('ff.loadouts', JSON.stringify(this.presets));
+      localStorage.setItem('ff.loadout', String(this.activePreset));
+      localStorage.setItem('fjordfront.primary', this.primary);
+      localStorage.setItem('fjordfront.secondary', this.secondary);
+      localStorage.setItem('fjordfront.tactical', this.tactical);
+      localStorage.setItem('fjordfront.lethal', this.lethal);
+    } catch {
+      /* storage unavailable */
+    }
+  }
+  /** switch to saved loadout i (applies on the next spawn; the death screen uses this) */
+  selectPreset(i: number) {
+    const p = this.presets[i];
+    if (!p) return;
+    this.activePreset = i;
+    this.primary = p.p;
+    this.secondary = p.s;
+    this.lethal = p.l;
+    this.tactical = p.t;
+    this.savePresets();
+    this.updateMenuWeapon();
+    this.deathKey = '';
+  }
+
   showLoadout(back: 'menu' | 'pause' = 'menu', note = '') {
     this.loadoutBack = back;
     const e = this.loadoutEl;
@@ -297,7 +359,8 @@ export class UI {
       };
       const ecard = (id: string, name: string, desc: string, count: number, sel: boolean, group: string) =>
         `<div class="ldcard eqp ${sel ? 'eq on' : ''}" data-g="${group}" data-id="${id}">${sel ? '<i class="chk">✓</i>' : ''}<div class="th ic">${icon(id, 'big')}</div><div class="cn">${name}</div><div class="cs">${desc}</div><div class="cs">×${count} PER LIFE</div></div>`;
-      const top = `<div class="ldtop"><div class="ldtitle">${slot === 'p' ? 'PRIMARY WEAPON' : slot === 's' ? 'SIDEARM' : 'EQUIPMENT'} <small>${back === 'pause' ? 'changes apply on your next spawn' : 'choose your kit'}</small></div>
+      const bar = `<div class="ldpresets">${this.presets.map((p, i) => `<button data-preset="${i}" class="${i === this.activePreset ? 'on' : ''}" title="Double-click to rename"><small>${i + 1}</small>${p.name}</button>`).join('')}</div>`;
+      const top = `${bar}<div class="ldtop"><div class="ldtitle">${slot === 'p' ? 'PRIMARY WEAPON' : slot === 's' ? 'SIDEARM' : 'EQUIPMENT'} <small>${back === 'pause' ? 'changes apply on your next spawn' : 'choose your kit'}</small></div>
         <div class="ldslots">
           <button data-slot="p" class="${slot === 'p' ? 'on' : ''}"><small>PRIMARY</small>${WEAPONS[this.primary].short}</button>
           <button data-slot="s" class="${slot === 's' ? 'on' : ''}"><small>SIDEARM</small>${WEAPONS[this.secondary].short}</button>
@@ -324,6 +387,22 @@ export class UI {
         if (this.preview) this.preview.show(e.querySelector('.ldview') as HTMLElement, shown);
       }
       e.querySelectorAll('[data-slot]').forEach((b) => b.addEventListener('click', () => { this.ldSlot = (b as HTMLElement).dataset.slot as 'p' | 's' | 'e'; this.ldCat = ''; render(); }));
+      e.querySelectorAll('[data-preset]').forEach((b) => {
+        const i = +(b as HTMLElement).dataset.preset!;
+        b.addEventListener('click', () => {
+          this.selectPreset(i);
+          this.ldCat = '';
+          render();
+        });
+        b.addEventListener('dblclick', () => {
+          const n = prompt('Loadout name', this.presets[i].name);
+          if (n && n.trim()) {
+            this.presets[i].name = n.trim().toUpperCase().slice(0, 16);
+            this.savePresets();
+            render();
+          }
+        });
+      });
       e.querySelectorAll('[data-cat]').forEach((b) => b.addEventListener('click', () => { this.ldCat = (b as HTMLElement).dataset.cat!; render(); }));
       e.querySelectorAll('.ldcard').forEach((c) =>
         c.addEventListener('click', () => {
@@ -334,14 +413,8 @@ export class UI {
           else if (el.dataset.g === 't') this.tactical = id as TacticalId;
           else if (el.dataset.g === 'l') this.lethal = id as LethalId;
           else return;
-          try {
-            localStorage.setItem('fjordfront.primary', this.primary);
-            localStorage.setItem('fjordfront.secondary', this.secondary);
-            localStorage.setItem('fjordfront.tactical', this.tactical);
-            localStorage.setItem('fjordfront.lethal', this.lethal);
-          } catch {
-            /* storage unavailable */
-          }
+          Object.assign(this.presets[this.activePreset], { p: this.primary, s: this.secondary, l: this.lethal, t: this.tactical });
+          this.savePresets();
           render();
         }),
       );
@@ -367,7 +440,7 @@ export class UI {
     const select = (k: keyof SettingsData, label: string, opts: [string, string][]) =>
       `<label class="opt"><span>${label}</span><select data-k="${k}">${opts.map(([v, l]) => `<option value="${v}" ${String(s[k]) === v ? 'selected' : ''}>${l}</option>`).join('')}</select></label>`;
     e.innerHTML = `<div class="panel"><div class="ptitle">SETTINGS</div>
-      <div class="tabs"><button data-t="g" class="on">GAMEPLAY</button><button data-t="v">GRAPHICS</button><button data-t="a">AUDIO</button></div>
+      <div class="tabs"><button data-t="g" class="on">GAMEPLAY</button><button data-t="c">CONTROLS</button><button data-t="v">GRAPHICS</button><button data-t="a">AUDIO</button><button data-t="m">MULTIPLAYER</button></div>
       <div class="tab" data-t="g">
         ${slider('sensitivity', 'Mouse sensitivity', 0.1, 4, 0.05)}
         ${slider('adsSensitivity', 'ADS sensitivity multiplier', 0.3, 1.5, 0.05)}
@@ -403,6 +476,36 @@ export class UI {
         ${toggle('godRays', 'Sun shafts (god rays)')}
         ${toggle('showFps', 'Show FPS')}
       </div>
+      <div class="tab hidden" data-t="c">
+        <div class="lsub">SENSITIVITY FROM ANOTHER GAME</div>
+        <div class="opt conv"><span>Same turn speed as</span><span class="convrow"><select class="cg">
+          <option value="0.022">CS2 / CS:GO / Apex Legends</option><option value="0.07">Valorant</option><option value="0.0066">Overwatch 2 / Call of Duty (MW / BO)</option><option value="0.12605">Fjordfront (another computer)</option></select>
+          <input class="cv" type="number" step="0.01" min="0" placeholder="their sens"><button data-a="conv">APPLY</button></span></div>
+        <div class="opt"><span></span><small class="convout" style="color:var(--dim);grid-column:span 2">Same mouse DPI: the same hand movement turns the same amount. We turn ${(0.0022 * 180 / Math.PI).toFixed(4)}° per mouse count × sensitivity.</small></div>
+        <div class="lsub">CONTROLLER</div>
+        ${slider('padSensitivity', 'Look speed', 0.3, 2.5, 0.05)}
+        ${slider('padDeadzone', 'Stick deadzone', 0.03, 0.3, 0.01)}
+        ${toggle('padInvertY', 'Invert look (controller)')}
+        ${toggle('aimAssist', 'Aim assist (controller only: slow-down + rotational, needs a visible target)')}
+        <div class="lsub">KEYS <small>click a key, then press the new one (Esc cancels, Backspace clears)</small></div>
+        <div class="binds">${ACTION_LABELS.map(([a, l]) => `<div class="bind"><span>${l}</span><button data-bind="${a}">${keysFor(a).map(keyLabel).join(' / ') || '—'}</button></div>`).join('')}</div>
+        <div class="row"><button data-a="resetkeys">RESET KEYS</button></div>
+      </div>
+      <div class="tab hidden" data-t="m">
+        <div class="lsub">VOICE CHAT</div>
+        ${select('voiceMode', 'Talk', [['ptt', 'Push to talk (K by default)'], ['open', 'Open mic (voice activated)']])}
+        ${select('voiceChannel', 'Channel', [['team', 'Team: only your side hears you'], ['proximity', 'Proximity: anyone near you, fading with distance']])}
+        ${slider('voiceVolume', 'Voice volume', 0, 1.5, 0.05)}
+        <div class="opt"><span></span><small style="color:var(--dim);grid-column:span 2">Turn voice on in a room with /voice (needs the microphone). /mute name silences a player.</small></div>
+        ${toggle('profanityFilter', 'Filter swear words in chat')}
+        <div class="lsub">CONNECTION <small>peer-to-peer; a TURN relay helps on strict school / office / mobile networks</small></div>
+        <label class="opt"><span>TURN server</span><input class="ice" data-ice="turnUrl" placeholder="turn:relay.example.org:3478" spellcheck="false"></label>
+        <label class="opt"><span>TURN username</span><input class="ice" data-ice="turnUser" spellcheck="false" autocomplete="off"></label>
+        <label class="opt"><span>TURN password</span><input class="ice" data-ice="turnPass" type="password" autocomplete="off"></label>
+        <label class="opt"><span>Relay only (hides your IP, a little more latency)</span><input type="checkbox" class="ice" data-ice="relayOnly"><i class="tg"></i></label>
+        <div class="row"><button data-a="icetest">TEST CONNECTION</button></div>
+        <div class="icemsg"></div>
+      </div>
       <div class="tab hidden" data-t="a">
         ${slider('masterVolume', 'Master volume', 0, 1, 0.05)}
         ${slider('sfxVolume', 'Effects', 0, 1, 0.05)}
@@ -418,7 +521,8 @@ export class UI {
         e.querySelectorAll('.tab').forEach((x) => x.classList.toggle('hidden', (x as HTMLElement).dataset.t !== t));
       }),
     );
-    e.querySelectorAll('input,select').forEach((inp) =>
+    this.wireControls(e);
+    e.querySelectorAll('input[data-k],select[data-k]').forEach((inp) =>
       inp.addEventListener('input', () => {
         const el = inp as HTMLInputElement;
         const k = el.dataset.k as keyof SettingsData;
@@ -448,6 +552,103 @@ export class UI {
       Settings.reset();
       this.showSettings(this.settingsBack);
       this.handlers.onSettings();
+    });
+  }
+
+  /** Controls / Multiplayer tabs: rebinding, sensitivity converter, TURN settings and test */
+  private wireControls(e: HTMLElement) {
+    // ---- key rebinding
+    e.querySelectorAll('[data-bind]').forEach((b) =>
+      b.addEventListener('click', () => {
+        const btn = b as HTMLButtonElement;
+        const a = btn.dataset.bind as Action;
+        btn.textContent = 'PRESS A KEY…';
+        btn.classList.add('wait');
+        const done = (code: string | null) => {
+          window.removeEventListener('keydown', kd, true);
+          window.removeEventListener('mousedown', md, true);
+          btn.classList.remove('wait');
+          if (code !== null) {
+            const kb = { ...(Settings.data.keybinds ?? {}) };
+            if (code === '') kb[a] = [];
+            else {
+              // a key does one thing: take it off any other action
+              for (const [o] of ACTION_LABELS) {
+                if (o === a) continue;
+                const ks = keysFor(o);
+                if (ks.includes(code)) kb[o] = ks.filter((k) => k !== code);
+              }
+              kb[a] = [code];
+            }
+            Settings.set('keybinds', kb);
+            applyKeybinds();
+          }
+          e.querySelectorAll('[data-bind]').forEach((x) => {
+            const ac = (x as HTMLElement).dataset.bind as Action;
+            x.textContent = keysFor(ac).map(keyLabel).join(' / ') || '—';
+          });
+        };
+        const kd = (ev: KeyboardEvent) => {
+          ev.preventDefault();
+          ev.stopImmediatePropagation();
+          done(ev.code === 'Escape' ? null : ev.code === 'Backspace' ? '' : ev.code);
+        };
+        const md = (ev: MouseEvent) => {
+          if (ev.target === btn && ev.button === 0) return;
+          ev.preventDefault();
+          ev.stopImmediatePropagation();
+          done('Mouse' + ev.button);
+        };
+        setTimeout(() => {
+          window.addEventListener('keydown', kd, true);
+          window.addEventListener('mousedown', md, true);
+        }, 0);
+      }),
+    );
+    e.querySelector('[data-a=resetkeys]')?.addEventListener('click', () => {
+      Settings.set('keybinds', {});
+      applyKeybinds();
+      e.querySelectorAll('[data-bind]').forEach((x) => (x.textContent = keysFor((x as HTMLElement).dataset.bind as Action).map(keyLabel).join(' / ')));
+    });
+    // ---- sensitivity converter: their yaw per count × their sens = ours
+    e.querySelector('[data-a=conv]')?.addEventListener('click', () => {
+      const yaw = parseFloat((e.querySelector('.cg') as HTMLSelectElement).value);
+      const v = parseFloat((e.querySelector('.cv') as HTMLInputElement).value);
+      const out = e.querySelector('.convout') as HTMLElement;
+      if (!(v > 0)) {
+        out.textContent = 'Type your sensitivity from that game first.';
+        return;
+      }
+      const ours = Math.max(0.05, Math.min(10, (v * yaw) / ((0.0022 * 180) / Math.PI)));
+      Settings.set('sensitivity', Math.round(ours * 1000) / 1000);
+      const sl = e.querySelector('[data-k=sensitivity]') as HTMLInputElement | null;
+      if (sl) {
+        sl.value = String(ours);
+        const em = sl.parentElement?.querySelector('em');
+        if (em) em.textContent = ours.toFixed(2);
+      }
+      out.textContent = `Mouse sensitivity set to ${ours.toFixed(3)} (${((360 / (0.0022 * ours * 180 / Math.PI)) / 400 * 2.54).toFixed(1)} cm per 360° at 400 DPI · ${((360 / (0.0022 * ours * 180 / Math.PI)) / 800 * 2.54).toFixed(1)} cm at 800 DPI).`;
+      this.handlers.onSettings();
+    });
+    // ---- TURN relay
+    const ice = loadIce();
+    e.querySelectorAll('.ice').forEach((x) => {
+      const el = x as HTMLInputElement;
+      const k = el.dataset.ice as keyof typeof ice;
+      if (el.type === 'checkbox') el.checked = !!ice[k];
+      else el.value = String(ice[k] ?? '');
+      el.addEventListener('input', () => {
+        const cur = loadIce();
+        (cur as any)[k] = el.type === 'checkbox' ? el.checked : el.value.trim();
+        saveIce(cur);
+      });
+      el.addEventListener('keydown', (ev) => ev.stopPropagation());
+    });
+    e.querySelector('[data-a=icetest]')?.addEventListener('click', async () => {
+      const m = e.querySelector('.icemsg') as HTMLElement;
+      m.textContent = 'Testing…';
+      const r = await testIce(5000);
+      m.innerHTML = `Local: ${r.host ? '✓' : '✗'} · STUN (direct through NAT): ${r.srflx ? '✓' : '✗'} · TURN relay: ${r.relay ? '✓' : loadIce().turnUrl ? '✗' : 'not set'}<br>${r.verdict}`;
     });
   }
 
@@ -543,8 +744,13 @@ export class UI {
   private tableHTML(rows: CombatantState[], names: [string, string]) {
     const team = (t: 0 | 1) => {
       const r = rows.filter((x) => x.team === t).sort((a, b) => b.score - a.score);
-      return `<div class="sbteam ${t === 0 ? 'blue' : 'red'}"><div class="sbh"><span>${names[t]}</span><span>K</span><span>D</span><span>SCORE</span></div>${r
-        .map((x) => `<div class="sbr ${x.isPlayer ? 'me' : ''} ${x.alive ? '' : 'dead'}"><span>${x.name}</span><span>${x.kills}</span><span>${x.deaths}</span><span>${x.score}</span></div>`)
+      const net = !!this.sbExtra?.(-1);
+      const ex = (id: number) => (this.sbExtra ? this.sbExtra(id) : null);
+      return `<div class="sbteam ${t === 0 ? 'blue' : 'red'} ${net ? 'net' : ''}"><div class="sbh"><span>${names[t]}</span><span>K</span><span>D</span><span>SCORE</span>${net ? '<span>PING</span>' : ''}</div>${r
+        .map((x) => {
+          const e = ex(x.id);
+          return `<div class="sbr ${x.isPlayer ? 'me' : ''} ${x.alive ? '' : 'dead'}"><span>${e?.talk ? '<i class="spk"></i>' : ''}${x.name}</span><span>${x.kills}</span><span>${x.deaths}</span><span>${x.score}</span>${net ? `<span class="pg">${e?.ping ?? ''}</span>` : ''}</div>`;
+        })
         .join('')}</div>`;
     };
     return `<div class="sbwrap">${team(0)}${team(1)}</div>`;
@@ -923,8 +1129,17 @@ export class UI {
       .join('');
   }
 
+  private deathKey = '';
   showDeath(v: boolean, killer = '', weapon = '', t = 0) {
     this.deathEl.classList.toggle('hidden', !v);
-    if (v) setHTML(this.deathEl, `<div class="kb">ELIMINATED BY</div><div class="kn">${killer}</div><div class="kw">${weapon}</div><div class="rs">Redeploying in ${Math.ceil(t)}…</div>`);
+    if (!v) {
+      this.deathKey = '';
+      return;
+    }
+    const key = `${killer}|${weapon}|${Math.ceil(t)}|${this.activePreset}`;
+    if (key === this.deathKey) return;
+    this.deathKey = key;
+    const cards = this.presets.map((p, i) => `<div class="dlo ${i === this.activePreset ? 'on' : ''}"><b>${i + 1}</b><span>${p.name}</span><small>${WEAPONS[p.p]?.short ?? ''} · ${WEAPONS[p.s]?.short ?? ''}</small></div>`).join('');
+    setHTML(this.deathEl, `<div class="kb">ELIMINATED BY</div><div class="kn">${killer}</div><div class="kw">${weapon}</div><div class="rs">Redeploying in ${Math.ceil(t)}…</div><div class="dloadouts">${cards}</div><div class="dlhint">1–5: loadout for your next life</div>`);
   }
 }

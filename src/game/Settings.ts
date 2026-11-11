@@ -48,6 +48,20 @@ export interface SettingsData {
   musicVolume: number;
   showFps: boolean;
   botDifficulty: 'recruit' | 'regular' | 'veteran';
+  /** rebound keys: action → key codes (KeyW, Space, Mouse0 …); missing actions use the defaults */
+  keybinds: Record<string, string[]>;
+  /** controller: look speed, stick deadzone, invert, aim assist (controller only) */
+  padSensitivity: number;
+  padDeadzone: number;
+  padInvertY: boolean;
+  aimAssist: boolean;
+  /** multiplayer: voice chat */
+  voice: boolean;
+  voiceMode: 'ptt' | 'open';
+  voiceChannel: 'team' | 'proximity';
+  voiceVolume: number;
+  /** mask swear words in chat */
+  profanityFilter: boolean;
 }
 
 // Low aims for 120 fps on integrated graphics (dynamic resolution targets it); the others for 60.
@@ -96,6 +110,16 @@ const DEFAULTS: SettingsData = {
   musicVolume: 0.6,
   showFps: false,
   botDifficulty: 'regular',
+  keybinds: {},
+  padSensitivity: 1,
+  padDeadzone: 0.12,
+  padInvertY: false,
+  aimAssist: true,
+  voice: false,
+  voiceMode: 'ptt',
+  voiceChannel: 'team',
+  voiceVolume: 1,
+  profanityFilter: true,
 };
 
 type Listener = (d: SettingsData) => void;

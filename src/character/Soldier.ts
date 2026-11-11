@@ -288,6 +288,11 @@ export class Soldier {
         gp.lerp(back, up.slung);
         gq.slerp(sq.multiply(_q2.setFromEuler(_eu.set(-0.2, Math.PI, 0.9))), up.slung);
       }
+      // (guard: never let a bad frame park the gun at infinity)
+      if (!Number.isFinite(gp.x + gp.y + gp.z + gq.x + gq.y + gq.z + gq.w)) {
+        gp.copy(chest).addScaledVector(A, 0.3);
+        gq.copy(q0);
+      }
       // world → model space
       _m.compose(gp, gq, vT1.set(1, 1, 1));
       _m2.copy(this.model.matrixWorld).invert().multiply(_m);

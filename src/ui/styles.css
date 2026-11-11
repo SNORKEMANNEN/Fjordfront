@@ -502,3 +502,48 @@ button.primary:hover { background: #f3d76a; }
 /* AI debug overlay (F4) */
 .aidbg { position: absolute; transform: translate(-50%, -100%); font: 10px/1.25 ui-monospace, monospace; color: #e8f4ea; background: rgba(0,0,0,.55); padding: 2px 4px; border-left: 2px solid #5aa8ff; white-space: pre; pointer-events: none; }
 .aidbg.t1 { border-left-color: #ff5340; }
+
+/* ---- Update 28: lobby, voice, chat channels, net graph, scoreboard ping, loadouts, controls ---- */
+.netpanel .card { width: 900px; max-height: calc(100vh - 32px); overflow-y: auto; }
+.netpanel .col { flex: 1 1 220px; display: flex; flex-direction: column; }
+.netpanel .col button { margin-top: auto; }
+.netpanel label.pub { display: flex; align-items: center; gap: 8px; margin: 0 0 12px; font-size: 12px; }
+.netpanel label.pub input { width: auto; margin: 0; }
+.netpanel .rooms { margin-top: 18px; border: 1px solid var(--line); padding: 12px 16px; }
+.netpanel .rooms .rh { display: flex; justify-content: space-between; align-items: center; }
+.netpanel .rlist { max-height: 180px; overflow-y: auto; margin-top: 8px; }
+.netpanel .room { display: grid; grid-template-columns: 1.4fr 1fr 1fr auto; gap: 10px; align-items: center; padding: 6px 0; border-top: 1px solid rgba(255,255,255,.06); font-family: Inter, sans-serif; font-size: 13px; }
+.netpanel .room span { color: var(--dim); }
+.netpanel .rempty { color: var(--dim); font-family: Inter, sans-serif; font-size: 13px; padding: 6px 0; }
+.netchat.team input { border-color: #8cc4ff; }
+.netchat .tm { color: #8cc4ff; font-size: 12px; letter-spacing: .1em; }
+.voicehud { position: absolute; left: 22px; bottom: 300px; z-index: 30; pointer-events: none; font-size: 14px; letter-spacing: .06em; }
+.voicehud div { display: flex; align-items: center; gap: 6px; padding: 2px 8px; margin-top: 3px; background: rgba(6,9,11,.55); color: #e8ecee; text-shadow: 0 1px 2px #000; }
+.voicehud div.me { color: #9dffb0; }
+.voicehud i, .sbr i.spk { display: inline-block; width: 10px; height: 10px; border-radius: 50%; background: #9dffb0; box-shadow: 0 0 6px #9dffb0; margin-right: 6px; vertical-align: middle; }
+.perfov .netgraph { display: block; margin-top: 6px; width: 200px; height: 70px; }
+.sbteam.net .sbh, .sbteam.net .sbr { grid-template-columns: 1fr 44px 44px 64px 74px; }
+.sbr .pg { color: var(--dim); font-size: 14px; text-align: right; }
+.death .dloadouts { display: flex; gap: 8px; justify-content: center; margin-top: 18px; flex-wrap: wrap; }
+.death .dlo { min-width: 110px; padding: 6px 10px; background: rgba(6,9,11,.6); border: 1px solid rgba(255,255,255,.14); text-align: left; }
+.death .dlo b { color: var(--accent); margin-right: 6px; }
+.death .dlo span { letter-spacing: .08em; }
+.death .dlo small { display: block; color: var(--dim); font-size: 11px; letter-spacing: .06em; }
+.death .dlo.on { border-color: var(--accent); background: rgba(232,197,71,.16); }
+.death .dlhint { margin-top: 8px; color: var(--dim); font-size: 12px; letter-spacing: .2em; }
+.ldpresets { display: flex; gap: 6px; margin-bottom: 10px; flex-wrap: wrap; }
+.ldpresets button { padding: 6px 12px; background: rgba(255,255,255,.04); border: 1px solid var(--line); color: var(--fg); font-family: 'Barlow Condensed'; font-size: 15px; letter-spacing: .08em; cursor: pointer; }
+.ldpresets button small { color: var(--accent); margin-right: 6px; }
+.ldpresets button.on { border-color: var(--accent); background: rgba(232,197,71,.14); }
+.settings .lsub { margin: 16px 0 4px; letter-spacing: .24em; font-size: 13px; color: var(--accent); }
+.settings .lsub small { letter-spacing: .04em; color: var(--dim); font-family: Inter, sans-serif; margin-left: 8px; }
+.settings .binds { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 0 18px; }
+.settings .bind { display: flex; justify-content: space-between; align-items: center; padding: 4px 0; border-bottom: 1px solid rgba(255,255,255,.05); font-family: Inter, sans-serif; font-size: 13px; }
+.settings .bind button { min-width: 96px; padding: 4px 8px; background: rgba(255,255,255,.06); border: 1px solid var(--line); color: var(--fg); cursor: pointer; font-family: inherit; font-size: 12px; }
+.settings .bind button.wait { border-color: var(--accent); color: var(--accent); }
+.settings .opt.conv { grid-template-columns: 1fr 2fr; }
+.settings .convrow { display: flex; gap: 6px; }
+.settings .convrow input { width: 90px; background: #151b1e; color: var(--fg); border: 1px solid var(--line); padding: 5px; }
+.settings .opt input.ice:not([type=checkbox]) { grid-column: span 2; background: #151b1e; color: var(--fg); border: 1px solid var(--line); padding: 6px; font-family: inherit; }
+.settings .icemsg { min-height: 20px; margin-top: 8px; color: #ffe27a; font-family: Inter, sans-serif; font-size: 13px; line-height: 1.5; }
+.death { width: 720px; max-width: 94vw; }

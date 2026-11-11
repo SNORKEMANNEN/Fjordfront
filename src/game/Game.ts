@@ -2,7 +2,7 @@ import * as THREE from 'three';
 import { Vegetation } from '../world/Vegetation';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import { Physics } from '../core/Physics';
-import { Input } from '../core/Input';
+import { Input, applyKeybinds } from '../core/Input';
 import { MaterialLib } from '../render/Materials';
 import { Pipeline } from '../render/Pipeline';
 import { GpuTimer, PerfGovernor } from '../render/PerfGovernor';
@@ -820,6 +820,15 @@ export class Game {
     this.toMenu();
     this.clock.start();
     this.netg = new NetGame(this);
+    this.perf.net = () => (this.netg.active ? this.netg.graphSample() : null);
+    this.ui.sbExtra = (id: number) => (this.netg.active ? { ping: this.netg.pingOf(id), talk: this.netg.speakingSlot(id) } : null);
+    this.input.onPadPause = () => {
+      if (this.state === 'playing') {
+        this.input.unlock();
+        this.pauseGame();
+      } else if (this.state === 'paused') this.resume();
+    };
+    if (Settings.data.voice) this.netg.voice.enable().catch(() => {});
     const joinCode = new URLSearchParams(location.search).get('join');
     if (joinCode) this.netg.showPanel(joinCode);
     if (!this.testMode) r.setAnimationLoop((t: number) => this.frame(t));
@@ -1143,6 +1152,7 @@ export class Game {
   private tmpAnimP = new THREE.Vector3();
 
   applySettings() {
+    applyKeybinds();
     if (this.perf) this.perf.visible = !!Settings.data.perfOverlay;
     this.pipeline.rebuild();
     this.pipeline.setSize(window.innerWidth, window.innerHeight);
@@ -1277,6 +1287,7 @@ export class Game {
   }
 
   private respawnPlayer() {
+    this.spectating = false;
     // your own legs / killcam stand-in wear your side's uniform
     this.legs?.setTeam(this.avatar.team);
     this.ghost?.setTeam(this.avatar.team);
@@ -1382,6 +1393,8 @@ export class Game {
       this.weather.update(dt, this.camera.position, this.env.weather);
       return;
     }
+    this.input.pollGamepad(dt);
+    if (this.input.wasPressed('spectate')) this.toggleSpectate();
     if (this.input.wasPressed('map')) this.setMapOpen(!this.tmap.open);
     if (this.tmap.open) {
       // the map takes the mouse (virtual cursor, wheel, clicks); the player can still move
@@ -1401,7 +1414,7 @@ export class Game {
     const w = this.weapons;
     const a = this.avatar;
     const sens = (w.ads > 0.5 ? (w.scopeActive ? (Settings.data.scopeSensitivity ?? 0.2) : Settings.data.adsSensitivity) : 1) * (this.stunT > 0 ? 0.3 : 1);
-    if (a.alive && !this.tmap.open) this.player.look(inp.mouseDX, inp.mouseDY, sens);
+    if (a.alive && !this.tmap.open) this.player.look(inp.mouseDX, inp.mouseDY, sens * this.aimAssist(dt));
     this.updateZipline(dt);
     this.player.update(dt);
     this.updateDoors(dt);
@@ -1425,7 +1438,8 @@ export class Game {
     this.nvgFrame(dt);
     if (!a.alive) {
       this.vm.root.visible = false;
-      this.deathCam(dt);
+      if (this.spectating) this.spectateCam(dt);
+      else this.deathCam(dt);
     }
     const zipHere = a.alive && !this.world.zips.ride ? this.world.zips.reachable(this.camera.position, new THREE.Vector3(0, 0, -1).applyQuaternion(this.camera.quaternion)) : null;
     const c4Tap = inp.wasPressed('spot') && a.alive && this.myC4().length > 0 && this.time - this.lastUseTap < 0.35;
@@ -1460,8 +1474,15 @@ export class Game {
         if (this.oobT <= 0.02) this.hurtPlayer(200, 'Out of bounds');
       } else this.oobT = 0;
       a.stealth = this.player.stance !== 'stand' ? 1 : 0;
+    } else if (this.spectating) {
+      this.ui.showDeath(false);
     } else {
       this.respawnT -= dt;
+      // loadout for the next life: keys 1-5 (the weapon / streak keys) pick a saved loadout
+      const keys = ['primary', 'secondary', 'streak1', 'streak2', 'streak3'] as const;
+      keys.forEach((k, i) => {
+        if (inp.wasPressed(k)) this.ui.selectPreset(i);
+      });
       this.ui.showDeath(true, this.killerName, this.killerWeapon, this.respawnT + (this.killcamSlot >= 0 ? 4 : 0));
       if (this.respawnT <= 0 && this.match.phase === 'live') {
         if (this.killcamSlot >= 0 && this.startKillcam()) return;
@@ -1632,6 +1653,143 @@ export class Game {
     this.camera.lookAt(-30, 6, 0);
     this.camera.fov = 52;
     this.camera.updateProjectionMatrix();
+  }
+
+  // ================================================================ controller aim assist
+  /**
+   * Controller only (never with a mouse), and only with an enemy you can actually see near the
+   * crosshair: the look slows down over them ("friction") and, while you are moving or turning,
+   * the view is drawn a little along with them ("rotational" assist). It never turns the camera on
+   * its own when you are standing still with the sticks centred. Returns the look multiplier.
+   */
+  private aaTarget: Combatant | null = null;
+  private aaCheckT = 0;
+  private aimAssist(dt: number) {
+    const inp = this.input;
+    if (!Settings.data.aimAssist || !inp.padActive || !this.avatar.alive) {
+      this.aaTarget = null;
+      return 1;
+    }
+    const cam = this.camera.position;
+    const fwd = this._aaF.set(0, 0, -1).applyQuaternion(this.camera.quaternion);
+    const ads = this.weapons.ads;
+    const cone = (ads > 0.5 ? 4.5 : 6.5) * (Math.PI / 180);
+    // re-pick the target a few times a second (a ray per candidate is not free)
+    this.aaCheckT -= dt;
+    if (this.aaCheckT <= 0) {
+      this.aaCheckT = 0.12;
+      let best: Combatant | null = null, bestA = cone;
+      for (const c of this.match.players) {
+        if (c === this.avatar || !c.alive || c.team === this.avatar.team) continue;
+        const p = c.chest(this._aaP);
+        const d = p.distanceTo(cam);
+        if (d > 90 || d < 1) continue;
+        const ang = fwd.angleTo(this._aaD.copy(p).sub(cam).normalize());
+        // a little wider up close (the body is bigger on screen)
+        const lim = cone + Math.atan(0.35 / d);
+        if (ang < lim && ang < bestA + Math.atan(0.35 / d) && this.physics.lineOfSight(cam, p)) {
+          best = c;
+          bestA = ang;
+        }
+      }
+      this.aaTarget = best;
+    }
+    const t = this.aaTarget;
+    if (!t || !t.alive) return 1;
+    const p = t.chest(this._aaP);
+    const dir = this._aaD.copy(p).sub(cam);
+    const yawTo = Math.atan2(-dir.x, -dir.z);
+    const pitchTo = Math.atan2(dir.y, Math.hypot(dir.x, dir.z));
+    const pl = this.player;
+    const moving = Math.abs(inp.axis('left', 'right')) + Math.abs(inp.axis('back', 'forward')) > 0.2 || Math.hypot(inp.padLook.x, inp.padLook.y) > 0.05;
+    if (moving) {
+      const k = (ads > 0.5 ? 6 : 3.5) * dt;
+      const dy = Math.atan2(Math.sin(yawTo - pl.yaw), Math.cos(yawTo - pl.yaw));
+      pl.yaw += dy * Math.min(1, k);
+      pl.pitch += (pitchTo - pl.pitch) * Math.min(1, k * 0.6);
+    }
+    return ads > 0.5 ? 0.5 : 0.65;
+  }
+  private _aaF = new THREE.Vector3();
+  private _aaP = new THREE.Vector3();
+  private _aaD = new THREE.Vector3();
+
+  // ================================================================ spectator / free camera
+  /**
+   * F6 (or /spec): step out of the fight and watch. Free camera (WASD, mouse, SPACE / C up and
+   * down, SHIFT faster) or follow a player (fire = next player, aim = back to the free camera).
+   * F6 again drops you back in at a spawn.
+   */
+  spectating = false;
+  private specYaw = 0;
+  private specPitch = 0;
+  private specFollow = -1;
+  toggleSpectate() {
+    if (this.state !== 'playing' && this.state !== 'paused') return;
+    if (!this.spectating) {
+      this.spectating = true;
+      if (this.avatar.alive) {
+        // leave the fight quietly (no kill, no death on the scoreboard)
+        NETF.allowPuppetDeath++;
+        this.avatar.alive = false;
+        NETF.allowPuppetDeath--;
+        this.avatar.health = 0;
+        this.player.dead = true;
+      }
+      this.weapons.enabled = false;
+      const e = new THREE.Euler().setFromQuaternion(this.camera.quaternion, 'YXZ');
+      this.specYaw = e.y;
+      this.specPitch = e.x;
+      this.specFollow = -1;
+      this.ui.showDeath(false);
+      this.ui.notify('SPECTATING', 'WASD FLY · SPACE / C UP-DOWN · SHIFT FAST · FIRE: FOLLOW NEXT · AIM: FREE · F6: PLAY');
+    } else {
+      this.spectating = false;
+      this.specFollow = -1;
+      if (this.match.phase === 'live') this.respawnPlayer();
+    }
+  }
+  private spectateCam(dt: number) {
+    const inp = this.input;
+    const cam = this.camera;
+    const s = 0.0022 * Settings.data.sensitivity;
+    this.specYaw -= inp.mouseDX * s;
+    this.specPitch = THREE.MathUtils.clamp(this.specPitch - inp.mouseDY * s * (Settings.data.invertY ? -1 : 1), -1.5, 1.5);
+    const alive = this.match.players.filter((c) => c.alive && c !== this.avatar);
+    if (inp.wasPressed('fire') && alive.length) {
+      const i = alive.findIndex((c) => c.id === this.specFollow);
+      this.specFollow = alive[(i + 1) % alive.length].id;
+    }
+    if (inp.wasPressed('ads')) this.specFollow = -1;
+    const tgt = this.specFollow >= 0 ? alive.find((c) => c.id === this.specFollow) : undefined;
+    if (this.specFollow >= 0 && !tgt) this.specFollow = alive.length ? alive[0].id : -1;
+    if (tgt) {
+      // chase camera behind the followed player, orbiting with the mouse
+      const p = tgt.position();
+      const back = new THREE.Vector3(Math.sin(this.specYaw), 0, Math.cos(this.specYaw)).multiplyScalar(3.2 * Math.cos(this.specPitch));
+      const want = new THREE.Vector3(p.x, p.y + 1.7 - Math.sin(this.specPitch) * 3.2, p.z).add(back);
+      // don't put the camera inside a wall
+      const head = new THREE.Vector3(p.x, p.y + 1.6, p.z);
+      const hit = this.physics.raycast(head, want.clone().sub(head).normalize(), head.distanceTo(want));
+      if (hit) want.copy(head).addScaledVector(want.clone().sub(head).normalize(), Math.max(0.4, hit.distance - 0.25));
+      cam.position.lerp(want, 1 - Math.exp(-10 * dt));
+      cam.quaternion.setFromEuler(new THREE.Euler(this.specPitch, this.specYaw, 0, 'YXZ'));
+      this.ui.interactHint(`SPECTATING ${tgt.name.toUpperCase()}`);
+    } else {
+      const fast = inp.rawDown('sprint') ? 32 : 11;
+      const f = new THREE.Vector3(-Math.sin(this.specYaw) * Math.cos(this.specPitch), Math.sin(this.specPitch), -Math.cos(this.specYaw) * Math.cos(this.specPitch));
+      const r = new THREE.Vector3(Math.cos(this.specYaw), 0, -Math.sin(this.specYaw));
+      const mv = new THREE.Vector3()
+        .addScaledVector(f, inp.axis('back', 'forward'))
+        .addScaledVector(r, inp.axis('left', 'right'));
+      mv.y += (inp.rawDown('jump') ? 1 : 0) - (inp.rawDown('crouch') ? 1 : 0);
+      cam.position.addScaledVector(mv, fast * dt);
+      const ground = this.terrain.heightAt(cam.position.x, cam.position.z) + 0.5;
+      if (cam.position.y < ground) cam.position.y = ground;
+      cam.quaternion.setFromEuler(new THREE.Euler(this.specPitch, this.specYaw, 0, 'YXZ'));
+      this.ui.interactHint('FREE CAMERA');
+    }
+    cam.updateMatrixWorld();
   }
 
   private deathCam(dt: number) {

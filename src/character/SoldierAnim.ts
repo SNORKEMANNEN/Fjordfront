@@ -119,7 +119,7 @@ export class SoldierAnimator {
 
   /** a shot was fired: the gun and shoulders kick */
   fire(strength = 1) {
-    this.kickV += 9 * strength;
+    this.kickV = Math.min(30, this.kickV + 9 * strength);
   }
 
   // ------------------------------------------------------------------ body
@@ -189,9 +189,17 @@ export class SoldierAnimator {
       f.kind = 0;
       f.next = 3 + Math.random() * 5;
     }
-    // recoil spring
-    this.kickV += (-this.kick * 260 - this.kickV * 22) * dt;
-    this.kick += this.kickV * dt;
+    // recoil spring — sub-stepped: far / off-screen soldiers are posed at a few Hz with one big dt,
+    // and a stiff spring integrated in one big explicit step gains energy every step (it wobbled,
+    // then blew the gun off to infinity)
+    const n = Math.min(40, Math.ceil(dt / (1 / 120)));
+    const h = dt / Math.max(1, n);
+    for (let i = 0; i < n; i++) {
+      this.kickV += (-this.kick * 260 - this.kickV * 22) * h;
+      this.kick += this.kickV * h;
+    }
+    if (!Number.isFinite(this.kick) || !Number.isFinite(this.kickV)) this.kick = this.kickV = 0;
+    this.kick = Math.max(-1, Math.min(1, this.kick));
 
     // ---- compute the pose families that matter and blend them
     const w = this.sw;
