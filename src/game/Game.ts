@@ -25,6 +25,8 @@ import { Effects } from '../fx/Effects';
 import { WeaponDef, WEAPONS } from '../weapons/WeaponDefs';
 import { NavGraph } from '../ai/NavGraph';
 import { Bot } from '../ai/Bot';
+import { avoidance, CoverMap, Exposure, Fireteam, Order } from '../ai/BotBrain';
+import { AIDebug } from '../ai/AIDebug';
 import { Soldier, SoldierStyle } from '../character/Soldier';
 import { Impostors } from '../character/Impostors';
 import { roleFor } from '../character/SoldierMesh';
@@ -521,6 +523,8 @@ export class Game {
     this.nav = new NavGraph(this.physics, this.terrain, this.world.buildings.nav, this.world.buildings.navPoints);
     mark('nav');
     this.director = new BotDirector(this.nav, () => this.rng.next());
+    // directional cover for every nav node (low / full cover in 8 directions)
+    this.coverMap = new CoverMap(this.nav, this.physics);
     // doors are hung after the nav graph is built so routes run through doorways
     this.doors = new Doors(this.world.buildings.doors, this.physics, this.scene, this.world.buildings.materials);
     this.doors.onOpen = (d, kicked, by) => this.onDoorOpen(d, kicked, by);
@@ -692,6 +696,7 @@ export class Game {
     this.match = new Match([this.avatar], this.physics, this.terrain);
     this.match.spawns = new SpawnSystem(this.physics, this.terrain, this.nav, () => this.time);
     this.spawnBots();
+    this.formFireteams();
     this.match.players.push(...this.bots);
     this.recorder = new KillcamRecorder(this.bots.length + 1);
     // stand-in soldier for the player in killcam replays
@@ -738,6 +743,7 @@ export class Game {
       this.glints.push(sp);
     }
 
+    this.aiDebug = new AIDebug(this.scene, this.ui.root);
     // ---- radar & markers ----
     this.radar = new Radar(this.ui.hudEl, this.terrain);
     this.markers = new Markers(this.ui.hudEl);
@@ -823,6 +829,184 @@ export class Game {
     (window as any).__ready = true;
   }
 
+  private avoidFrame = -1;
+  private agents: { pos: THREE.Vector3; vel: THREE.Vector3; out: THREE.Vector3; id: number; alive: boolean }[] = [];
+  /** local avoidance between soldiers (the player counts as an obstacle) */
+  private runAvoidance() {
+    const a = this.agents;
+    if (a.length !== this.bots.length + 1) {
+      a.length = 0;
+      for (const b of this.bots) a.push({ pos: b.position(), vel: b.velocity, out: b.avoid, id: b.id, alive: false });
+      a.push({ pos: this.player.pos, vel: this.player.vel, out: new THREE.Vector3(), id: 0, alive: false });
+    }
+    for (let i = 0; i < this.bots.length; i++) a[i].alive = this.bots[i].alive && !this.bots[i].netPuppet;
+    a[this.bots.length].alive = this.avatar.alive;
+    avoidance(a);
+  }
+
+  // ---------------------------------------------------------------- squads, orders, exposure
+  coverMap!: CoverMap;
+  aiDebug!: AIDebug;
+  coverClaims: [Set<number>, Set<number>] = [new Set(), new Set()];
+  fireteams: Fireteam[] = [];
+  private teamOf = new Map<number, { ft: Fireteam; slot: number }>();
+  /**
+   * Fireteams of up to four. On the player's side the first three bots form *your* fireteam (they
+   * take your orders); everyone else moves with their team leader.
+   */
+  private formFireteams() {
+    this.fireteams = [];
+    this.teamOf.clear();
+    let id = 0;
+    for (const team of [0, 1] as const) {
+      const list = this.bots.filter((b) => b.team === team);
+      let i = 0;
+      if (team === this.avatar.team) {
+        const ft: Fireteam = { id: id++, team, members: list.slice(0, 3), player: true };
+        this.fireteams.push(ft);
+        ft.members.forEach((m, k) => this.teamOf.set(m.id, { ft, slot: k + 1 }));
+        i = 3;
+      }
+      for (; i < list.length; i += 4) {
+        const ft: Fireteam = { id: id++, team, members: list.slice(i, i + 4), player: false };
+        this.fireteams.push(ft);
+        ft.members.forEach((m, k) => this.teamOf.set(m.id, { ft, slot: k }));
+      }
+    }
+  }
+  // ---- player orders
+  private wheel: { el: HTMLDivElement; x: number; y: number; sel: number } | null = null;
+  private static ORDERS: { kind: Order['kind'] | 'cancel'; label: string; sub: string }[] = [
+    { kind: 'attack', label: 'ATTACK', sub: 'where you look' },
+    { kind: 'defend', label: 'DEFEND', sub: 'where you look' },
+    { kind: 'follow', label: 'FOLLOW ME', sub: 'stay with you' },
+    { kind: 'hold', label: 'HOLD', sub: 'stay put' },
+    { kind: 'regroup', label: 'REGROUP', sub: 'on you, then free' },
+    { kind: 'cancel', label: 'AS YOU WERE', sub: 'cancel orders' },
+  ];
+  private updateOrderWheel() {
+    const inp = this.input;
+    const can = this.state === 'playing' && this.avatar.alive && !this.tmap.open;
+    if (can && inp.isDown('orders')) {
+      if (!this.wheel) {
+        const el = document.createElement('div');
+        el.className = 'orderwheel';
+        el.innerHTML = '<div class="ring"></div>' + Game.ORDERS.map((o, i) => {
+          const a = (i / Game.ORDERS.length) * Math.PI * 2 - Math.PI / 2;
+          return `<div class="opt" style="left:${180 + Math.cos(a) * 118}px;top:${180 + Math.sin(a) * 118}px">${o.label}<small>${o.sub}</small></div>`;
+        }).join('') + `<div class="hint">SQUAD · ${this.mySquad().length}</div>`;
+        this.ui.hudEl.appendChild(el);
+        this.wheel = { el, x: 0, y: 0, sel: -1 };
+      }
+      const w = this.wheel;
+      w.x += inp.mouseDX;
+      w.y += inp.mouseDY;
+      const m = Math.hypot(w.x, w.y);
+      if (m > 160) {
+        w.x *= 160 / m;
+        w.y *= 160 / m;
+      }
+      const n = Game.ORDERS.length;
+      let sel = -1;
+      if (m > 30) {
+        let a = Math.atan2(w.y, w.x) + Math.PI / 2;
+        if (a < 0) a += Math.PI * 2;
+        sel = Math.round((a / (Math.PI * 2)) * n) % n;
+      }
+      if (sel !== w.sel) {
+        w.sel = sel;
+        w.el.querySelectorAll('.opt').forEach((o, i) => o.classList.toggle('on', i === sel));
+        if (sel >= 0) this.audio.play('click', { gain: 0.15, bus: 'ui', reverb: 0, rate: 1.8 });
+      }
+      inp.mouseDX = inp.mouseDY = 0;
+      return;
+    }
+    if (this.wheel) {
+      const sel = this.wheel.sel;
+      this.wheel.el.remove();
+      this.wheel = null;
+      if (sel >= 0 && can) this.issueOrder(Game.ORDERS[sel].kind);
+    }
+  }
+  /** give your squad an order (the wheel, or a location ping) */
+  issueOrder(kind: Order['kind'] | 'cancel', at?: THREE.Vector3) {
+    const squad = this.mySquad();
+    if (!squad.length) {
+      this.ui.notify('NO SQUAD', 'YOUR FIRETEAM IS DOWN');
+      return;
+    }
+    let pos = at;
+    if (!pos) {
+      const eye = this.camera.position;
+      const fwd = new THREE.Vector3(0, 0, -1).applyQuaternion(this.camera.quaternion);
+      const hit = this.physics.raycast(eye, fwd, 250);
+      pos = hit ? hit.point.clone() : eye.clone().addScaledVector(fwd, 40);
+    }
+    const label = { attack: 'ATTACKING', defend: 'DEFENDING', follow: 'FOLLOWING YOU', hold: 'HOLDING', regroup: 'REGROUPING', cancel: 'AS YOU WERE' }[kind];
+    squad.forEach((b, i) => {
+      if (kind === 'cancel') {
+        b.order = null;
+        return;
+      }
+      // spread out round the point instead of all standing on it
+      const ang = (i / Math.max(1, squad.length)) * Math.PI * 2;
+      const p = kind === 'hold' ? b.position().clone() : pos!.clone().add(new THREE.Vector3(Math.sin(ang) * 3, 0, Math.cos(ang) * 3));
+      b.order = { kind, pos: this.nav.nearest(p, 8, false)?.p.clone() ?? p, until: this.time + (kind === 'regroup' ? 30 : 75), who: kind === 'follow' || kind === 'regroup' ? this.avatar : undefined };
+    });
+    this.ui.notify('SQUAD', label);
+    this.audio.play('radio', { gain: 0.25, bus: 'ui', reverb: 0, rate: 1.2 });
+    if (kind === 'attack') this.botVoice(squad[0], 'engage');
+    if (kind !== 'cancel' && kind !== 'hold' && kind !== 'follow' && kind !== 'regroup') {
+      this.worldPings = this.worldPings.filter((p) => p.until > this.time).slice(-2);
+      this.worldPings.push({ pos: pos!.clone(), until: this.time + 6 });
+    }
+  }
+
+  private squadOf(b: Bot): { leader: Bot | null; slot: number } {
+    const e = this.teamOf.get(b.id);
+    if (!e || e.ft.player) return { leader: null, slot: e?.slot ?? 0 };
+    // the first live member leads
+    const lead = (e.ft.members as Bot[]).find((m) => m.alive) ?? null;
+    return { leader: lead === b ? null : lead, slot: e.slot };
+  }
+  /** the bots taking your orders */
+  mySquad(): Bot[] {
+    const ft = this.fireteams.find((f) => f.player);
+    return (ft?.members as Bot[] | undefined)?.filter((b) => b.alive && b.team === this.avatar.team) ?? [];
+  }
+  private expo: Exposure = { stance: 'stand', speed: 0, sinceFire: 99, suppressed: false, foliage: 0, lit: false };
+  /** how visible a combatant is: stance, motion, muzzle flash, vegetation, being lit at night */
+  private exposureOf(c: { isPlayer?: boolean; position(): THREE.Vector3 }): Exposure {
+    let e: Exposure;
+    if (c instanceof Bot) e = c.exposure();
+    else {
+      e = this.expo;
+      const pl = this.player;
+      e.stance = pl.stance === 'prone' ? 'prone' : pl.stance === 'crouch' || pl.stance === 'slide' ? 'crouch' : 'stand';
+      e.speed = pl.horizSpeed();
+      e.sinceFire = this.time - this.lastShotT;
+      e.suppressed = !!this.weapons?.cur.def.sound.suppressed;
+      e.lit = false;
+    }
+    const p = c.position();
+    const [forest] = this.terrain.splatAt(p.x, p.z);
+    e.foliage = this.winter ? forest * 0.5 : forest;
+    return e;
+  }
+  /** a round flying past soldiers: suppression for everyone it passes close to */
+  private suppressAlong(shooter: { team: number } & object, origin: THREE.Vector3, dir: THREE.Vector3, amount: number) {
+    for (const b of this.bots) {
+      if (!b.alive || b.team === shooter.team || b.netPuppet) continue;
+      const c = b.chest(this.tmpSup);
+      const t = this.tmpSup2.copy(c).sub(origin).dot(dir);
+      if (t < 3 || t > 300) continue;
+      const miss = this.tmpSup2.copy(origin).addScaledVector(dir, t).distanceTo(c);
+      if (miss < 2.6 && miss > 0.25) b.suppress(amount * (1 - miss / 2.6), shooter as never);
+    }
+  }
+  private tmpSup = new THREE.Vector3();
+  private tmpSup2 = new THREE.Vector3();
+
   private spawnBots() {
     // 12v12: eleven bots beside the player, twelve against. Same class mix on both sides
     // (rifles carry the line, SMGs + shotguns clear buildings, two marksmen per side)
@@ -877,12 +1061,19 @@ export class Game {
           },
           smokeBlocks: (a, b) => this.explosives?.smokeBlocks(a, b) ?? false,
           voice: (b, line) => this.botVoice(b, line),
-          callout: (from, pos) => {
-            for (const m of this.bots) if (m !== from && m.alive && m.team === from.team && m.position().distanceTo(from.position()) < 70 && !m.target) m.hear(pos);
+          callout: (from, pos, enemy) => {
+            // the radio carries it further than a shout; the position is second-hand (fuzzed in hear)
+            for (const m of this.bots) if (m !== from && m.alive && m.team === from.team && m.position().distanceTo(from.position()) < 90 && !m.target) m.hear(pos, enemy ?? null, 0.6);
           },
           difficulty: diff,
           night: () => this.env.night > 0.5,
           animEvent: (b, ev, p) => this.botAnimEvent(b, ev, p),
+          cover: this.coverMap,
+          coverClaims: this.coverClaims,
+          exposure: (c) => this.exposureOf(c),
+          squad: (b) => this.squadOf(b),
+          flanking: (b, t) => this.bots.reduce((n, o) => n + (o !== b && o.alive && o.team === b.team && o.intent === 'flank' && o.target === t ? 1 : 0), 0),
+          time: () => this.time,
         });
         // soldiers are fine detail for the water reflection (layer 1: main + scope cameras and
         // the sun's shadow camera see it, the reflection camera does not)
@@ -1202,6 +1393,9 @@ export class Game {
       this.updateMapView(dt);
       return;
     }
+    // squad order wheel (hold Y): takes the mouse while open
+    this.updateOrderWheel();
+    if (this.input.wasPressed('aidebug')) this.aiDebug.toggle();
     const inp = this.input;
     // ---------------- player ----------------
     const w = this.weapons;
@@ -1288,6 +1482,10 @@ export class Game {
         b.kill(new THREE.Vector3(0, 0, 1));
       }
       if (!b.alive) this.director.forget(b.id);
+      if (this.avoidFrame !== this.frameNo) {
+        this.avoidFrame = this.frameNo;
+        this.runAvoidance();
+      }
       b.update(dt, this.time);
       if (!b.alive && b.respawnT <= 0 && this.match.phase === 'live') {
         const s = this.match.pickSpawn(b.team);
@@ -1347,6 +1545,7 @@ export class Game {
     this.updateStreakWorld(dt);
     this.updateGlints();
     this.updateRadar(dt);
+    this.aiDebug.update(this.bots, this.camera, this.avatar.alive ? this.avatar : null);
     this.world.update(this.time, this.camera.position, this.env);
     this.weather.update(dt, this.camera.position, this.env.weather, window.innerHeight);
     this.ballistics.wind.copy(this.weather.wind);
@@ -3023,7 +3222,8 @@ export class Game {
     if (d.modes[0] !== 'pump' && d.modes[0] !== 'bolt' && d.id !== 'rv357' && d.action !== 'break') this.ejectCasing(req, d);
     for (let i = 0; i < req.dirs.length; i++) this.ballistics.fire(this.avatar, req.origin, req.dirs[i], d, muzzle, req.tracer && (i === 0 || i % 3 === 0));
     this.recorder.shot({ t: this.time, id: this.bots.length, origin: req.origin.clone(), dir: req.dirs[0].clone(), muzzle: muzzle.clone(), def: d.id });
-    this.alertBots(this.player.pos, d.sound.suppressed ? 25 : 90, this.avatar.team);
+    this.alertBots(this.player.pos, d.sound.suppressed ? 25 : 90, this.avatar.team, this.avatar);
+    for (const dir of req.dirs.slice(0, 3)) this.suppressAlong(this.avatar, req.origin, dir, d.cls === 'Sniper' ? 0.5 : d.cls === 'LMG' ? 0.22 : 0.16);
     if (!d.sound.suppressed) this.radarPing(this.avatar, this.player.pos);
     for (const dir of req.dirs) this.shootLights(req.origin, dir);
     this.gunEcho(this.camera.position, d, 1);
@@ -3070,8 +3270,9 @@ export class Game {
         }
       }
     }
+    if (firstPellet) this.suppressAlong(bot, origin, dir, def.cls === 'Sniper' ? 0.5 : def.cls === 'LMG' ? 0.22 : 0.16);
     const loud = def.cls === 'Sniper' ? 90 : def.cls === 'Marksman' ? 85 : def.sound.suppressed ? 20 : 80;
-    this.alertBots(bot.position(), loud, bot.team);
+    this.alertBots(bot.position(), loud, bot.team, bot);
     if (!def.sound.suppressed) this.radarPing(bot, bot.position());
     this.noteGunfire(bot.position());
   }
@@ -3179,7 +3380,7 @@ export class Game {
       this.ui.notify('ENEMY SPOTTED', best.name.toUpperCase());
       this.audio.play('medal', { gain: 0.18, bus: 'ui', reverb: 0, rate: 1.6 });
       // teammates hear about it
-      for (const m of this.bots) if (m.alive && m.team === this.avatar.team && !m.target) m.hear(best.position());
+      for (const m of this.bots) if (m.alive && m.team === this.avatar.team) m.hear(best.position(), best, 0.95);
     } else this.audio.play('click', { gain: 0.3, bus: 'ui', reverb: 0 });
   }
 
@@ -3222,6 +3423,9 @@ export class Game {
     this.playerVoice('pingSpot', 0.8);
     // friendlies with nothing to do drift over to have a look
     for (const m of this.bots) if (m.alive && m.team === this.avatar.team && !m.target && m.position().distanceTo(at) < 80 && Math.random() < 0.35) m.hear(at);
+    // your squad takes a location ping as an order: a flag you hold → defend it, else attack there
+    const flag = this.dom.flagAt(at);
+    if (this.mySquad().length) this.issueOrder(flag && flag.owner === this.avatar.team ? 'defend' : 'attack', flag ? flag.pos.clone() : at);
   }
 
   /** lens circle on screen (px) while a PiP scope is up */
@@ -3266,8 +3470,9 @@ export class Game {
         blips.push({ x: bp.x, z: bp.z, kind: 'ally', alpha: 1 });
         const head = bp.clone().setY(bp.y + 2.05);
         const d = head.distanceTo(cam.position);
-        const at = d < (aimCls ? 160 : 90) ? this.markerAt(head) : null;
-        if (at) items.push({ x: at.x, y: at.y, text: b.name.toUpperCase(), cls: 'ally' + aimCls, alpha: Math.max(0.3, 1 - d / (aimCls ? 170 : 100)) * nearAim(at.x, at.y) });
+        const at = d < (aimCls ? 160 : this.teamOf.get(b.id)?.ft.player ? 220 : 90) ? this.markerAt(head) : null;
+        const mine = this.teamOf.get(b.id)?.ft.player;
+        if (at) items.push({ x: at.x, y: at.y, text: b.name.toUpperCase(), cls: 'ally' + (mine ? ' squad' : '') + aimCls, alpha: Math.max(mine ? 0.55 : 0.3, 1 - d / (aimCls ? 170 : mine ? 220 : 100)) * nearAim(at.x, at.y) });
       } else {
         const spottedUntil = this.spotted.get(b.id) ?? 0;
         const ping = this.time - (this.pings.get(b.id) ?? -99);
@@ -3339,8 +3544,8 @@ export class Game {
     for (; gi < this.glints.length; gi++) this.glints[gi].visible = false;
   }
 
-  private alertBots(p: THREE.Vector3, radius: number, team: number) {
-    for (const b of this.bots) if (b.alive && b.team !== team && b.position().distanceTo(p) < radius) b.hear(p);
+  private alertBots(p: THREE.Vector3, radius: number, team: number, src: { team: number } | null = null) {
+    for (const b of this.bots) if (b.alive && b.team !== team && b.position().distanceTo(p) < radius) b.hear(p, src as never, 0.4);
   }
 
   private ejectCasing(req: ShotRequest, d: WeaponDef) {
@@ -3682,6 +3887,12 @@ export class Game {
   }
 
   footstepSound(p: THREE.Vector3, speed: number, local: boolean) {
+    // enemies hear you move: sprinting carries ~22 m, walking ~9, crouched / prone steps ~3
+    if (local && this.avatar.alive) {
+      const st = this.player.stance;
+      const r = st === 'prone' || st === 'crouch' ? 3 : this.player.sprinting || this.player.tactical ? 22 : speed > 0.7 ? 12 : 8;
+      for (const b of this.bots) if (b.alive && b.team !== this.avatar.team && !b.netPuppet && b.position().distanceTo(p) < r) b.hear(p, this.avatar, 0.3);
+    }
     // remote footsteps fall off with ref 3 m: past ~40 m they're inaudible under the mix, so skip
     // the ground probe and the 3–5 audio nodes (24 soldiers × ~2 steps/s)
     if (!local && p.distanceToSquared(this.camera.position) > 40 * 40) return;

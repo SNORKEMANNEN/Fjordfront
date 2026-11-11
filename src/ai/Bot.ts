@@ -6,12 +6,13 @@ import { roleFor, SoldierLook } from '../character/SoldierMesh';
 import { AnimState, ActionKind, newAnimState, ReloadStyle } from '../character/SoldierAnim';
 import { CharacterBody } from '../player/CharacterBody';
 import { Physics } from '../core/Physics';
-import { NavGraph } from './NavGraph';
+import { NavGraph, NavNode } from './NavGraph';
 import { WeaponDef, WEAPONS } from '../weapons/WeaponDefs';
 import { WeaponModel } from '../weapons/WeaponModels';
 import { clamp, damp, dampAngle, lerp, RNG, wrapAngle, easeOutCubic, Spring } from '../core/math';
 import { Combatant, HitPart } from '../game/Combatant';
 import { Ragdoll } from './Ragdoll';
+import { AimController, CoverMap, detectRate, Exposure, Order, SKILL } from './BotBrain';
 
 /** replicated / recorded pose: see Bot.replayState */
 export const POSE_N = 20;
@@ -51,9 +52,21 @@ export interface BotWorld {
   animEvent?(bot: Bot, ev: string, pos: THREE.Vector3): void;
   /** soldiers wear their goggles down */
   night?(): boolean;
+  /** directional cover per nav node */
+  cover?: CoverMap;
+  /** cover spots taken, per team (node ids) */
+  coverClaims?: [Set<number>, Set<number>];
+  /** how exposed a combatant is (stance, motion, muzzle flash, foliage) */
+  exposure?(c: Combatant): Exposure;
+  /** this bot's fireteam leader (null: leads itself) and its slot in the formation */
+  squad?(bot: Bot): { leader: Bot | null; slot: number };
+  /** teammates already working round a flank on this target */
+  flanking?(bot: Bot, target: Combatant): number;
+  /** game time (s) */
+  time?(): number;
   /** how far soldiers can see right now (fog / snowstorm shrink it) */
   viewDist?(): number;
-  callout?: (from: Bot, enemyPos: THREE.Vector3) => void;
+  callout?: (from: Bot, enemyPos: THREE.Vector3, enemy?: Combatant) => void;
   /** lob a frag at a position (bots carry one per life) */
   throwGrenade?(bot: Bot, at: THREE.Vector3): void;
   /** throw a tactical (flash / stun / smoke) */
@@ -72,6 +85,13 @@ const DIFF = [
 ];
 
 type State = 'roam' | 'engage' | 'search' | 'cover' | 'dead';
+export type Intent = 'objective' | 'engage' | 'cover' | 'flank' | 'search' | 'investigate' | 'retreat' | 'regroup' | 'order' | 'evade';
+const DEFAULT_EXPOSURE: Exposure = { stance: 'stand', speed: 2, sinceFire: 99, suppressed: false, foliage: 0, lit: false };
+/** a combatant's velocity, when it has one we can read */
+function velocityOf(c: Combatant): THREE.Vector3 | null {
+  const a = c as unknown as { velocity?: THREE.Vector3; pc?: { vel: THREE.Vector3 } };
+  return a.velocity ?? a.pc?.vel ?? null;
+}
 
 export class Bot implements Combatant {
   isPlayer = false;
@@ -262,6 +282,16 @@ export class Bot implements Combatant {
     this.model.rotation.set(0, 0, 0);
     this.model.position.set(0, 0, 0);
     this.crouch = false;
+    this.stanceCur = 'stand';
+    this.lean = 0;
+    this.slideT = 0;
+    this.suppression = 0;
+    this.intent = 'objective';
+    this.evadeT = 0;
+    this.releaseCover();
+    this.aware.length = 0;
+    this.order = null;
+    this.blocked.length = 0;
     this.repathT = 0;
     this.lastDamageT = 99;
     this.weapon.root.visible = true;
@@ -326,7 +356,8 @@ export class Bot implements Combatant {
       this.lastSeen.copy(from.position());
       this.lastSeenT = 0;
       if (!this.target || !this.target.alive) this.target = from;
-      if (this.health < 45 && this.rng.chance(0.5)) this.seekCover(from.position());
+      this.suppression = Math.min(1, this.suppression + 0.35);
+      this.decideT = Math.min(this.decideT, 0.1);
     }
   }
 
@@ -348,20 +379,57 @@ export class Bot implements Combatant {
   }
   /** run from a live grenade */
   flee(from: THREE.Vector3) {
-    if (!this.alive || this.state === 'cover') return;
+    if (!this.alive || this.intent === 'evade') return;
     const away = this.body.pos.clone().sub(from).setY(0);
     if (away.lengthSq() < 0.01) away.set(this.rng.range(-1, 1), 0, this.rng.range(-1, 1));
     away.setLength(11);
     const goal = this.w.nav.nearest(this.body.pos.clone().add(away), 12)?.p ?? this.body.pos.clone().add(away);
     this.path = this.w.nav.path(this.body.pos, goal) ?? [goal.clone()];
     this.goal.copy(goal);
-    this.state = 'cover';
+    this.moveGoal.copy(goal);
+    this.setIntent('evade');
+    this.evadeT = 2.6;
     this.repathT = 3;
   }
 
-  hear(p: THREE.Vector3) {
-    if (!this.alive || this.state === 'engage') return;
-    this.heardAt = p.clone();
+  /**
+   * A sound or a teammate's callout: a rough position (worse further away) and, when known, who
+   * made it — awareness of them rises without spotting them.
+   */
+  hear(p: THREE.Vector3, src?: Combatant | null, strength = 0.35) {
+    if (!this.alive) return;
+    if (src && src.team !== this.team) {
+      const e = this.awareOf(src);
+      e.a = Math.min(0.95, Math.max(e.a, strength));
+    }
+    if (this.intent === 'engage' && this.target && this.lastSeenT < 1) return;
+    const d = p.distanceTo(this.body.pos);
+    const fuzz = Math.min(12, d * 0.12);
+    this.heardAt = p.clone().add(new THREE.Vector3((this.rng.next() - 0.5) * fuzz, 0, (this.rng.next() - 0.5) * fuzz));
+  }
+  /** rounds cracking past: suppression builds up */
+  suppress(amount: number, from?: Combatant | null) {
+    if (!this.alive) return;
+    this.suppression = Math.min(1, this.suppression + amount);
+    if (from && from.team !== this.team) {
+      const e = this.awareOf(from);
+      e.a = Math.min(1.2, e.a + amount * 0.8);
+      if (!this.target) this.heardAt = from.position().clone();
+    }
+  }
+  /** what this soldier exposes to enemy eyes */
+  exposure(): Exposure {
+    const e = this.expo;
+    e.stance = this.stanceCur === 'prone' ? 'prone' : this.stanceCur === 'crouch' ? 'crouch' : 'stand';
+    e.speed = this.moveSpeed;
+    e.sinceFire = this.sinceShot;
+    e.suppressed = !!this.def.sound.suppressed;
+    e.lit = !!this.w.night?.() && !this.irGearPublic;
+    return e;
+  }
+  private expo: Exposure = { stance: 'stand', speed: 0, sinceFire: 99, suppressed: false, foliage: 0, lit: false };
+  get irGearPublic() {
+    return this.id % 2 === 0;
   }
 
   // ---------------------------------------------------------------- hit test
@@ -412,76 +480,225 @@ export class Bot implements Combatant {
   }
 
   // ---------------------------------------------------------------- AI
-  private seekCover(threat: THREE.Vector3) {
-    const here = this.body.pos;
-    let best: THREE.Vector3 | null = null;
-    let bs = -Infinity;
-    for (const n of this.w.nav.near(here, 22)) {
+  // ================================================================= brain
+  /**
+   * Perception without wallhacks: every enemy has an awareness level that builds up while it can
+   * actually be seen (line of sight, not hidden by smoke) at a rate set by distance, where it is in
+   * the field of view (focal / peripheral), stance, movement, muzzle flash, night and foliage — and
+   * decays when it can't. ≥ 1 means spotted. Sounds and teammates' callouts raise awareness and give
+   * a rough position, never a perfect one.
+   */
+  private aware: { c: Combatant; a: number }[] = [];
+  private awareOf(c: Combatant) {
+    let e = this.aware.find((x) => x.c === c);
+    if (!e) this.aware.push((e = { c, a: 0 }));
+    return e;
+  }
+  /** awareness of a combatant (0..2; ≥ 1 spotted) — read by the AI debug overlay */
+  awareness(c: Combatant) {
+    return this.aware.find((x) => x.c === c)?.a ?? 0;
+  }
+  private percAcc = 0;
+  private sEye = new THREE.Vector3();
+  private sFwd = new THREE.Vector3();
+  private sT1 = new THREE.Vector3();
+  private sT2 = new THREE.Vector3();
+  private perceive(dt: number) {
+    if (this.blindT > 0) return;
+    const eye = this.eye(this.sEye);
+    const fwd = this.lookDir(this.sFwd);
+    const view = this.w.viewDist?.() ?? 160;
+    const night = !!this.w.night?.();
+    let best: Combatant | null = null, bs = Infinity, bd = 0;
+    for (const c of this.w.combatants()) {
+      if (c.team === this.team || !c.alive) continue;
+      const e = this.awareOf(c);
+      const cp = c.chest(this.sT1);
+      const dx = cp.x - eye.x, dy = cp.y - eye.y, dz = cp.z - eye.z;
+      const dist = Math.hypot(dx, dy, dz) || 1e-3;
+      let rate = 0;
+      if (dist < view) {
+        const ex = this.w.exposure?.(c) ?? DEFAULT_EXPOSURE;
+        rate = detectRate(dist, view, (dx * fwd.x + dy * fwd.y + dz * fwd.z) / dist, ex, night);
+        // the one who just shot you: you know which way to look
+        if (c === this.lastAttacker && this.lastDamageT < 2) rate = Math.max(rate, 4);
+        if (rate > 0) {
+          const los = this.w.physics.lineOfSight(eye, cp) || this.w.physics.lineOfSight(eye, c.eye(this.sT2));
+          if (!los || this.w.smokeBlocks?.(eye, cp)) rate = 0;
+        }
+      }
+      if (rate > 0) {
+        e.a = Math.min(2, e.a + rate * dt * (0.8 + this.w.difficulty * 0.5));
+        if (e.a >= 1) {
+          if (c === this.target) {
+            this.lastSeen.copy(c.position());
+            this.lastSeenT = 0;
+          }
+          const score = dist * (c === this.target ? 0.6 : 1) * (c === this.lastAttacker ? 0.5 : 1);
+          if (score < bs) {
+            bs = score;
+            best = c;
+            bd = dist;
+          }
+        }
+      } else e.a = Math.max(0, e.a - dt * (e.a >= 1 ? 0.06 : 0.3));
+    }
+    if (best) this.acquire(best, bd);
+  }
+  private acquire(c: Combatant, dist: number) {
+    if (c !== this.target || this.lastSeenT > 1.0) {
+      if (this.rng.chance(0.45) && (c !== this.target || this.lastSeenT > 4)) this.w.voice?.(this, 'contact');
+      const sk = this.skill();
+      this.reactT = sk.reaction * this.rng.range(0.75, 1.35) * (this.intent === 'engage' ? 0.6 : 1);
+      this.aimCtl.acquire(sk, dist, () => this.rng.next());
+      this.w.callout?.(this, c.position(), c);
+    }
+    this.target = c;
+    this.lastSeen.copy(c.position());
+    this.lastSeenT = 0;
+  }
+  skill() {
+    return SKILL[Math.round(this.w.difficulty * 2)];
+  }
+
+  // ---- decisions
+  /** what the soldier is trying to do right now (utility-scored, re-evaluated ~2× a second) */
+  intent: Intent = 'objective';
+  private intentT = 0;
+  private decideT = 0;
+  /** suppression from rounds cracking past (0..1): worse aim, more cover, lower stance */
+  suppression = 0;
+  /** player / squad order */
+  order: Order | null = null;
+  /** recently noted intent scores (AI debug overlay) */
+  scores: Partial<Record<Intent, number>> = {};
+  private evadeT = 0;
+  private flankGoal: THREE.Vector3 | null = null;
+  private dwellLook = 0;
+
+  private decide(visible: boolean) {
+    const now = this.w.time?.() ?? 0;
+    const hp = this.health / 100;
+    const t = this.target;
+    const tDist = t ? t.position().distanceTo(this.body.pos) : 1e9;
+    const reloading = this.reloadT > 0;
+    const sc: Partial<Record<Intent, number>> = {};
+    if (this.evadeT > 0) sc.evade = 2;
+    if (this.order && this.order.until < now) this.order = null;
+    sc.objective = 0.38 + (this.w.preferObjective?.(this) ? 0.1 : 0);
+    if (t && this.lastSeenT < 3) {
+      sc.engage = (visible ? 0.82 : this.lastSeenT > 1.2 ? 0.45 : 0.6) + 0.12 * hp - this.suppression * 0.3 - (reloading ? 0.25 : 0);
+      const pressed = (1 - hp) * 0.7 + this.suppression * 0.6 + (reloading && visible ? 0.4 : 0) + (this.lastDamageT < 1.5 ? 0.2 : 0);
+      sc.cover = this.w.cover ? Math.min(0.97, 0.25 + pressed) : 0;
+      if (hp < 0.32 && this.nearbyEnemies() >= 2) sc.retreat = 0.9;
+      const flankers = this.w.flanking?.(this, t) ?? 0;
+      if (!visible && flankers < 2 && tDist > 14 && tDist < 80 && this.def.cls !== 'Sniper') sc.flank = 0.62 + this.w.difficulty * 0.1 - flankers * 0.15 + (this.id % 3 === 0 ? 0.08 : 0);
+    } else if (this.lastSeenT < 12) sc.search = 0.58 - this.lastSeenT * 0.02;
+    if (this.heardAt) sc.investigate = 0.5;
+    const sq = this.w.squad?.(this);
+    if (sq?.leader && sq.leader.alive && !t && sq.leader.position().distanceTo(this.body.pos) > 38) sc.regroup = 0.52;
+    if (this.order) sc.order = visible && tDist < 45 ? 0.7 : 0.88;
+    // hysteresis: stick with the current plan unless something is clearly better
+    if (sc[this.intent] !== undefined) sc[this.intent]! += 0.1;
+    let best: Intent = 'objective', bs = -1;
+    for (const [k, v] of Object.entries(sc) as [Intent, number][]) if (v > bs) {
+      bs = v;
+      best = k;
+    }
+    this.scores = sc;
+    if (best !== this.intent) this.setIntent(best);
+  }
+  private setIntent(i: Intent) {
+    if (this.intent === 'cover' || i !== 'cover') this.releaseCover();
+    this.intent = i;
+    this.intentT = 0;
+    this.repathT = 0;
+    this.dwellT = -1;
+    if (i !== 'flank') this.flankGoal = null;
+    this.peekT = 0;
+  }
+  private nearbyEnemies() {
+    let n = 0;
+    for (const c of this.w.combatants()) if (c.team !== this.team && c.alive && c.position().distanceTo(this.body.pos) < 30 && this.awareness(c) >= 1) n++;
+    return n;
+  }
+
+  // ---- cover
+  coverNode: NavNode | null = null;
+  coverQ = 0;
+  private peekT = 0;
+  private peeking = false;
+  private releaseCover() {
+    if (this.coverNode) this.w.coverClaims?.[this.team].delete(this.coverNode.id);
+    this.coverNode = null;
+    this.coverQ = 0;
+  }
+  private findCover(threat: THREE.Vector3) {
+    this.releaseCover();
+    const claims = this.w.coverClaims?.[this.team] ?? new Set<number>();
+    const c = this.w.cover?.find(this.body.pos, threat, 24, claims);
+    if (c) {
+      this.coverNode = c.node;
+      this.coverQ = c.q;
+      claims.add(c.node.id);
+      return true;
+    }
+    // fallback: any nearby node out of the threat's sight
+    let best: NavNode | null = null, bs = -Infinity;
+    for (const n of this.w.nav.near(this.body.pos, 22)) {
       if (n.links.length === 0) continue;
-      const vis = this.w.physics.lineOfSight(n.p.clone().setY(n.p.y + 1.3), threat.clone().setY(threat.y + 1.4));
-      const s = (vis ? -10 : 10) - n.p.distanceTo(here) * 0.3 - n.cover * 3;
+      const vis = this.w.physics.lineOfSight(this.sT1.copy(n.p).setY(n.p.y + 1.3), this.sT2.copy(threat).setY(threat.y + 1.4));
+      const s = (vis ? -10 : 10) - n.p.distanceTo(this.body.pos) * 0.3;
       if (s > bs) {
         bs = s;
-        best = n.p;
+        best = n;
       }
     }
     if (best) {
-      this.path = this.w.nav.path(here, best) ?? [];
-      this.state = 'cover';
-      this.repathT = 3;
+      this.coverNode = best;
+      this.coverQ = 1;
+      return true;
     }
+    return false;
   }
 
-  private perceive() {
-    if (this.blindT > 0) return;
-    const eye = this.eye();
-    const fwd = this.lookDir();
-    let bestT: Combatant | null = null;
-    let bd = Infinity;
-    for (const c of this.w.combatants()) {
-      if (c.team === this.team || !c.alive) continue;
-      const cp = c.chest(new THREE.Vector3());
-      const to = cp.clone().sub(eye);
-      const dist = to.length();
-      if (dist > (this.w.viewDist?.() ?? 160)) continue;
-      to.divideScalar(dist);
-      const inFov = to.dot(fwd) > Math.cos((dist < 10 ? 140 : 70) * (Math.PI / 180));
-      const noticed = inFov || dist < 6 || (c === this.lastAttacker && this.lastDamageT < 3);
-      if (!noticed) continue;
-      // crouched/prone targets in vegetation are harder to see far away
-      if (dist > 70 && (c as any).isPlayer && (c as any).stealth > 0.5 && this.rng.chance(0.6)) continue;
-      const head = c.eye(new THREE.Vector3());
-      if (!this.w.physics.lineOfSight(eye, cp) && !this.w.physics.lineOfSight(eye, head)) continue;
-      if (this.w.smokeBlocks?.(eye, cp)) continue;
-      const score = dist * (c === this.target ? 0.6 : 1) * (c === this.lastAttacker ? 0.5 : 1);
-      if (score < bd) {
-        bd = score;
-        bestT = c;
-      }
+  // ---- movement helpers
+  /** recently blocked spots (unstuck): kept out of route planning for a while */
+  private blocked: { p: THREE.Vector3; until: number }[] = [];
+  private pathOptions() {
+    const o = this.w.pathOpts?.(this) ?? {};
+    const now = this.w.time?.() ?? 0;
+    this.blocked = this.blocked.filter((b) => b.until > now);
+    if (!this.blocked.length) return o;
+    return { ...o, avoid: [...(o.avoid ?? []), ...this.blocked.map((b) => b.p)] };
+  }
+  private moveGoal = new THREE.Vector3(1e9, 0, 0);
+  /** path towards a goal (re-planned when the goal moves or every few seconds); true when arrived */
+  private moveTo(goal: THREE.Vector3, wish: THREE.Vector3, arrive = 1.8) {
+    if (goal.distanceTo(this.moveGoal) > 2.5 || this.repathT <= 0 || !this.path.length) {
+      if (goal.distanceTo(this.body.pos) > arrive) {
+        this.path = this.w.nav.path(this.body.pos, goal, 6000, this.pathOptions()) ?? [goal.clone()];
+      } else this.path = [];
+      this.moveGoal.copy(goal);
+      this.repathT = 3 + this.rng.range(0, 1.5);
     }
-    if (bestT) {
-      if ((bestT !== this.target || this.lastSeenT > 4) && this.rng.chance(0.45)) this.w.voice?.(this, 'contact');
-      if (bestT !== this.target || this.lastSeenT > 1.0) {
-        const d = DIFF[Math.round(this.w.difficulty * 2)];
-        this.reactT = d.reaction * this.rng.range(0.75, 1.35) * (this.state === 'engage' ? 0.6 : 1);
-        const errScale = 1 + bd / 40;
-        this.aimErr.set(this.rng.range(-1, 1) * 0.06 * errScale, this.rng.range(-1, 1) * 0.05 * errScale);
-      }
-      this.target = bestT;
-      this.lastSeen.copy(bestT.position());
-      this.lastSeenT = 0;
-      this.w.callout?.(this, bestT.position());
-      this.state = this.state === 'cover' && this.path.length ? 'cover' : 'engage';
-    }
+    this.followPath(wish);
+    return this.body.pos.distanceTo(goal) < arrive;
   }
 
   private pickGoal() {
     // objective players (Domination capture/defend) often ignore distant noise and keep to the flag
     if (this.heardAt && this.w.preferObjective?.(this) && this.rng.chance(0.85)) this.heardAt = null;
-    const g = this.heardAt ?? (this.lastSeenT < 8 && !(this.w.preferObjective?.(this) && this.rng.chance(0.4)) ? this.lastSeen : this.w.objectiveFor(this.team, this.body.pos, this));
-    this.heardAt = null;
+    // fireteam members move with their leader (a loose wedge around its goal)
+    const sq = this.w.squad?.(this);
+    let g: THREE.Vector3;
+    if (sq?.leader && sq.leader.alive && sq.leader.goalPos.distanceTo(this.body.pos) < 120) {
+      const lg = sq.leader.goalPos;
+      const ang = (sq.slot % 2 ? 1 : -1) * (0.9 + 0.4 * Math.floor(sq.slot / 2));
+      g = this.w.nav.nearest(this.sT1.set(lg.x + Math.sin(ang) * 5, lg.y, lg.z + Math.cos(ang) * 5), 10)?.p ?? lg;
+    } else g = this.w.objectiveFor(this.team, this.body.pos, this);
     this.goal.copy(g);
-    this.path = this.w.nav.path(this.body.pos, this.goal, 6000, this.w.pathOpts?.(this) ?? {}) ?? [];
+    this.path = this.w.nav.path(this.body.pos, this.goal, 6000, this.pathOptions()) ?? [];
     this.repathT = 4 + this.rng.range(0, 2);
     this.goalSet = performance.now();
   }
@@ -494,6 +711,79 @@ export class Bot implements Combatant {
     this.heldPos.copy(pos);
     this.heldYaw = yaw;
     this.heldT = t;
+  }
+
+  aimCtl = new AimController();
+  /** for the AI debug overlay */
+  debugInfo() {
+    return { path: this.path, lastSeen: this.lastSeen, lastSeenT: this.lastSeenT };
+  }
+  private aimCur = { yaw: 0, pitch: 0 };
+  private sinceShot = 99;
+  stanceCur: 'stand' | 'crouch' | 'prone' = 'stand';
+  lean = 0;
+  private slideT = 0;
+  private slideCd = 0;
+  /** separation from nearby soldiers (filled by the game every frame) */
+  avoid = new THREE.Vector3();
+  private stanceWantKeep(): 'stand' | 'crouch' | 'prone' {
+    return this.stanceCur === 'prone' ? 'crouch' : this.stanceCur;
+  }
+  // ---- unstuck: no progress towards the next waypoint → side-step → hop → route round → new goal
+  private wpRef: THREE.Vector3 | null = null;
+  private wpBest = 1e9;
+  private noProg = 0;
+  stuckStage = 0;
+  private sideT = 0;
+  private sideDir = 1;
+  private unstuck(dt: number, wish: THREE.Vector3, speed: number, now: number) {
+    if (this.sideT > 0) {
+      this.sideT -= dt;
+      wish.add(this.sT2.set(-wish.z, 0, wish.x).multiplyScalar(this.sideDir * 1.3));
+    }
+    const wp = this.path[0];
+    const following = this.followedPath;
+    this.followedPath = false;
+    if (!wp || speed < 1 || !following) {
+      this.noProg = 0;
+      return;
+    }
+    if (wp !== this.wpRef) {
+      this.wpRef = wp;
+      this.wpBest = 1e9;
+      this.noProg = 0;
+      this.stuckStage = 0;
+    }
+    const dW = Math.hypot(wp.x - this.body.pos.x, wp.z - this.body.pos.z);
+    if (dW < this.wpBest - 0.12) {
+      this.wpBest = dW;
+      this.noProg = 0;
+      return;
+    }
+    this.noProg += dt;
+    if (this.noProg < 1.0) return;
+    this.noProg = 0;
+    this.wpBest = dW;
+    this.stuckStage++;
+    this.stuckHops++;
+    if (this.stuckStage === 1) {
+      this.sideT = 0.7;
+      this.sideDir = this.rng.chance(0.5) ? 1 : -1;
+    } else if (this.stuckStage === 2) {
+      if (this.body.grounded) this.vel.y = 6.2;
+      this.sideT = 0.5;
+      this.sideDir = -this.sideDir;
+    } else if (this.stuckStage === 3) {
+      // route round it: this spot stays out of planning for a while
+      this.blocked.push({ p: wp.clone(), until: now + 15 });
+      this.path = [];
+      this.repathT = 0;
+    } else {
+      this.stuckStage = 0;
+      this.blocked.push({ p: this.body.pos.clone(), until: now + 15 });
+      this.pickGoal();
+      this.decideT = 0;
+    }
   }
 
   // per-frame scratch vectors (Bot.update used to allocate several per bot per frame)
@@ -526,112 +816,256 @@ export class Bot implements Combatant {
     }
     this.lastSeenT += dt;
     this.lastDamageT += dt;
+    this.sinceShot += dt;
+    this.suppression = Math.max(0, this.suppression - dt * 0.3);
+    this.evadeT -= dt;
     this.perceiveT -= dt;
+    this.percAcc += dt;
     if (this.perceiveT <= 0) {
-      this.perceiveT = 0.18 + this.rng.range(0, 0.08);
-      this.perceive();
+      this.perceiveT = 0.15 + this.rng.range(0, 0.08);
+      this.perceive(this.percAcc);
+      this.percAcc = 0;
     }
-    if (this.target && (!this.target.alive || this.lastSeenT > 2.5)) {
-      if (!this.target.alive) this.lastSeenT = 99;
-      this.target = null;
-      this.state = this.lastSeenT < 8 ? 'search' : 'roam';
-      if (this.state === 'search') {
-        this.path = this.w.nav.path(this.body.pos, this.lastSeen) ?? [];
-        this.repathT = 6;
+    if (this.target && (!this.target.alive || this.lastSeenT > 3)) {
+      if (!this.target.alive) {
+        this.lastSeenT = 99;
+        const e = this.aware.find((x) => x.c === this.target);
+        if (e) e.a = 0;
       }
+      this.target = null;
     }
+    const sk = this.skill();
     const d = DIFF[Math.round(this.w.difficulty * 2)];
-    const visible = this.target && this.lastSeenT < 0.35;
+    const visible = !!this.target && this.lastSeenT < 0.35;
+    // ---------------- decide ----------------
+    this.decideT -= dt;
+    if (this.decideT <= 0) {
+      this.decideT = 0.4 + this.rng.range(0, 0.3);
+      this.decide(visible);
+    }
+    this.intentT += dt;
+    const it = this.intent;
+    this.state = it === 'engage' || it === 'flank' ? (this.target ? 'engage' : 'search') : it === 'cover' || it === 'retreat' || it === 'evade' ? 'cover' : it === 'search' || it === 'investigate' ? 'search' : 'roam';
+    const now2 = this.w.time?.() ?? now;
 
     // ---------------- movement intent ----------------
     const wish = this.sWish.set(0, 0, 0);
     let speed = 0;
-    if (this.state === 'engage' && this.target) {
-      const tp = this.target.position();
-      const dist = tp.distanceTo(this.body.pos);
-      const ideal = this.def.cls === 'Shotgun' ? 8 : this.def.cls === 'SMG' ? 16 : this.def.cls === 'Sniper' ? 60 : this.def.cls === 'Marksman' ? 42 : 28;
-      this.strafeT -= dt;
-      if (this.strafeT <= 0) {
-        this.strafeT = this.rng.range(0.6, 1.6);
-        this.strafeDir = this.rng.chance(0.5) ? 1 : -1;
-        if (this.rng.chance(0.25) && dist > 15) this.strafeDir = 0;
-        this.wantCrouchT = this.rng.chance(dist > 30 ? 0.35 : 0.12) ? this.rng.range(0.8, 2) : 0;
-      }
-      const to = this.sTo.copy(tp).sub(this.body.pos).setY(0).normalize();
-      const side = this.sSide.set(-to.z, 0, to.x);
-      // objective players keep pushing to the flag while trading shots at range
-      const pushObj = visible && dist > 22 && this.w.preferObjective?.(this) && this.goal.distanceTo(this.body.pos) > 3;
-      if (pushObj) {
-        if (!this.path.length || this.repathT <= 0) {
-          this.path = this.w.nav.path(this.body.pos, this.goal, 6000, this.w.pathOpts?.(this) ?? {}) ?? [];
-          this.repathT = 3;
+    let wantStance: 'stand' | 'crouch' | 'prone' = 'stand';
+    let wantLean = 0;
+    let suppressFire = false;
+    const threat = this.target ? this.target.position() : this.lastSeenT < 12 ? this.lastSeen : this.heardAt;
+    const longRange = this.def.cls === 'Sniper' || this.def.cls === 'Marksman' || this.def.cls === 'LMG';
+    this.repathT -= dt;
+    switch (it) {
+      case 'engage': {
+        const tp = this.target ? this.target.position() : this.lastSeen;
+        const dist = tp.distanceTo(this.body.pos);
+        const ideal = this.def.cls === 'Shotgun' ? 8 : this.def.cls === 'SMG' ? 16 : this.def.cls === 'Sniper' ? 60 : this.def.cls === 'Marksman' ? 42 : 28;
+        this.strafeT -= dt;
+        if (this.strafeT <= 0) {
+          this.strafeT = this.rng.range(0.6, 1.6);
+          this.strafeDir = this.rng.chance(0.5) ? 1 : -1;
+          if (this.rng.chance(0.25) && dist > 15) this.strafeDir = 0;
+          this.wantCrouchT = this.rng.chance(dist > 30 ? 0.35 : 0.12) ? this.rng.range(0.8, 2) : 0;
         }
-        this.followPath(wish);
-        wish.multiplyScalar(0.85).addScaledVector(side, this.strafeDir * 0.3);
-      } else wish.addScaledVector(side, this.strafeDir);
-      if (dist > ideal + 12 && visible) wish.addScaledVector(to, 0.9);
-      else if (dist < ideal * 0.5) wish.addScaledVector(to, -0.6);
-      if (!visible) {
-        // lost sight briefly: push toward last known position
-        if (!this.path.length || this.repathT <= 0) {
-          this.path = this.w.nav.path(this.body.pos, this.lastSeen) ?? [];
-          this.repathT = 2;
+        const to = this.sTo.copy(tp).sub(this.body.pos).setY(0).normalize();
+        const side = this.sSide.set(-to.z, 0, to.x);
+        const pushObj = visible && dist > 22 && this.w.preferObjective?.(this) && this.goal.distanceTo(this.body.pos) > 3;
+        // long guns at range settle down prone (or crouched) and stop strafing
+        const settle = visible && longRange && dist > 32 && !pushObj;
+        if (settle) {
+          wantStance = this.body.fits('prone') ? 'prone' : 'crouch';
+        } else {
+          if (pushObj) {
+            if (!this.path.length || this.repathT <= 0) {
+              this.path = this.w.nav.path(this.body.pos, this.goal, 6000, this.pathOptions()) ?? [];
+              this.repathT = 3;
+            }
+            this.followPath(wish);
+            wish.multiplyScalar(0.85).addScaledVector(side, this.strafeDir * 0.3);
+          } else wish.addScaledVector(side, this.strafeDir);
+          if (dist > ideal + 12 && visible) wish.addScaledVector(to, 0.9);
+          else if (dist < ideal * 0.5) wish.addScaledVector(to, -0.6);
+          if (this.wantCrouchT > 0 && this.def.cls !== 'Shotgun') wantStance = 'crouch';
         }
-        this.followPath(wish);
+        if (!visible) {
+          // lost sight briefly: someone else is flanking → keep them pinned with suppressive fire,
+          // otherwise push to the last known position
+          const flankers = this.target ? this.w.flanking?.(this, this.target) ?? 0 : 0;
+          if (flankers > 0 && this.lastSeenT < 3.5 && dist < 70) {
+            suppressFire = true;
+            wish.set(0, 0, 0);
+            wantStance = longRange ? wantStance : 'crouch';
+          } else this.moveTo(this.lastSeen, wish, 2);
+        }
+        speed = visible ? (settle ? 0 : this.stanceCur !== 'stand' ? 1.8 : pushObj ? 3.6 : 3.2) : 5.0;
+        break;
       }
-      speed = visible ? (this.crouch ? 1.8 : pushObj ? 3.6 : 3.2) : 5.0;
-    } else {
-      this.repathT -= dt;
-      const atGoal = this.body.pos.distanceTo(this.goal) < 2.2;
-      if (atGoal && this.dwellT < 0 && (this.state === 'roam' || this.w.preferObjective?.(this))) this.dwellT = this.w.dwellAt?.(this.goal, this) ?? 0;
-      if (this.dwellT > 0) {
-        // hold the room: stand, sweep the view around
-        this.dwellT -= dt;
-        this.path = [];
-        this.aimYaw += Math.sin(now * 1.6 + this.id) * dt * 1.4;
-        if (this.dwellT <= 0) {
+      case 'cover': {
+        if (!threat) break;
+        if (!this.coverNode || (this.intentT > 0.5 && this.w.cover && this.coverQ && this.w.cover.quality(this.coverNode, threat) === 0)) {
+          if (!this.findCover(threat)) {
+            this.setIntent('engage');
+            break;
+          }
+        }
+        const cn = this.coverNode!;
+        const there = this.moveTo(cn.p, wish, 1.1);
+        speed = there ? 0 : 6.2;
+        if (!there) {
+          // closing the last few metres at a sprint: slide into it
+          const dc = cn.p.distanceTo(this.body.pos);
+          if (dc < 5.5 && dc > 2.5 && this.moveSpeed > 5 && this.slideT <= 0 && this.slideCd <= 0 && this.rng.chance(0.4)) {
+            this.slideT = 0.65;
+            this.slideCd = 6;
+          }
+        } else {
+          // peek cycle: hide (duck / stay behind the wall) ⇄ peek (stand up / lean out) and shoot
+          this.peekT -= dt;
+          if (this.peekT <= 0) {
+            this.peeking = !this.peeking && this.reloadT <= 0;
+            this.peekT = this.peeking ? this.rng.range(1.2, 2.4) : this.rng.range(0.9, 2.0) + this.suppression * 1.5;
+          }
+          const full = this.coverQ >= 2;
+          if (full) {
+            wantStance = this.suppression > 0.6 ? 'crouch' : 'stand';
+            wantLean = this.peeking ? this.w.cover?.leanSide(cn, threat) ?? 1 : 0;
+          } else wantStance = this.peeking ? 'stand' : 'crouch';
+        }
+        break;
+      }
+      case 'flank': {
+        const tp = this.target ? this.target.position() : this.lastSeen;
+        if (!this.flankGoal) {
+          // a point off to one side of the enemy, 18–28 m out, reached by a detour
+          const away = this.sT1.copy(this.body.pos).sub(tp).setY(0).normalize();
+          const sideSign = this.id % 2 ? 1 : -1;
+          const side = this.sT2.set(-away.z * sideSign, 0, away.x * sideSign);
+          const want = tp.clone().addScaledVector(side, this.rng.range(18, 28)).addScaledVector(away, this.rng.range(2, 8));
+          this.flankGoal = this.w.nav.nearest(want, 14)?.p.clone() ?? want;
+        }
+        const there = this.moveTo(this.flankGoal, wish, 2.5);
+        speed = 5.6;
+        if (there) this.setIntent('search');
+        break;
+      }
+      case 'search':
+      case 'investigate': {
+        const tgt = it === 'search' ? this.lastSeen : this.heardAt ?? this.lastSeen;
+        const there = this.moveTo(tgt, wish, 2.2);
+        speed = it === 'search' ? 4.4 : 3.6;
+        if (there) {
+          // look around the spot
+          this.dwellLook += dt;
+          this.aimYaw += Math.sin(now * 1.7 + this.id) * dt * 1.6;
+          speed = 0;
+          if (this.dwellLook > 2.5) {
+            this.dwellLook = 0;
+            if (it === 'investigate') this.heardAt = null;
+            else this.lastSeenT = Math.max(this.lastSeenT, 12);
+            this.decideT = 0;
+          }
+        } else this.dwellLook = 0;
+        wantStance = it === 'search' && this.def.cls !== 'Shotgun' && this.rng.chance(0.002) ? 'crouch' : this.stanceWantKeep();
+        break;
+      }
+      case 'retreat': {
+        if (threat && (!this.path.length || this.repathT <= 0)) {
+          const away = this.sT1.copy(this.body.pos).sub(threat).setY(0).normalize().multiplyScalar(22);
+          const g = this.w.nav.nearest(this.sT2.copy(this.body.pos).add(away), 14)?.p ?? this.body.pos;
+          this.moveTo(g, wish, 2);
+        } else this.followPath(wish);
+        speed = 6.2;
+        if (!this.path.length) this.setIntent('cover');
+        break;
+      }
+      case 'regroup': {
+        const sq = this.w.squad?.(this);
+        const lp = sq?.leader?.position();
+        if (lp) {
+          const there = this.moveTo(lp, wish, 6);
+          speed = there ? 0 : 5.4;
+        }
+        break;
+      }
+      case 'order': {
+        const o = this.order!;
+        if (!o) break;
+        const goal = o.kind === 'follow' || o.kind === 'regroup' ? (o.who?.position() ?? o.pos) : o.pos;
+        const there = this.moveTo(goal, wish, o.kind === 'follow' ? 5 : 2.5);
+        speed = there ? 0 : o.kind === 'attack' ? 5.6 : 5;
+        if (there && (o.kind === 'defend' || o.kind === 'hold')) {
+          this.aimYaw += Math.sin(now * 1.3 + this.id) * dt * 1.2;
+          wantStance = o.kind === 'hold' ? 'crouch' : 'stand';
+        }
+        if (there && o.kind === 'regroup') this.order = null;
+        break;
+      }
+      case 'evade': {
+        this.followPath(wish);
+        speed = 6.4;
+        if (!this.path.length || this.evadeT <= 0) {
+          this.evadeT = 0;
+          this.decideT = 0;
+        }
+        break;
+      }
+      default: {
+        // objective: missions from the team director (fireteams follow their leader)
+        const atGoal = this.body.pos.distanceTo(this.goal) < 2.2;
+        if (atGoal && this.dwellT < 0) this.dwellT = this.w.dwellAt?.(this.goal, this) ?? 0;
+        if (this.dwellT > 0) {
+          this.dwellT -= dt;
+          this.path = [];
+          this.aimYaw += Math.sin(now * 1.6 + this.id) * dt * 1.4;
+          if (this.dwellT <= 0) {
+            this.dwellT = -1;
+            this.pickGoal();
+          }
+        } else if (!this.path.length || atGoal) {
           this.dwellT = -1;
           this.pickGoal();
+        } else if (this.repathT <= 0) {
+          const np = this.w.nav.path(this.body.pos, this.goal, 6000, this.pathOptions());
+          if (np && np.length) this.path = np;
+          else this.pickGoal();
+          this.repathT = 4 + this.rng.range(0, 2);
         }
-      } else if (!this.path.length || atGoal) {
-        this.dwellT = -1;
-        this.pickGoal();
+        this.followPath(wish);
+        speed = 6.0;
       }
-      else if (this.repathT <= 0) {
-        // periodic re-plan toward the SAME goal (keeps mission itineraries intact)
-        const np = this.w.nav.path(this.body.pos, this.goal, 6000, this.w.pathOpts?.(this) ?? {});
-        if (np && np.length) this.path = np;
-        else this.pickGoal();
-        this.repathT = 4 + this.rng.range(0, 2);
-      }
-      this.followPath(wish);
-      speed = this.state === 'search' ? 4.8 : this.state === 'cover' ? 6.4 : 6.0;
-      if (this.state === 'cover' && !this.path.length) this.state = this.target ? 'engage' : 'roam';
     }
-    this.repathT -= dt;
-    // frag the corner the enemy just ducked behind
+    // ---------------- equipment ----------------
     this.nadeCd -= dt;
-    if (this.state === 'engage' && this.target && this.frags > 0 && this.nadeCd <= 0 && this.lastSeenT > 0.7 && this.lastSeenT < 5) {
-      const d = this.lastSeen.distanceTo(this.body.pos);
+    if (this.target && this.frags + this.tacticals > 0 && this.nadeCd <= 0 && this.lastSeenT > 0.7 && this.lastSeenT < 5 && (it === 'engage' || it === 'search')) {
+      const dd = this.lastSeen.distanceTo(this.body.pos);
+      // clearing a room: flash / stun first, then the frag
+      const indoor = this.w.nav.nearest(this.lastSeen, 4, false)?.indoor ?? false;
       this.nadeCd = 6 + this.rng.range(0, 8);
-      if (d > 9 && d < 32 && this.rng.chance(0.55)) {
+      if (indoor && this.tacticals > 0 && this.tacKind !== 'smoke' && dd > 4 && dd < 22 && this.rng.chance(0.7)) {
+        this.tacticals--;
+        this.throwT = 0;
+        this.w.voice?.(this, this.tacKind);
+        this.w.throwTactical?.(this, this.lastSeen.clone(), this.tacKind);
+      } else if (this.frags > 0 && dd > 9 && dd < 32 && this.rng.chance(indoor ? 0.75 : 0.55)) {
         this.frags--;
         this.throwT = 0;
         this.w.voice?.(this, 'frag');
         this.w.throwGrenade?.(this, this.lastSeen.clone());
-      } else if (this.tacticals > 0 && d > 7 && d < 26 && this.tacKind !== 'smoke' && this.rng.chance(0.5)) {
-        // flash / stun the room before pushing it
+      } else if (this.tacticals > 0 && dd > 7 && dd < 26 && this.tacKind !== 'smoke' && this.rng.chance(0.5)) {
         this.tacticals--;
         this.throwT = 0;
         this.w.voice?.(this, this.tacKind);
         this.w.throwTactical?.(this, this.lastSeen.clone(), this.tacKind);
       }
     }
-    // smoke to cover a retreat or a push across open ground
-    if (this.tacKind === 'smoke' && this.tacticals > 0 && this.target && this.health < 60 && this.lastSeenT < 0.4) {
-      const d = this.target.position().distanceTo(this.body.pos);
-      if (d > 18 && this.rng.chance(0.02)) {
+    // smoke to cover a retreat, a dash to cover or a push across open ground
+    if (this.tacKind === 'smoke' && this.tacticals > 0 && this.target && this.lastSeenT < 0.4 && (it === 'retreat' || (it === 'cover' && speed > 0) || this.health < 60)) {
+      const dd = this.target.position().distanceTo(this.body.pos);
+      if (dd > 16 && this.rng.chance(0.03)) {
         this.tacticals--;
+        this.throwT = 0;
         this.w.voice?.(this, 'smoke');
         this.w.throwTactical?.(this, this.body.pos.clone().lerp(this.target.position(), 0.35), 'smoke');
       }
@@ -640,27 +1074,42 @@ export class Bot implements Combatant {
     this.blindT = Math.max(0, this.blindT - dt);
     this.stunT = Math.max(0, this.stunT - dt);
     if (this.blindT > 0) {
-      // staggering, shielding the eyes
       wish.set(Math.sin(now * 1.3 + this.id), 0, Math.cos(now * 0.9 + this.id)).multiplyScalar(0.4);
       speed = 1.3;
       this.burstPause = Math.max(this.burstPause, 0.3);
     }
     if (this.stunT > 0) speed *= 0.45;
-    if (wish.lengthSq() > 1) wish.normalize();
-    this.wantCrouchT -= dt;
-    const wantCrouch = this.state === 'engage' && this.wantCrouchT > 0 && this.def.cls !== 'Shotgun';
-    if (wantCrouch !== this.crouch) {
-      if (this.body.setStance(wantCrouch ? 'crouch' : 'stand')) this.crouch = wantCrouch;
+    // heavy suppression keeps heads down
+    if (this.suppression > 0.7 && wantStance === 'stand' && it !== 'evade' && speed < 4) wantStance = 'crouch';
+    // local avoidance (computed for everyone by the game) and the unstuck side-step
+    if (speed > 0.5) wish.addScaledVector(this.avoid, 0.9);
+    else if (this.avoid.lengthSq() > 0.3) {
+      wish.copy(this.avoid);
+      speed = 1.5;
     }
-    if (this.crouch) speed = Math.min(speed, 1.8);
+    this.unstuck(dt, wish, speed, now2);
+    if (wish.lengthSq() > 1) wish.normalize();
+    // stance (the body only stands up where it fits)
+    this.slideT -= dt;
+    this.slideCd -= dt;
+    if (this.slideT > 0) wantStance = 'crouch';
+    this.wantCrouchT -= dt;
+    if (wantStance !== this.stanceCur && (speed < 0.5 || wantStance !== 'prone')) {
+      if (this.body.setStance(wantStance)) this.stanceCur = wantStance;
+    }
+    if (this.stanceCur === 'prone' && speed > 0.5) speed = Math.min(speed, 0.9);
+    else if (this.stanceCur === 'crouch' && this.slideT <= 0) speed = Math.min(speed, 1.9);
+    if (this.slideT > 0) speed = Math.max(speed, 6.5 * (this.slideT / 0.65));
+    this.crouch = this.stanceCur !== 'stand';
+    this.lean = damp(this.lean, wantLean, 8, dt);
 
     // ---------------- physics ----------------
     const tv = wish.multiplyScalar(speed);
-    this.vel.x = damp(this.vel.x, tv.x, 9, dt);
-    this.vel.z = damp(this.vel.z, tv.z, 9, dt);
+    this.vel.x = damp(this.vel.x, tv.x, this.slideT > 0 ? 2 : 9, dt);
+    this.vel.z = damp(this.vel.z, tv.z, this.slideT > 0 ? 2 : 9, dt);
     if (!this.body.grounded) this.vel.y -= 21 * dt;
     else this.vel.y = Math.max(this.vel.y, -1.5);
-    // movement LOD: far, off-screen soldiers run their character-controller sweep at half rate
+    // movement LOD: far, off-screen soldiers run their character-controller sweep at a lower rate
     this.moveAcc += dt;
     const mi = this.w.moveInterval?.(this) ?? 0;
     if (this.moveAcc >= mi) {
@@ -670,39 +1119,48 @@ export class Bot implements Combatant {
       if (this.body.grounded && this.vel.y < 0) this.vel.y = -1.5;
       this.moveSpeed = damp(this.moveSpeed, Math.hypot(moved.x, moved.z) / Math.max(step, 1e-4), 10, step);
     }
-    // stuck detection → hop & repath
-    if (tv.lengthSq() > 1 && this.moveSpeed < 0.4) {
-      this.stuckT += dt;
-      if (this.stuckT > 0.8 && this.body.grounded) {
-        this.vel.y = 6.2;
-        this.stuckT = 0;
-        this.stuckHops++;
-        this.path.shift();
-        if (this.rng.chance(0.5)) this.repathT = 0;
-      }
-    } else this.stuckT = 0;
     // out of the map: respawn guard
     if (this.body.pos.y < -3) this.health = 0;
 
     // ---------------- aim ----------------
     let wantYaw = this.vel.lengthSq() > 0.5 ? Math.atan2(-this.vel.x, -this.vel.z) : this.aimYaw;
     let wantPitch = 0;
-    if (this.target && this.lastSeenT < 1.5) {
-      const visibleNow = this.lastSeenT < 0.35;
-      const aimAt = visibleNow ? this.target.chest(this.sAim) : this.sAim.copy(this.lastSeen).setY(this.lastSeen.y + 1.25);
-      if (this.rng.chance(0.002)) this.target.eye(aimAt);
-      const to = aimAt.sub(this.eye());
-      wantYaw = Math.atan2(-to.x, -to.z) + this.aimErr.x;
-      wantPitch = Math.atan2(to.y, Math.hypot(to.x, to.z)) + this.aimErr.y;
-      this.aimErr.multiplyScalar(Math.exp(-dt * 2.6));
+    let aiming = false;
+    if ((this.target && this.lastSeenT < 1.5) || suppressFire) {
+      const visibleNow = this.lastSeenT < 0.35 && this.target;
+      const aimAt = visibleNow ? this.target!.chest(this.sAim) : this.sAim.copy(this.lastSeen).setY(this.lastSeen.y + 1.25);
+      if (visibleNow && this.rng.chance(0.002)) this.target!.eye(aimAt);
+      // lead a moving target (better soldiers lead better)
+      if (visibleNow) {
+        const tvel = velocityOf(this.target!);
+        if (tvel) aimAt.addScaledVector(tvel, (aimAt.distanceTo(this.body.pos) / 750) * (1 - sk.lag) + 0.06 * (1 - sk.lag));
+      }
+      const to = aimAt.sub(this.eye(this.sT1));
+      wantYaw = Math.atan2(-to.x, -to.z);
+      wantPitch = Math.atan2(to.y, Math.hypot(to.x, to.z));
+      aiming = true;
+    } else if (this.coverNode && threat && it === 'cover') {
+      const to = this.sT1.copy(threat).sub(this.body.pos);
+      wantYaw = Math.atan2(-to.x, -to.z);
     } else if (this.heardAt) {
-      const to = this.heardAt.clone().sub(this.body.pos);
+      const to = this.sT1.copy(this.heardAt).sub(this.body.pos);
       wantYaw = Math.atan2(-to.x, -to.z);
     }
-    const aimK = this.stunT > 0 ? 0.3 : 1;
-    this.aimYaw = dampAngle(this.aimYaw, wantYaw, (this.target ? d.aimSpeed : 6) * aimK, dt);
-    this.aimPitch = damp(this.aimPitch, clamp(wantPitch, -1.2, 1.2), d.aimSpeed * aimK, dt);
-    this.yaw = dampAngle(this.yaw, this.state === 'engage' ? this.aimYaw : wantYaw, 8, dt);
+    let aimErr = 1;
+    if (aiming) {
+      const cur = this.aimCur;
+      cur.yaw = this.aimYaw;
+      cur.pitch = this.aimPitch;
+      aimErr = this.aimCtl.step(cur, wantYaw, wantPitch, sk, dt, this.stunT > 0 || this.suppression > 0.6);
+      this.aimYaw = cur.yaw;
+      this.aimPitch = cur.pitch;
+    } else {
+      this.aimCtl.yawVel = this.aimCtl.pitchVel = 0;
+      this.aimYaw = dampAngle(this.aimYaw, wantYaw, 6 * (this.stunT > 0 ? 0.3 : 1), dt);
+      this.aimPitch = damp(this.aimPitch, clamp(wantPitch, -1.2, 1.2), 6, dt);
+    }
+    const faceAim = it === 'engage' || it === 'cover' || aiming;
+    this.yaw = dampAngle(this.yaw, faceAim ? this.aimYaw : wantYaw, this.stanceCur === 'prone' ? 3 : 8, dt);
 
     // ---------------- shooting ----------------
     this.fireCd -= dt;
@@ -710,16 +1168,20 @@ export class Bot implements Combatant {
     if (this.reloadT > 0) {
       this.reloadT -= dt;
       if (this.reloadT <= 0) this.mag = this.def.mag;
-    } else if (visible && this.reactT <= 0 && this.target) {
-      const yawErr = Math.abs(wrapAngle(this.aimYaw - wantYaw));
-      const dist = this.target.position().distanceTo(this.body.pos);
+    } else if ((visible || suppressFire) && this.reactT <= 0 && (this.target || suppressFire)) {
+      const dist = (this.target ? this.target.position() : this.lastSeen).distanceTo(this.body.pos);
       const effRange = this.def.cls === 'Shotgun' ? 26 : this.def.cls === 'SMG' ? 70 : 160;
+      // fire when the sights are on: tolerance ~ the target's angular size, a bit looser for
+      // spray-and-pray suppressive bursts
+      const tol = Math.atan2(suppressFire ? 1.5 : 0.42, dist) + 0.012;
+      // when hiding in cover only shoot while peeking
+      const hiding = it === 'cover' && this.coverNode && !this.peeking && speed === 0;
       if (this.burstPause > 0) this.burstPause -= dt;
-      else if (yawErr < 0.12 && dist < effRange && this.fireCd <= 0) {
+      else if (!hiding && aimErr < tol && dist < effRange && this.fireCd <= 0) {
         if (this.burstLeft <= 0) this.burstLeft = this.def.modes[0] === 'auto' ? this.rng.int(d.burst[0], d.burst[1]) : 1;
-        this.shoot(d.spread, dist);
+        this.shoot(d.spread * (1 + this.suppression * 1.4) * (suppressFire ? 1.8 : 1), dist);
         this.burstLeft--;
-        if (this.burstLeft <= 0) this.burstPause = this.def.modes[0] === 'auto' ? this.rng.range(0.25, 0.7) : this.rng.range(0.2, 0.6);
+        if (this.burstLeft <= 0) this.burstPause = (this.def.modes[0] === 'auto' ? this.rng.range(0.25, 0.7) : this.rng.range(0.2, 0.6)) * (suppressFire ? 2 : 1);
       }
     }
 
@@ -755,7 +1217,21 @@ export class Bot implements Combatant {
     void now;
   }
 
+  private smoothT = 0;
+  private followedPath = false;
   private followPath(wish: THREE.Vector3) {
+    // string pulling: skip a waypoint when the next one is in plain view and walkable (no more
+    // zig-zagging node to node across open ground)
+    this.smoothT -= 1 / 60;
+    if (this.path.length > 1 && this.smoothT <= 0) {
+      this.smoothT = 0.3;
+      const n1 = this.path[1];
+      const p = this.body.pos;
+      if (Math.abs(n1.y - p.y) < 0.6 && Math.hypot(n1.x - p.x, n1.z - p.z) < 18) {
+        const a = this.sT1.set(p.x, p.y + 0.45, p.z), b = this.sT2.set(n1.x, n1.y + 0.45, n1.z);
+        if (this.w.physics.lineOfSight(a, b) && this.w.physics.lineOfSight(a.setY(p.y + 1.2), b.setY(n1.y + 1.2))) this.path.shift();
+      }
+    }
     while (this.path.length) {
       const n = this.path[0];
       const dx = n.x - this.body.pos.x, dz = n.z - this.body.pos.z;
@@ -764,6 +1240,7 @@ export class Bot implements Combatant {
         continue;
       }
       wish.set(dx, 0, dz).normalize();
+      this.followedPath = true;
       if (n.y - this.body.pos.y > 0.8 && this.body.grounded && Math.hypot(dx, dz) < 2.5) this.vel.y = 6;
       return;
     }
@@ -776,6 +1253,9 @@ export class Bot implements Combatant {
     }
     this.mag--;
     this.shots++;
+    this.sinceShot = 0;
+    const cls = this.def.cls;
+    this.aimCtl.kick(cls === 'Sniper' ? 0.07 : cls === 'Shotgun' ? 0.05 : cls === 'Pistol' ? 0.02 : cls === 'Marksman' ? 0.03 : cls === 'LMG' ? 0.009 : 0.012, this.skill());
     this.fireCd = 60 / this.def.rpm * (this.def.modes[0] === 'semi' ? 1.6 : 1);
     if (this.def.modes[0] === 'pump' || this.def.modes[0] === 'bolt') this.fireCd = this.def.cycle! + 0.2;
     const moving = this.moveSpeed > 1 ? 1.3 : 1;
@@ -811,13 +1291,14 @@ export class Bot implements Combatant {
     a.yaw = this.yaw;
     a.aimYaw = this.aimYaw;
     a.aimPitch = this.aimPitch;
-    a.stance = this.crouch ? 1 : 0;
-    a.sprint = this.moveSpeed > 5.3 && this.state !== 'engage';
+    a.stance = this.stanceCur === 'prone' ? 2 : this.stanceCur === 'crouch' ? 1 : 0;
+    a.sprint = this.moveSpeed > 5.3 && this.state !== 'engage' && this.slideT <= 0;
     a.tactical = false;
-    a.slide = a.dive = a.ladder = false;
+    a.slide = this.slideT > 0;
+    a.dive = a.ladder = false;
     a.mantle = -1;
     a.air = !this.body.grounded && this.vel.y > 1;
-    a.lean = 0;
+    a.lean = this.lean;
     a.ready = this.state === 'engage' || this.state === 'search' || (this.target !== null && this.lastSeenT < 3);
     a.calm = this.state === 'roam' && !this.target;
     if (this.reloadT > 0) {

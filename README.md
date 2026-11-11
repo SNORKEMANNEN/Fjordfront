@@ -53,6 +53,8 @@ URL options: `?quality=low|medium|high|ultra`, `?weather=clear|overcast|rain|sno
 | Tactical map | M. Scroll to zoom at the cursor, drag to pan, left click (or X) to ping, right click for a waypoint (right click it again to clear), R to re-centre. You can still move while it is open, but not shoot or aim |
 | Scoreboard | Tab |
 | Chat / commands (multiplayer) | Enter, or / for a command. `/help` lists them |
+| Squad orders | Hold Y, flick the mouse at an order, release |
+| AI debug overlay | F4 |
 | Pause, settings, movement tuning | Esc |
 
 ## Features
@@ -283,6 +285,112 @@ URL options: `?quality=low|medium|high|ultra`, `?weather=clear|overcast|rain|sno
 - **MP7:** sprint and jump clutter reduced.
 - **Rifle:** support hand moved so it no longer shows through the optic window.
 - **Pistol:** hold reworked.
+
+## Update 27: smarter bots — perception, decisions, cover, fireteams, squad orders
+
+### Perception without wallhacks (`Bot.perceive`, `BotBrain.detectRate`)
+
+- **Awareness builds up over time.** Every enemy has an awareness level that rises only while the bot can actually see it: line of sight to the chest or head, not through smoke. 1.0 means spotted.
+- **How fast it rises depends on:**
+  - distance;
+  - where the target is in view (focal ±35°, peripheral to ±100°, a sense of someone right behind within 4 m);
+  - stance (prone 0.3, crouched 0.62);
+  - movement (sprinting stands out, standing still helps);
+  - **muzzle flash** (shooting gives you away, suppressors much less);
+  - **vegetation** (the forest channel of the terrain splat);
+  - night (goggles: a little worse than daylight, unless you're lit).
+- **A still, prone player in the trees at 80 m can stay unseen;** a sprinting, shooting one is spotted at once. Awareness decays when you break line of sight.
+- **Sounds give a rough position, never a perfect one.** The error grows with distance.
+  - Gunfire: suppressed weapons carry ~25 m instead of 90.
+  - **Your footsteps:** sprinting ~22 m, walking 8–12, crouched or prone ~3.
+  - Grenades and doors.
+- **Teammates' callouts and your enemy pings share awareness** of that enemy, second-hand.
+
+### Decisions (`Bot.decide`)
+
+- **Utility scoring.** About twice a second each bot scores its options from health, suppression, reloading, whether its target is visible, how many enemies are near, teammates flanking the same target, the Domination objective, its fireteam leader and your orders:
+  - **objective** (team-director missions)
+  - **engage**, **take cover**, **flank**
+  - **search** the last known position, **investigate** a sound
+  - **retreat**, **regroup** on the fireteam leader, **follow orders**, **evade** a grenade
+- **Hysteresis** keeps plans stable.
+
+### Combat tactics
+
+- **Directional cover** (`CoverMap`):
+  - Every nav node knows which of 8 directions are blocked at crouch height (low cover) and at head height (full cover).
+  - Bots pick a spot that shields them *from where the threat is*, claim it so teammates don't stack, sprint (sometimes **slide**) into it, then run a **peek cycle**.
+  - Behind low cover they duck and stand up to shoot; behind full cover they **lean out** of the open side.
+  - Under heavy suppression they stay down longer.
+- **Suppression.**
+  - Rounds cracking past within 2.6 m (yours or the other bots') build suppression: worse aim, lower stance, more cover-seeking.
+  - Being hit adds more.
+- **Fireteams.**
+  - Bots move in fireteams of up to four, the followers in a loose wedge round their leader's mission.
+  - When a target breaks contact, one or two bots **flank**: they go to a point 18–28 m off to its side by a detour.
+  - Others keep it pinned with **suppressive fire** on its last known position.
+- **Room clearing and equipment.**
+  - A target last seen indoors gets a flashbang or stun first, then a frag.
+  - Smoke covers retreats and dashes to cover.
+- **Stances.** Snipers, marksmen and LMG gunners **go prone** to fight at range; others crouch-strafe.
+
+### Human-like aim (`AimController`)
+
+- **Reaction time** before the first shot at a new target.
+- **Sprung acquisition:** the sights *overshoot and settle* (an under-damped spring), with an initial error that grows with distance.
+- **Lead** on moving targets, but with lag.
+- **Recoil climb** that the soldier only partly pulls down.
+- **Sway**, worse when stunned or suppressed.
+- Bots fire when the sights are on, within roughly the target's size at that range.
+- **Difficulty** (Recruit, Regular, Veteran) tunes all of this rather than raw accuracy.
+
+### Working with you
+
+- **Your fireteam.** The first three bots on your side are *your squad*: gold ◆ nameplates, visible out to 220 m.
+- **Squad order wheel — hold Y,** flick the mouse at an option, release:
+
+| Order | What the squad does |
+| --- | --- |
+| Attack | Move on where you're looking |
+| Defend | Hold where you're looking |
+| Follow me | Stay with you |
+| Hold | Stay where they are |
+| Regroup | Come to you, then carry on |
+| As you were | Cancel orders |
+
+- **Pings** (X or middle mouse) are orders too:
+  - Ping a place → your squad attacks there.
+  - Ping a flag you hold → they defend it.
+  - Ping an enemy → every teammate becomes aware of it.
+
+### Movement
+
+- **Path smoothing:** bots skip a waypoint when the next one is in clear, walkable view, so no more zig-zagging node to node.
+- **Local avoidance:** soldiers push apart inside 1.6 m, and someone right ahead makes a bot step aside to a consistent side, so two bots in a corridor pass instead of shoving. You count as an obstacle too.
+- **Unstuck, in stages.** With no progress towards the next waypoint:
+  - side-step;
+  - then hop and side-step the other way;
+  - then route round the spot (kept out of planning for 15 s);
+  - then pick a new goal.
+
+### Tooling
+
+- **AI debug overlay: F4** (or `?aidebug` in the URL). Above each nearby soldier:
+  - its intent and the runner-up scores;
+  - its awareness of you, suppression, stance, cover quality;
+  - its target and how long since it was last seen, and any order.
+- **Lines in the world:** planned route (white), chosen cover spot (yellow), last known enemy (red), where it looks (cyan).
+
+### Tested
+
+- 180 s 12 v 12 match: 34 kills, flags changing hands, every intent showing up, sim 2.5 ms/frame.
+- Two-browser multiplayer.
+- Squad orders: attack, follow and cancel, driven by the wheel through simulated input.
+- AI overlay, checked with screenshots.
+
+### Not yet
+
+- Bots don't climb ladders or place claymores.
 
 ## Update 26: our own soldiers, built and animated from scratch
 

@@ -1,14 +1,14 @@
 /** Keyboard/mouse input with pointer lock and per-frame edge detection. */
 export type Action =
   | 'forward' | 'back' | 'left' | 'right' | 'jump' | 'crouch' | 'prone' | 'sprint'
-  | 'reload' | 'inspect' | 'primary' | 'secondary' | 'swap' | 'melee' | 'scoreboard' | 'fire' | 'ads' | 'fireMode' | 'spot' | 'tuning' | 'grenade' | 'tactical' | 'streak1' | 'streak2' | 'streak3' | 'nvg' | 'ping' | 'map' | 'leanL' | 'leanR' | 'field';
+  | 'reload' | 'inspect' | 'primary' | 'secondary' | 'swap' | 'melee' | 'scoreboard' | 'fire' | 'ads' | 'fireMode' | 'spot' | 'tuning' | 'grenade' | 'tactical' | 'streak1' | 'streak2' | 'streak3' | 'nvg' | 'ping' | 'map' | 'leanL' | 'leanR' | 'field' | 'orders' | 'aidebug';
 
 const BINDS: Record<string, Action> = {
   KeyW: 'forward', KeyS: 'back', KeyA: 'left', KeyD: 'right',
   Space: 'jump', KeyC: 'crouch', ControlLeft: 'crouch', KeyZ: 'prone',
   ShiftLeft: 'sprint', KeyR: 'reload', KeyI: 'inspect',
   Digit1: 'primary', Digit2: 'secondary', KeyQ: 'leanL', KeyE: 'leanR', KeyV: 'melee', KeyX: 'ping', Tab: 'scoreboard', KeyB: 'fireMode', KeyF: 'spot', Backquote: 'tuning', F2: 'tuning',
-  KeyG: 'grenade', KeyT: 'tactical', KeyH: 'field', KeyN: 'nvg', KeyM: 'map', Digit3: 'streak1', Digit4: 'streak2', Digit5: 'streak3',
+  KeyG: 'grenade', KeyT: 'tactical', KeyH: 'field', KeyN: 'nvg', KeyM: 'map', KeyY: 'orders', F4: 'aidebug', Digit3: 'streak1', Digit4: 'streak2', Digit5: 'streak3',
 };
 
 /** what still reaches the game while the tactical map is open (you can walk, not fight) */

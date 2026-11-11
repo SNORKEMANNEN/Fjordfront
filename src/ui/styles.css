@@ -488,3 +488,17 @@ button.primary:hover { background: #f3d76a; }
 .marker.spotted.ads i { width: 9px; height: 9px; }
 .marker.pingmark.ads span { font-size: 10px; }
 .marker.pingmark.ads i { width: 10px; height: 10px; }
+
+/* squad order wheel (hold Y) */
+.orderwheel { position: absolute; left: 50%; top: 50%; width: 360px; height: 360px; margin: -180px 0 0 -180px; pointer-events: none; z-index: 30; }
+.orderwheel .ring { position: absolute; inset: 0; border-radius: 50%; background: radial-gradient(circle, rgba(8,12,14,.15) 0 26%, rgba(8,12,14,.62) 27% 100%); border: 1px solid rgba(255,255,255,.12); }
+.orderwheel .opt { position: absolute; width: 130px; margin-left: -65px; margin-top: -16px; text-align: center; font-size: 15px; letter-spacing: .14em; color: var(--dim); transition: color .1s, transform .1s; }
+.orderwheel .opt.on { color: var(--accent); transform: scale(1.12); }
+.orderwheel .opt small { display: block; font-size: 10px; letter-spacing: .1em; color: #6f7a73; }
+.orderwheel .hint { position: absolute; left: 0; right: 0; top: 50%; margin-top: -8px; text-align: center; font-size: 11px; letter-spacing: .2em; color: #8a958e; }
+.marker.ally.squad span { color: #ffd257; }
+.marker.ally.squad span::before { content: '◆ '; }
+.marker.ally.squad i { border-top-color: #e8c547; }
+/* AI debug overlay (F4) */
+.aidbg { position: absolute; transform: translate(-50%, -100%); font: 10px/1.25 ui-monospace, monospace; color: #e8f4ea; background: rgba(0,0,0,.55); padding: 2px 4px; border-left: 2px solid #5aa8ff; white-space: pre; pointer-events: none; }
+.aidbg.t1 { border-left-color: #ff5340; }
