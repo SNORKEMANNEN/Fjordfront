@@ -93,6 +93,17 @@ export const WEAPONS: Record<WeaponId, WeaponDef> = {
     speedMul: 0.86, adsSpeedMul: 0.46, penetration: 0.6, swaySpeed: 0.7, weight: 1.75, hip: [0.104, -0.064, -0.06], tracerEvery: 3,
     sound: { body: 1.2, crack: 1.05, low: 1.15, tail: 1.15, pitch: 0.9 },
   },
+  stille9: {
+    id: 'stille9', name: 'Stille-9 Suppressed SMG', short: 'STILLE-9', cls: 'SMG', slot: 'primary',
+    desc: 'Integrally suppressed 9 mm roller-delayed SMG with diopter irons. Quiet enough to stay off the enemy minimap, smooth and laser-accurate up close — but the subsonic rounds run out of steam past 30 m.',
+    rpm: 800, modes: ['auto', 'burst', 'semi'], damage: [26, 16], range: [13, 30], headMul: 1.45, limbMul: 0.9, pellets: 1, pelletSpread: 0,
+    mag: 30, reserve: 150, reload: 2.05, reloadEmpty: 2.6, adsTime: 0.18, adsZoom: 1.3, sprintToFire: 0.13,
+    hipSpread: 1.8, adsSpread: 0.09, moveSpread: 1.2, bloomPerShot: 0.22, bloomMax: 2.1,
+    recoil: { v: 0.42, h: 0.22, drift: 0.04, firstShotMul: 1.15, adsMul: 0.78, recover: 0.55, kickZ: 0.02, kickPitch: 0.025, roll: 0.018, shake: 0.0024 },
+    speedMul: 1.03, adsSpeedMul: 0.74, penetration: 0.25, swaySpeed: 1.15, weight: 0.82, hip: [0.096, -0.056, -0.06], tracerEvery: 0,
+    sound: { body: 0.6, crack: 0.3, low: 0.4, tail: 0.3, pitch: 1.0, suppressed: true },
+    reloadKind: 'rifle',
+  },
   ums45: {
     id: 'ums45', name: 'UMS-45 Submachine Gun', short: 'UMS-45', cls: 'SMG', slot: 'primary',
     desc: '.45 polymer SMG with a Kestrel box reflex. A slow, thumping 650 rpm that drops people in five at close range.',
@@ -188,6 +199,17 @@ export const WEAPONS: Record<WeaponId, WeaponDef> = {
     speedMul: 1.06, adsSpeedMul: 0.8, penetration: 0.15, swaySpeed: 1.3, weight: 0.6, hip: [0.07, -0.06, 0.04], tracerEvery: 3,
     sound: { body: 0.8, crack: 0.9, low: 0.6, tail: 0.8, pitch: 1.15 },
   },
+  mp18: {
+    id: 'mp18', name: 'MP-18 Machine Pistol', short: 'MP-18', cls: 'Pistol', slot: 'secondary',
+    desc: 'Select-fire 9 mm pistol with a 33-round stick and a folding stock that flicks out when you aim. 1100 rpm: a sidearm that wins close fights outright, if you can hold it on target.',
+    rpm: 1100, modes: ['auto', 'semi'], damage: [23, 14], range: [9, 24], headMul: 1.45, limbMul: 0.9, pellets: 1, pelletSpread: 0,
+    mag: 33, reserve: 132, reload: 1.7, reloadEmpty: 2.05, adsTime: 0.16, adsZoom: 1.15, sprintToFire: 0.1,
+    hipSpread: 2.2, adsSpread: 0.22, moveSpread: 1.2, bloomPerShot: 0.3, bloomMax: 3.0,
+    recoil: { v: 0.5, h: 0.42, drift: 0.08, firstShotMul: 1.2, adsMul: 0.55, recover: 0.6, kickZ: 0.022, kickPitch: 0.045, roll: 0.03, shake: 0.003 },
+    speedMul: 1.06, adsSpeedMul: 0.8, penetration: 0.15, swaySpeed: 1.3, weight: 0.62, hip: [0.07, -0.06, 0.04], tracerEvery: 4,
+    sound: { body: 0.75, crack: 0.95, low: 0.55, tail: 0.75, pitch: 1.2 },
+    reloadKind: 'pistol',
+  },
   rv357: {
     id: 'rv357', name: 'R357 Revolver', short: 'R357', cls: 'Pistol', slot: 'secondary',
     desc: '.357 Magnum six-shooter. Hits like a truck, a headshot kill at any sane range — make every round count.',
@@ -200,5 +222,5 @@ export const WEAPONS: Record<WeaponId, WeaponDef> = {
   },
 };
 
-export const PRIMARIES: WeaponId[] = ['k416', 'ks17', 'mp7', 'ums45', 'lmg', 'pump12', 'as20', 'db12', 'dmr14', 'skv338'];
-export const SECONDARIES: WeaponId[] = ['p80', 'rv357'];
+export const PRIMARIES: WeaponId[] = ['k416', 'ks17', 'mp7', 'ums45', 'lmg', 'stille9', 'pump12', 'as20', 'db12', 'dmr14', 'skv338'];
+export const SECONDARIES: WeaponId[] = ['p80', 'mp18', 'rv357'];

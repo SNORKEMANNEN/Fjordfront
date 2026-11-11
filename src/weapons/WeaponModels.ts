@@ -1832,6 +1832,240 @@ export function buildLMG(mats: WeaponMats): WeaponModel {
   return { root, parts: { cover: coverPivot, belt, mag, charge, trigger, bipodL: bipod[0], bipodR: bipod[1] }, sockets, adsDist: 0.2 };
 }
 
+
+// ======================================================================
+// Stille-9 integrally suppressed 9 mm SMG (roller-delayed, MP5SD pattern). Proportions from a
+// side reference at ~1.5 mm/px: rounded-top stamped receiver with the cocking tube running
+// forward over the suppressor, front sight = hooded ring with a post on the end of the tube,
+// rear sight = rotary diopter drum sitting low between two tall knurled ears (looking down the
+// sights the hooded post sits in the notch between the ears — the classic sight picture),
+// polymer trigger group with an enclosed guard and a fat finger-grooved grip, curved 30-round
+// magazine with a paddle release behind the well, collapsible twin-rail stock.
+// Moving parts: charge (HK slap cocking handle on a pivot at the tube axis), trigger, mag, mag2.
+// ======================================================================
+export const SD9 = { tubeV: 0.032, sightV: 0.061, handleU: 0.255 };
+export function buildStille9(mats: WeaponMats): WeaponModel {
+  const root = new THREE.Group();
+  root.name = 'Stille9';
+  const b = new PartBuilder();
+  const bore = 0.0;
+  const sv = SD9.sightV;
+  // ---- receiver: flat-sided box with a fully rounded top, front tapering into the tube ----
+  b.add('metal', rbox(-0.165, 0.128, -0.032, 0.014, -0.0205, 0.0205, 0.002));
+  b.add('metal', cyl(0.0205, -0.165, 0.128, 0.014, 0, 24));
+  // stamped side ribs and the long indentation, cross pins
+  for (const w of [-1, 1]) {
+    b.add('dark', rbox(-0.13, 0.09, -0.006, -0.003, w * 0.0207 - 0.0004, w * 0.0207 + 0.0004, 0.0004));
+    b.add('metal', rbox(-0.12, 0.08, 0.004, 0.012, w * 0.0206, w * 0.0218, 0.002));
+    for (const u of [-0.135, 0.095]) b.add('steel', pin(u, -0.022, w * 0.021, 0.0026, 0.0012));
+  }
+  // claw-mount dimples on top
+  for (const u of [-0.095, -0.03, 0.05]) b.add('dark', rbox(u, u + 0.008, 0.033, 0.0345, -0.007, 0.007, 0.001));
+  // ejection port (right) with the brass deflector bump behind it, the bolt face in the port
+  b.add('dark', rbox(-0.02, 0.045, -0.006, 0.02, 0.0198, 0.0212, 0.001));
+  b.add('steel', rbox(-0.018, 0.043, -0.002, 0.016, 0.0185, 0.0196, 0.0008));
+  b.add('metal', rbox(-0.04, -0.022, 0.0, 0.016, 0.0205, 0.0245, 0.003));
+  // rear end cap and stock housing block
+  b.add('metal', rbox(-0.18, -0.162, -0.034, 0.03, -0.022, 0.022, 0.003));
+  // ---- cocking tube forward over the suppressor, slot + notch on the left ----
+  const tv = SD9.tubeV;
+  b.add('metal', cyl(0.0118, 0.12, 0.3, tv, 0, 20));
+  b.add('metal', cyl(0.0128, 0.288, 0.302, tv, 0, 20));
+  b.add('dark', rbox(0.19, 0.27, tv - 0.0035, tv + 0.0035, -0.0124, -0.0112, 0.0006));
+  b.add('dark', rbox(0.19, 0.2, tv - 0.0035, tv + 0.009, -0.0122, -0.0108, 0.0006)); // the notch at the rear of the slot
+  // ---- front sight: base on the tube end, hood ring with a post ----
+  b.add('metal', rbox(0.272, 0.302, tv + 0.006, tv + 0.018, -0.008, 0.008, 0.002));
+  b.add('metal', lathe([[0.276, 0.0128], [0.276, 0.0158], [0.298, 0.0158], [0.298, 0.0128], [0.276, 0.0128]], sv, 0, 32));
+  for (const w of [-1, 1]) b.add('metal', rbox(0.278, 0.296, tv + 0.012, sv - 0.009, w * 0.0112 - 0.0024, w * 0.0112 + 0.0024, 0.001));
+  b.add('steel', rbox(0.285, 0.289, tv + 0.012, sv, -0.0009, 0.0009, 0.0003));
+  // ---- rear sight: base block, two tall knurled ears, the diopter drum low between them ----
+  b.add('metal', rbox(-0.138, -0.096, 0.03, 0.043, -0.019, 0.019, 0.003));
+  for (const w of [-1, 1]) {
+    // low knurled wedges: tops just under the sight line, inner faces slanting out
+    b.add('metal', profile([[-0.136, 0.042], [-0.136, sv - 0.004], [-0.128, sv + 0.003], [-0.106, sv + 0.003], [-0.098, sv - 0.003], [-0.098, 0.042]], 0.0092, { round: 0.003, bevel: 0.0014, wc: w * 0.0142 }));
+    for (let i = 0; i < 5; i++) for (let j = 0; j < 3; j++) b.add('dark', rbox(-0.133 + i * 0.006, -0.1302 + i * 0.006, 0.046 + j * 0.0055, 0.0482 + j * 0.0055, w * 0.0189 - 0.0004, w * 0.0189 + 0.0004, 0.0004));
+    for (let i = 0; i < 5; i++) b.add('dark', rbox(-0.133 + i * 0.006, -0.1302 + i * 0.006, sv + 0.0028, sv + 0.0034, w * 0.0142 - 0.0035, w * 0.0142 + 0.0035, 0.0003));
+  }
+  b.add('steel', cyl(0.0115, -0.124, -0.11, 0.045, 0, 20)); // drum (axis fore-aft, top just under the sight line)
+  b.add('dark', cyl(0.0035, -0.11, -0.109, 0.045, 0, 10));
+  b.add('steel', cyl(0.0022, -0.118, -0.116, 0.058, 0.0, 8)); // windage screw head
+  // ---- polymer trigger group: enclosed guard, finger-grooved grip, selector ----
+  b.add('blackPoly', profile([[-0.15, -0.032], [0.03, -0.032], [0.034, -0.04], [0.03, -0.044], [-0.03, -0.044], [-0.15, -0.04]], 0.038, { round: 0.003, bevel: 0.002 }));
+  b.add('blackPoly', profile([[-0.034, -0.044], [0.032, -0.044], [0.036, -0.05], [0.032, -0.074], [0.024, -0.08], [-0.016, -0.08], [-0.03, -0.072]], 0.014, { round: 0.003, bevel: 0.0015, holes: [[[-0.022, -0.048], [0.026, -0.048], [0.026, -0.07], [0.018, -0.074], [-0.012, -0.074], [-0.02, -0.066]]] }));
+  b.add('blackPoly', profile([
+    [-0.03, -0.044], [-0.03, -0.075], [-0.036, -0.088], [-0.034, -0.104], [-0.04, -0.118], [-0.038, -0.134], [-0.046, -0.15], [-0.05, -0.158],
+    [-0.09, -0.158], [-0.094, -0.15], [-0.088, -0.11], [-0.084, -0.07], [-0.09, -0.048], [-0.1, -0.044],
+  ], 0.034, { round: 0.009, bevel: 0.004 }));
+  for (let i = 0; i < 5; i++) for (const w of [-1, 1]) b.add('dark', rbox(-0.08 + i * 0.002, -0.048 + i * 0.001, -0.09 - i * 0.012, -0.084 - i * 0.012, w * 0.0168 - 0.0004, w * 0.0168 + 0.0004, 0.0004));
+  b.add('metal', rbox(-0.098, -0.07, -0.036, -0.028, -0.024, -0.0195, 0.002)); // selector lever (left)
+  b.add('metal', cyl(0.004, -0.088, -0.084, -0.032, -0.0215, 10));
+  // ---- magazine well and paddle release ----
+  b.add('metal', rbox(0.046, 0.098, -0.046, -0.028, -0.016, 0.016, 0.002));
+  b.add('metal', profile([[0.034, -0.044], [0.046, -0.044], [0.046, -0.06], [0.036, -0.064], [0.03, -0.058]], 0.012, { round: 0.002, bevel: 0.001 }));
+  // ---- integral suppressor (barrel shroud) with a ribbed handguard sleeve ----
+  b.add('metal', cyl(0.0215, 0.12, 0.47, bore, 0, 28));
+  b.add('metal', lathe([[0.462, 0.0], [0.462, 0.0222], [0.474, 0.0222], [0.478, 0.019], [0.478, 0.006], [0.476, 0.0045], [0.476, 0.0]], bore, 0, 28));
+  b.add('dark', cyl(0.0045, 0.477, 0.479, bore, 0, 14));
+  b.add('polymer', cyl(0.0265, 0.13, 0.31, bore, 0, 24));
+  for (let i = 0; i < 10; i++) b.add('dark', cyl(0.0268, 0.142 + i * 0.016, 0.146 + i * 0.016, bore, 0, 24));
+  b.add('metal', cyl(0.0235, 0.118, 0.132, bore, 0, 24)); // locking collar
+  // ---- collapsible stock: twin curved rails each side and a butt plate ----
+  for (const w of [-1, 1]) for (const v of [0.012, -0.022]) {
+    b.add('steel', cyl(0.0035, -0.34, -0.17, v, w * 0.0195, 10));
+  }
+  b.add('metal', profile([[-0.33, 0.028], [-0.346, 0.034], [-0.352, 0.0], [-0.352, -0.07], [-0.344, -0.08], [-0.33, -0.04]], 0.046, { round: 0.004, bevel: 0.002 }));
+  b.add('rubber', rbox(-0.36, -0.35, -0.082, 0.036, -0.023, 0.023, 0.004));
+  b.add('steel', rbox(-0.19, -0.172, 0.022, 0.032, -0.006, 0.006, 0.002)); // stock latch
+  // ---- moving parts ----
+  // cocking handle: built around the tube axis so it can be pulled back and rotated up into the notch
+  const ch = new PartBuilder();
+  ch.add('metal', rbox(SD9.handleU - 0.006, SD9.handleU + 0.006, -0.003, 0.003, -0.034, -0.011, 0.0015));
+  ch.add('blackPoly', cyl(0.0058, SD9.handleU - 0.012, SD9.handleU + 0.002, 0.0, -0.036, 14));
+  const chg = ch.build(mats, 'chargeBody');
+  const charge = new THREE.Group();
+  charge.name = 'charge';
+  charge.position.set(0, tv, 0);
+  charge.add(chg);
+  const tb = new PartBuilder();
+  tb.add('metal', profile([[0.004, -0.0], [0.006, -0.012], [0.004, -0.021], [-0.002, -0.024], [-0.004, -0.022], [0.0, -0.014], [-0.001, -0.0]], 0.006, { bevel: 0.0008, round: 0.0015 }));
+  const trigger = tb.build(mats, 'trigger');
+  trigger.position.set(0, -0.046, -0.005);
+  // the curved 9 mm thirty: strongly curved, ribbed sides, small base plate
+  const magBuild = () => {
+    const mb = new PartBuilder();
+    const front = bez([0.016, 0.0], [0.02, -0.09], [0.052, -0.19], 10);
+    const rear = bez([0.022, -0.188], [-0.008, -0.095], [-0.014, 0.0], 10);
+    mb.add('metal', profile([...front, ...rear], 0.0215, { round: 0.003, bevel: 0.002 }));
+    mb.add('metal', profile([[0.056, -0.186], [0.06, -0.198], [0.018, -0.2], [0.016, -0.19]], 0.025, { round: 0.002, bevel: 0.002 }));
+    for (let i = 0; i < 3; i++) {
+      const t = 0.25 + i * 0.22;
+      const v = -0.19 * t, uc = -0.006 + 0.04 * t * t;
+      for (const w of [-1, 1]) mb.add('dark', rbox(uc, uc + 0.022, v - 0.03, v, w * 0.0109 - 0.0004, w * 0.0109 + 0.0004, 0.0004));
+    }
+    mb.add('brass', cyl(0.0048, -0.008, 0.012, 0.002, 0, 10));
+    mb.add('copper', lathe([[0.012, 0.0], [0.012, 0.0048], [0.019, 0.003], [0.021, 0.0]], 0.002, 0, 10));
+    return mb.build(mats, 'mag');
+  };
+  const mag = magBuild();
+  mag.position.set(0, -0.032, -0.07);
+  const mag2 = magBuild();
+  mag2.name = 'mag2';
+  mag2.visible = false;
+  root.add(b.build(mats, 'body'), charge, trigger, mag, mag2);
+  const sockets = addSockets(root, [
+    socket('muzzle', 0.479, bore, 0),
+    socket('eject', 0.012, 0.006, 0.022),
+    socket('sight', -0.118, sv, 0),
+    socket('magWell', 0.07, -0.032, 0),
+  ]);
+  const { rs, ls } = grips(root, [-0.066, -0.098, -0.18, 0.0168], { u: 0.22, v: bore - 0.004, r: 0.0265, fingers: [0.7, -0.5, -0.5], palm: [0.32, 1, 0] });
+  sockets.rightHand = rs;
+  sockets.leftHand = ls;
+  addLaser(root, sockets, mats, 0.3, bore, 0.027);
+  return { root, parts: { charge, trigger, mag, mag2 }, sockets, adsDist: 0.22 };
+}
+
+// ======================================================================
+// MP-18 machine pistol (9 mm, select fire): long-slide polymer pistol with a ported slide nose,
+// a selector on the slide's rear left, a 33-round extended magazine and a folding wire stock
+// hinged on the right of the frame tail. Folded, the stock lies forward along the right flank;
+// it flicks out round to the right and locks behind the grip when you aim.
+// Moving parts: slide, trigger, mag, stock (pivot), selector.
+// ======================================================================
+export function buildMP18(mats: WeaponMats): WeaponModel {
+  const root = new THREE.Group();
+  root.name = 'MP18';
+  const b = new PartBuilder();
+  const bore = 0.032;
+  const sightTop = 0.0575;
+  // ---- frame: longer dust cover with a rail, squared guard, raked grip, magwell flare ----
+  b.add('blackPoly', profile([[-0.07, 0.0165], [0.128, 0.0165], [0.13, 0.012], [0.128, 0.0], [0.086, -0.002], [0.05, -0.004], [0.046, -0.012], [-0.028, -0.012], [-0.04, -0.006], [-0.066, 0.006], [-0.09, 0.01], [-0.095, 0.015], [-0.08, 0.0165]], 0.027, { round: 0.003, bevel: 0.002 }));
+  for (let i = 0; i < 4; i++) b.add('dark', rbox(0.078 + i * 0.012, 0.0825 + i * 0.012, -0.0025, 0.002, -0.0132, 0.0132, 0.0006));
+  b.add('blackPoly', profile([[-0.03, -0.012], [0.046, -0.012], [0.052, -0.016], [0.052, -0.033], [0.046, -0.037], [-0.022, -0.037], [-0.028, -0.032], [-0.026, -0.029], [-0.02, -0.032], [0.043, -0.032], [0.047, -0.029], [0.047, -0.016], [0.043, -0.016], [-0.025, -0.016]], 0.012, { round: 0.0015, bevel: 0.001 }));
+  const rk = Math.tan(0.36);
+  const gu = (u: number, v: number) => u + rk * v;
+  b.add('blackPoly', profile([
+    [-0.03, -0.012], [gu(-0.026, -0.03), -0.03], [gu(-0.03, -0.05), -0.05], [gu(-0.026, -0.07), -0.07], [gu(-0.03, -0.09), -0.09], [gu(-0.026, -0.112), -0.112], [gu(-0.022, -0.12), -0.12],
+    [gu(-0.072, -0.12), -0.12], [gu(-0.068, -0.108), -0.108], [gu(-0.066, -0.06), -0.06], [gu(-0.064, -0.02), -0.02], [-0.072, 0.004], [-0.09, 0.01],
+  ], 0.03, { round: 0.008, bevel: 0.004 }));
+  for (const w of [0.0152, -0.0152]) for (let i = 0; i < 7; i++) {
+    const v = -0.03 - i * 0.012;
+    b.add('dark', rbox(gu(-0.06, v), gu(-0.034, v), v - 0.007, v - 0.004, w - 0.0003, w + 0.0003, 0.001));
+  }
+  // flared magwell funnel at the grip base
+  b.add('blackPoly', rbox(gu(-0.078, -0.12), gu(-0.018, -0.12), -0.128, -0.118, -0.018, 0.018, 0.003));
+  // stock hinge lug on the right of the frame tail
+  b.add('metal', rbox(-0.092, -0.076, -0.004, 0.012, 0.012, 0.02, 0.002));
+  b.add('steel', cyl(0.0036, -0.088, -0.08, 0.004, 0.0165, 10));
+  b.add('metal', rbox(-0.004, 0.022, 0.011, 0.0165, -0.0148, -0.013, 0.0008)); // slide stop
+  b.add('blackPoly', rbox(-0.036, -0.027, -0.02, -0.011, -0.016, -0.014, 0.002)); // mag release
+  // ---- slide: long, with a three-port compensator nose and the selector at the back ----
+  const sb = new PartBuilder();
+  sb.add('metal', profile([[-0.074, 0.0165], [-0.074, 0.046], [0.128, 0.046], [0.132, 0.043], [0.132, 0.0165]], 0.025, { round: 0.0015, bevel: 0.0016 }));
+  sb.add('metal', profile([[-0.073, 0.045], [-0.073, 0.0485], [-0.07, 0.0505], [0.125, 0.0505], [0.13, 0.0475], [0.13, 0.045]], 0.02, { round: 0.0015, bevel: 0.0022 }));
+  for (let i = 0; i < 3; i++) sb.add('dark', rbox(0.1 + i * 0.009, 0.106 + i * 0.009, 0.049, 0.051, -0.005, 0.005, 0.002)); // comp ports on top
+  for (let i = 0; i < 7; i++) for (const w of [0.0126, -0.0126]) sb.add('dark', rbox(-0.07 + i * 0.0036, -0.0688 + i * 0.0036, 0.02, 0.0445, w - 0.0005, w + 0.0005, 0.0004));
+  sb.add('dark', rbox(0.0, 0.05, 0.03, 0.0498, 0.0115, 0.0127, 0.0008));
+  sb.add('steel', rbox(0.004, 0.047, 0.04, 0.0496, 0.007, 0.012, 0.0008));
+  sb.add('steel', rbox(-0.0712, -0.06, 0.0505, sightTop - 0.003, -0.009, 0.009, 0.0008));
+  for (const sgn of [1, -1]) sb.add('steel', rbox(-0.0712, -0.06, sightTop - 0.0032, sightTop, sgn * 0.0018, sgn * 0.009, 0.0006));
+  sb.add('steel', rbox(0.088, 0.095, 0.0505, sightTop, -0.0017, 0.0017, 0.0005));
+  sb.add('steel', cyl(0.0056, 0.128, 0.1325, bore, 0, 18));
+  sb.add('dark', cyl(0.0046, 0.1325, 0.133, bore, 0, 18));
+  // selector: a small rotary lever on the slide's rear left
+  sb.add('metal', cyl(0.005, -0.066, -0.06, 0.036, -0.0135, 12));
+  sb.add('metal', rbox(-0.068, -0.058, 0.03, 0.046, -0.016, -0.0135, 0.0012));
+  const slide = sb.build(mats, 'slide');
+  const fdot = new THREE.Mesh(new THREE.CircleGeometry(0.0012, 14), mats.tritium);
+  fdot.position.set(0, sightTop - 0.0018, -0.0878);
+  fdot.rotation.y = Math.PI;
+  slide.add(fdot);
+  for (const sgn of [1, -1]) {
+    const dot = new THREE.Mesh(new THREE.CircleGeometry(0.0011, 14), mats.tritium);
+    dot.position.set(sgn * 0.0054, sightTop - 0.0018, 0.0713);
+    dot.rotation.y = Math.PI;
+    slide.add(dot);
+  }
+  const tb = new PartBuilder();
+  tb.add('blackPoly', profile([[0.004, 0.0], [0.006, -0.01], [0.004, -0.019], [-0.002, -0.023], [-0.004, -0.021], [0.0, -0.014], [-0.001, 0.0]], 0.0058, { bevel: 0.0008 }));
+  const trigger = tb.build(mats, 'trigger');
+  trigger.position.set(0, -0.006, -0.012);
+  // ---- 33-round extended magazine: long steel body, grippy polymer extension ----
+  const mb = new PartBuilder();
+  mb.add('metal', profile([[0.006, 0.0], [-0.002, -0.04], [-0.012, -0.1], [-0.02, -0.165], [-0.048, -0.168], [-0.04, -0.1], [-0.03, -0.04], [-0.022, 0.0]], 0.0205, { round: 0.002, bevel: 0.0015 }));
+  mb.add('blackPoly', profile([[-0.014, -0.15], [-0.018, -0.176], [-0.022, -0.182], [-0.056, -0.182], [-0.058, -0.176], [-0.05, -0.15]], 0.025, { round: 0.003, bevel: 0.002 }));
+  for (let i = 0; i < 4; i++) for (const w of [-1, 1]) mb.add('dark', rbox(-0.052 + i * 0.008, -0.048 + i * 0.008, -0.178, -0.154, w * 0.0126 - 0.0004, w * 0.0126 + 0.0004, 0.0004));
+  mb.add('brass', cyl(0.0045, -0.016, 0.004, 0.003, 0, 10));
+  mb.add('copper', lathe([[0.004, 0.0], [0.004, 0.0045], [0.01, 0.002], [0.012, 0.0]], 0.003, 0, 10));
+  const mag = mb.build(mats, 'mag');
+  mag.position.set(0, -0.004, 0.048);
+  // ---- folding stock: built deployed (pointing back from the hinge), folded = turned forward ----
+  const stb = new PartBuilder();
+  const L = 0.2;
+  for (const v of [0.0, -0.034]) stb.add('steel', cyl(0.0032, -L, 0.0, v, 0.0, 10));
+  stb.add('steel', rbox(-0.012, 0.004, -0.036, 0.004, -0.004, 0.004, 0.002)); // hinge knuckle
+  stb.add('blackPoly', profile([[-L + 0.01, 0.012], [-L - 0.008, 0.016], [-L - 0.016, 0.0], [-L - 0.016, -0.05], [-L - 0.006, -0.058], [-L + 0.01, -0.044]], 0.034, { round: 0.004, bevel: 0.002 }));
+  const stockBody = stb.build(mats, 'stockBody');
+  const stock = new THREE.Group();
+  stock.name = 'stock';
+  stock.position.set(0.0165, 0.004, 0.084);
+  stock.add(stockBody);
+  stock.rotation.y = Math.PI; // folded
+  root.add(b.build(mats, 'body'), slide, trigger, mag, stock);
+  const sockets = addSockets(root, [
+    socket('muzzle', 0.134, bore, 0),
+    socket('eject', 0.024, 0.044, 0.014),
+    socket('sight', -0.0712, sightTop, 0),
+    socket('magWell', -0.048, -0.004, 0),
+  ]);
+  const { rs, ls } = grips(root, [-0.068, -0.048, -0.36, 0.0148], { u: -0.058, v: -0.074, r: 0.027, fingers: [0.1, -0.85, -0.5], palm: [1, 0, 0.12] });
+  ls.userData.fist = true;
+  ls.userData.pose = 'pistolSupport';
+  sockets.rightHand = rs;
+  sockets.leftHand = ls;
+  return { root, parts: { slide, trigger, mag, stock }, sockets, adsDist: 0.3 };
+}
+
 export const WEAPON_BUILDERS = {
   k416: buildCarbine,
   mp7: buildMP7,
@@ -1846,5 +2080,7 @@ export const WEAPON_BUILDERS = {
   ks17: buildKS17,
   ums45: buildUMS45,
   lmg: buildLMG,
+  stille9: buildStille9,
+  mp18: buildMP18,
 } as const;
 export type WeaponId = keyof typeof WEAPON_BUILDERS;

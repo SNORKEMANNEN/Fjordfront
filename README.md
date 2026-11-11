@@ -65,7 +65,7 @@ URL options: `?quality=low|medium|high|ultra`, `?weather=clear|overcast|rain|sno
 - Crouch and prone with headroom checks, using a Rapier kinematic capsule with autostep and snap-to-ground.
 - Camera: footstep-synced bob, strafe and slide roll, sprint/slide FOV changes, landing and mantle springs, and a trauma-based shake.
 
-**Weapons** (`src/weapons/`): K416 carbine, MP7 PDW (flip-up notch-and-post irons, folding foregrip), Pump-12 shotgun, SKV .338 bolt-action sniper with 6× scope, and the P80 pistol.
+**Weapons** (`src/weapons/`): Stille-9 suppressed SMG, MP-18 machine pistol, KVL-7 LMG, K416 carbine, MP7 PDW (flip-up notch-and-post irons, folding foregrip), Pump-12 shotgun, SKV .338 bolt-action sniper with 6× scope, and the P80 pistol.
 - Detailed procedural models with separate moving parts: bolt carrier, charging handle, trigger, slide, pump, bolt handle and detachable magazines. Optics are a see-through red dot and a holographic sight.
 - First-person arms with gloved, articulated fingers and two-bone IK onto each weapon's grip sockets.
 - Procedural animation: exact ADS sight alignment, hip, sprint, tactical sprint, slide and crouch poses, and spring-based sway, bob, recoil and landing.
@@ -283,6 +283,49 @@ URL options: `?quality=low|medium|high|ultra`, `?weather=clear|overcast|rain|sno
 - **MP7:** sprint and jump clutter reduced.
 - **Rifle:** support hand moved so it no longer shows through the optic window.
 - **Pistol:** hold reworked.
+
+## Update 21: Stille-9 suppressed SMG and MP-18 machine pistol
+
+**Stille-9** (new primary, SMG): an integrally suppressed 9 mm roller-delayed SMG in the MP5SD pattern, modelled from scratch.
+- **Model:**
+  - Rounded-top stamped receiver with side ribs, claw-mount dimples and the brass deflector.
+  - Cocking tube running forward over the suppressor, with the slot and locking notch on the left.
+  - Polymer trigger group with an enclosed guard and a finger-grooved grip.
+  - Strongly curved 30-round magazine with a paddle release.
+  - Twin-rail sliding stock.
+  - Ribbed handguard over an integral suppressor.
+- **Sights:** the classic diopter picture. A hooded ring with a post sits on the end of the cocking tube. At the rear, the diopter drum sits low between two knurled wedge ears, so aiming puts the hooded post in the notch between the ears.
+- **Suppressed:**
+  - Quiet, choked "thwap" plus the bolt's metallic clack.
+  - No minimap ping when you fire, bots only hear it close by, no tracers, tiny flash.
+  - The subsonic rounds lose damage past ~30 m.
+- **Tactical reload** (2.05 s):
+  1. The fresh mag comes up held sideways in the support hand and clamps the old mag's base against it.
+  2. The thumb works the paddle and the old mag is pulled out.
+  3. The hand rolls a quarter turn so the new mag stands upright, hooks its front lip and rocks it home.
+  4. The old mag is carried away and down out of view in the same hand.
+- **Empty reload** (2.6 s), the HK slap:
+  1. The cocking handle is pulled back and flicked up into its notch.
+  2. Paddle, and the empty falls free.
+  3. Fresh mag in.
+  4. The open palm slaps the handle out of the notch and it slams forward, with a big jolt and camera punch.
+- Some bots carry it.
+
+**MP-18** (new sidearm, Pistol): a select-fire 9 mm machine pistol, 1100 rpm, 33-round extended magazine.
+- **Model:** long ported slide with a selector on its rear left, accessory rail, flared magwell, extended mag with a grippy base pad.
+- **Folding stock:**
+  - Folded, the wire stock lies forward along the right flank.
+  - When you aim it flicks out round to the right, drops toward the shoulder and locks with a click. The gun rocks a little as it locks.
+  - It folds back at the hip.
+  - Aimed recoil is much lower with it out.
+- **Tactical reload** (1.7 s): the gun cants over toward the support hand. The hand pinches the base pad and strips the stick out, pockets it, brings the fresh one up by its base, starts it and heels it home. The gun snaps back upright.
+- **Empty reload** (2.05 s):
+  1. A hard wrist flick throws the empty mag clear.
+  2. The support hand is already at the belt and puts the fresh stick in with a palm tap.
+  3. The hand comes over the top, grabs the rear serrations of the locked slide and slingshots it.
+- **Sound:** a tighter, quicker report than the P80.
+
+The reload code is in `src/weapons/SmgAnims.ts`. The support hand is always attached to whatever it is holding or touching (a magazine, the cocking handle, the slide), so the hand and the parts never drift apart.
 
 ## Update 20: LMG, new equipment, Trophy System, leaning, battlefield audio, destruction
 

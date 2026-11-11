@@ -1155,6 +1155,30 @@ export class AudioEngine {
     for (const [k, src] of [['magOut', 'magOut@skv338'], ['magIn', 'magIn@skv338'], ['magTouch', 'magTouch@k416'], ['boltBack', 'boltBack@k416'], ['boltRelease', 'boltRelease@k416'], ['dry', 'dry@k416'], ['rattle', 'rattle@k416'], ['boltOpen', 'boltOpen@skv338'], ['boltClose', 'boltClose@skv338']] as const) {
       if (this.bank[src]) this.bank[`${k}@lmg`] = this.bank[src];
     }
+    // Stille-9: integrally suppressed — the 9 mm report choked down to a low "thwap", with the
+    // roller-delayed bolt's metallic clack carrying most of the sound
+    const p9 = this.bank['shot@p80'] ?? [], pdwS = this.bank['shot@mp7'] ?? [], bclk = this.bank['boltRelease@mp7'] ?? this.bank['boltRelease@k416'] ?? [];
+    if (p9.length) {
+      await set('shot_stille9', p9.map((buf, i) => () => render([
+        { buf, rate: 0.72, gain: 0.55, lp: 1100, drive: 1.3 },
+        ...(pdwS.length ? [{ buf: pdwS[i % pdwS.length], rate: 0.9, gain: 0.14, lp: 2600, hp: 300 }] : []),
+        ...(bclk.length ? [{ buf: bclk[0], rate: 1.45, gain: 0.55, hp: 1400, at: 0.004 }] : []),
+      ], 0.45, 1.0)));
+      await set('far_stille9', p9.map((buf) => () => render([{ buf, rate: 0.7, gain: 0.4, lp: 700 }], 0.4, 0.8)));
+      // MP-18: the pistol report, tighter and quicker (comped slide, longer barrel) with a bit of PDW snap
+      await set('shot_mp18', p9.map((buf, i) => () => render([
+        { buf, rate: 1.06, gain: 0.95, drive: 1.3 },
+        ...(pdwS.length ? [{ buf: pdwS[i % pdwS.length], rate: 1.05, gain: 0.3, hp: 1800 }] : []),
+        { buf, rate: 0.7, gain: 0.3, lp: 500, drive: 1.8 },
+      ], 0.9, 1.0)));
+      if (this.bank['far@p80']) this.bank['far_mp18'] = this.bank['far@p80'];
+    }
+    for (const [k, src] of [['magOut', 'magOut@mp7'], ['magIn', 'magIn@mp7'], ['magTouch', 'magTouch@mp7'], ['boltBack', 'boltBack@k416'], ['boltRelease', 'boltRelease@k416'], ['dry', 'dry@mp7'], ['rattle', 'rattle@mp7']] as const) {
+      if (this.bank[src]) this.bank[`${k}@stille9`] = this.bank[src];
+    }
+    for (const k of ['magOut', 'magIn', 'magTouch', 'slideBack', 'slideRelease', 'dry', 'rattle']) {
+      if (this.bank[`${k}@p80`]) this.bank[`${k}@mp18`] = this.bank[`${k}@p80`];
+    }
     // UMS-45: .45 ACP is slower and fatter than the PDW's 4.6 — the PDW report pitched down with the
     // 9 mm pistol's punch underneath and a driven low thump
     const pdw = this.bank['shot@mp7'] ?? [], pst = this.bank['shot@p80'] ?? [];

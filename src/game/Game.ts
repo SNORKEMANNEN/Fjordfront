@@ -774,7 +774,7 @@ export class Game {
   private spawnBots() {
     // 12v12: eleven bots beside the player, twelve against. Same class mix on both sides
     // (rifles carry the line, SMGs + shotguns clear buildings, two marksmen per side)
-    const mix: WeaponId[] = ['k416', 'mp7', 'ks17', 'pump12', 'skv338', 'dmr14', 'as20', 'lmg', 'db12', 'ums45', 'dmr14', 'ks17'];
+    const mix: WeaponId[] = ['k416', 'mp7', 'ks17', 'pump12', 'skv338', 'dmr14', 'as20', 'lmg', 'db12', 'ums45', 'stille9', 'ks17'];
     const ids: WeaponId[][] = [mix.slice(0, 11), mix];
     let id = 1;
     const diff = { recruit: 0, regular: 0.5, veteran: 1 }[Settings.data.botDifficulty];
@@ -3403,6 +3403,11 @@ export class Game {
       this.audio.play('pin', { gain: 0.6, reverb: 0.03 });
     }
     if (name === 'stimCap') this.audio.play('click', { gain: 0.5, reverb: 0, rate: 0.8 });
+    if (name === 'stockOut') {
+      this.audio.play('bipod', { gain: 0.42, rate: 1.75, reverb: 0 });
+      this.audio.play('click', { gain: 0.5, rate: 0.9, reverb: 0 });
+    }
+    if (name === 'stockIn') this.audio.play('legs', { gain: 0.35, rate: 1.2, reverb: 0 });
     this.equipEvent(name);
     if (name === 'stimInject') {
       this.audio.play('stimInject', { gain: 0.9, reverb: 0.03 });

@@ -5,6 +5,7 @@ import { RiggedArms } from './RiggedArms';
 import { ReloadClip, ReloadKind, buildReloadClip, SPECS } from './ReloadClips';
 import { breakAction, BreakData } from './BreakAction';
 import { lmgReload } from './LmgAnim';
+import { sd9Reload, mp18Reload, AnimCtx } from './SmgAnims';
 import { knifeAction, knifeCarry } from './KnifeAnim';
 import { WeaponModel } from './WeaponModels';
 import { WeaponDef } from './WeaponDefs';
@@ -256,6 +257,11 @@ export class Viewmodel {
   poses = POSES;
   private cantBlend = 0;
   private peekBlend = 0;
+  private animMem: AnimCtx['mem'] = {};
+  /** MP-18 folding stock: flicks out round to the right when you aim, folds back at the hip */
+  private stockBlend = 0;
+  private stockOut = false;
+  private stockSpring = new Spring(260, 16);
   /** LMG bipod: target set by the weapon system (0 folded, 1 deployed); bipodBlend animates */
   bipod = 0;
   private bipodBlend = 0;
@@ -996,6 +1002,8 @@ export class Viewmodel {
     if (this.spareMag) this.spareMag.visible = false;
     if (p.charge) p.charge.position.copy(this.chargeHome);
     if (p.cover) p.cover.rotation.x = 0;
+    if (p.mag2) p.mag2.visible = false;
+    if (p.charge) p.charge.rotation.set(0, 0, 0);
     if (p.belt) {
       p.belt.visible = true;
       p.belt.position.set(0, 0, 0);
@@ -1179,6 +1187,26 @@ export class Viewmodel {
       pos.y -= 0.005 * Math.abs(pk);
       pos.z += 0.016 * Math.abs(pk);
       rot.y += -0.02 * pk;
+    }
+
+    // ---------------- MP-18 stock flick ----------------
+    const stock = this.model.parts.stock;
+    if (stock) {
+      const want = c.ads > 0.25 && !this.action;
+      if (want !== this.stockOut) {
+        this.stockOut = want;
+        this.onEvent(want ? 'stockOut' : 'stockIn');
+        this.stockSpring.impulse(want ? 2.2 : -1.2);
+      }
+      this.stockBlend = damp(this.stockBlend, want ? 1 : 0, want ? 16 : 9, dt);
+      this.stockSpring.update(dt);
+      const k = clamp(this.stockBlend + this.stockSpring.value * 0.06, 0, 1.08);
+      stock.rotation.y = Math.PI * (1 - k);
+      // deployed it drops toward the shoulder pocket instead of running straight back at the eye
+      stock.rotation.x = 0.38 * Math.min(1, k);
+      // the flick rocks the gun a touch as the stock swings and locks
+      rot.z += this.stockSpring.value * 0.012;
+      rot.y += this.stockSpring.value * 0.006;
     }
 
     // ---------------- Q/E lean: weight rolls onto one leg, the gun rides the shoulder ----------------
@@ -1962,8 +1990,20 @@ export class Viewmodel {
       }
       case 'reload':
       case 'reloadEmpty': {
-        if (t < 0.02) this.reloadFired.clear();
-        if (def.id === 'lmg') {
+        if (t < 0.02) {
+          this.reloadFired.clear();
+          this.animMem = {};
+        }
+        if (def.id === 'stille9' || def.id === 'mp18') {
+          const ctx: AnimCtx = {
+            parts, h, magHome: this.magHome, chargeHome: this.chargeHome, slideHome: this.slideHome,
+            wristFor: (an, q, r) => this.wristFor(an, q, r),
+            ev: (n) => (n.startsWith('cam') ? this.clipEvent(n) : this.onEvent(n)),
+            fired: this.reloadFired, jolt: (u, r, b) => this.jolt(u, r, b), mem: this.animMem,
+          };
+          (def.id === 'stille9' ? sd9Reload : mp18Reload)(t, a.type === 'reloadEmpty', pos, rot, ctx);
+          this.camRoll = rot.z * 0.035;
+        } else if (def.id === 'lmg') {
           lmgReload(t, a.type === 'reloadEmpty', pos, rot, parts, h, this.magHome, this.chargeHome, (an, q, r) => this.wristFor(an, q, r),
             (n) => (n.startsWith('cam') ? this.clipEvent(n) : this.onEvent(n)), this.reloadFired, (u, r, b) => this.jolt(u, r, b));
           this.camRoll = rot.z * 0.03;
