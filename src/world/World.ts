@@ -28,11 +28,11 @@ export class World {
   zips!: Ziplines;
   shafts: SunShafts;
 
-  constructor(L: MaterialLib, physics: Physics, scene: THREE.Scene, onProgress: (s: string) => void = () => {}) {
+  constructor(L: MaterialLib, physics: Physics, scene: THREE.Scene, onProgress: (s: string) => void = () => {}, heights?: Float32Array) {
     this.group.name = 'world';
     scene.add(this.group);
     onProgress('Shaping terrain');
-    this.terrain = new Terrain(L, physics);
+    this.terrain = new Terrain(L, physics, heights);
     this.group.add(this.terrain.mesh, this.terrain.cap);
     onProgress('Building Kvitvika');
     this.mats = makeWorldMaterials(L);

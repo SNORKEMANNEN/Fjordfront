@@ -155,7 +155,12 @@ export class Doors {
       const d = this.doors[di];
       if (Math.abs(d.target) < 0.5 && Math.abs(d.angle) < 0.5) {
         // closed (or only cracked open by a peek): anyone pushing into it?
-        for (const m of movers) {
+        for (let mi = 0; mi < movers.length; mi++) {
+          const m = movers[mi];
+          // cheap reject before the vector maths (most doors have nobody near them)
+          const dx = m.pos.x - d.centre.x, dz = m.pos.z - d.centre.z;
+          const rr = d.spec.width / 2 + 2.2; // ≥ the reach / along limits below
+          if (dx * dx + dz * dz > rr * rr) continue;
           this.tmp.subVectors(m.pos, d.centre).setY(0);
           const side = this.tmp.dot(d.normal);
           const along = this.tmp.dot(d.spec.along);
@@ -193,7 +198,11 @@ export class Doors {
       } else if (!d.collider) {
         d.restT += dt;
         // never drop a collider onto someone standing in the leaf's way
-        if (d.restT > 0.1 && !movers.some((m) => this.inLeaf(d, m.pos))) this.rebuildCollider(d);
+        if (d.restT > 0.1) {
+          let blocked = false;
+          for (let mi = 0; mi < movers.length && !blocked; mi++) blocked = this.inLeaf(d, movers[mi].pos);
+          if (!blocked) this.rebuildCollider(d);
+        }
       }
     }
   }

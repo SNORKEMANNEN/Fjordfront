@@ -2,26 +2,10 @@ import * as THREE from 'three';
 import { Settings } from '../game/Settings';
 import { MaterialLib } from '../render/Materials';
 import { Physics } from '../core/Physics';
-import { terrainHeight, forestDensity, nearestRoad, PLAY_HALF, TERRAIN_EXTENT, getPads, TUNNEL, TUNNEL_EXIT, tunnelCapHeight, tunnelShafts } from './MapLayout';
+import { terrainHeight, forestDensity, nearestRoad, PLAY_HALF, TERRAIN_EXTENT, padsNear, TUNNEL, TUNNEL_EXIT, tunnelCapHeight, tunnelShafts } from './MapLayout';
 import { clamp, smoothstep } from '../core/math';
 
-const INNER = 205; // half-size of the dense, collidable region
-const STEP = 1.25;
-
-function axisCoords(): number[] {
-  const pos: number[] = [];
-  for (let x = 0; x <= INNER + 1e-6; x += STEP) pos.push(x);
-  let s = STEP;
-  let x = pos[pos.length - 1];
-  // grow the spacing away from the play area, but cap it so distant massifs keep their shape
-  while (x < TERRAIN_EXTENT) {
-    s = Math.min(s * 1.05, 24);
-    x += s;
-    pos.push(Math.min(x, TERRAIN_EXTENT));
-  }
-  const neg = pos.slice(1).map((v) => -v).reverse();
-  return neg.concat(pos);
-}
+import { INNER, STEP, axisCoords } from './TerrainData';
 
 /** terrain tile LOD distances (full res, half res; quarter beyond) per quality preset */
 const LOD_DIST: Record<string, [number, number]> = { low: [30, 130], medium: [45, 190], high: [60, 240], ultra: [80, 300] };
@@ -41,7 +25,8 @@ export class Terrain {
   cloudUniforms: Record<string, THREE.IUniform> = {};
   splatData: Uint8Array;
 
-  constructor(private mats: MaterialLib, physics: Physics) {
+  /** `heights`: the precomputed n×n field over axisCoords() (see TerrainData); computed here if absent */
+  constructor(private mats: MaterialLib, physics: Physics, heights?: Float32Array) {
     const t0 = performance.now();
     const ax = axisCoords();
     const n = ax.length;
@@ -54,7 +39,7 @@ export class Terrain {
       const z = ax[j];
       for (let i = 0; i < n; i++) {
         const x = ax[i];
-        const h = terrainHeight(x, z);
+        const h = heights ? heights[j * n + i] : terrainHeight(x, z);
         const k = (j * n + i) * 3;
         positions[k] = x;
         positions[k + 1] = h;
@@ -243,7 +228,6 @@ export class Terrain {
   private buildSplat(): Uint8Array {
     const S = 512;
     const data = new Uint8Array(S * S * 4);
-    const pads = getPads();
     for (let j = 0; j < S; j++) {
       for (let i = 0; i < S; i++) {
         const x = -INNER + (i + 0.5) / S * INNER * 2;
@@ -256,8 +240,10 @@ export class Terrain {
         if (nr.road.kind === 'asphalt') gravel = Math.max(gravel, 1 - smoothstep(hw + 0.3, hw + 2.2, nr.d));
         else if (nr.road.kind === 'gravel') gravel = Math.max(gravel, 1 - smoothstep(hw - 0.5, hw + 1.5, nr.d));
         else dirt = Math.max(dirt, 1 - smoothstep(hw - 0.6, hw + 1.2, nr.d));
-        for (const p of pads) {
-          const c = Math.cos(-p.rot), s = Math.sin(-p.rot);
+        const pads = padsNear(x, z);
+        for (let q = 0; q < pads.length; q++) {
+          const p = pads[q];
+          const c = p.c, s = p.s;
           const dx = x - p.x, dz = z - p.z;
           const lx = Math.abs(dx * c - dz * s) - p.hw + 1.0;
           const lz = Math.abs(dx * s + dz * c) - p.hd + 1.0;

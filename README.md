@@ -13,7 +13,7 @@ npm run build      # type-check + production bundle in dist/
 npm run preview    # serve the production build
 ```
 
-Use a desktop browser with a dedicated GPU (Chrome, Edge or Firefox). Click **DEPLOY** to start. The mouse is captured on click, and **Esc** pauses.
+Use a desktop browser (Chrome, Edge or Firefox). Integrated graphics work too: on first launch the game picks a preset for your hardware, then adapts the render resolution to hold the frame rate. Click **DEPLOY** to start. The mouse is captured on click, and **Esc** pauses.
 
 URL options: `?quality=low|medium|high|ultra`, `?weather=clear|overcast|rain|snow`, `?map=autumn|winter|random`, `?time=dynamic|dawn|day|golden|night`.
 
@@ -283,6 +283,80 @@ URL options: `?quality=low|medium|high|ultra`, `?weather=clear|overcast|rain|sno
 - **MP7:** sprint and jump clutter reduced.
 - **Rifle:** support hand moved so it no longer shows through the optic window.
 - **Pistol:** hold reworked.
+
+## Update 25: performance overhaul (black flashes, loading, automatic scaling)
+
+Every number below was measured in this project's own test setup: headless Chrome on a 4-thread cloud machine with a *software* GPU (SwiftShader). Anything the CPU does is roughly representative of a slow laptop. Anything the GPU does is many times slower there than on any real graphics card. The tools are in `tools/` (`loadtime.cjs`, `bootprof.cjs`, `frametime.cjs`, `simprof.cjs`, `allocprof.cjs`, `govtest.cjs`).
+
+### The black flashes: what caused them and the fixes
+
+- **Dynamic resolution was resizing the canvas.**
+  - Every resolution step called `renderer.setSize`. Resizing a canvas clears it, and this happened right after the frame had been drawn, so the browser showed an empty (black) frame.
+  - The low preset targeted 120 fps. On a 60 Hz screen that always read as "too slow", so it stepped down every 1.2 s until it hit 60 % resolution, flashing each time.
+  - Fix: dynamic resolution now only reallocates the internal render targets. The final pass upscales to a canvas that never changes size; the live test counts 0 canvas resizes.
+- **NaN/overflow pixels.** A NaN from degenerate maths, or a mirror-like sun highlight beyond the half-float range, could reach the post chain. The AO and bloom blurs and the grade's colour mixing then smeared it into black blocks. Every lit material's output and the bloom and grade inputs are now sanitised.
+- **Shaders compiling on the first frame.**
+  - The shader warm-up compiled every material for the canvas (sRGB output), but the game renders into linear render targets, so none of those programs were ever used.
+  - All 46 programs compiled again on the first visible frame: a freeze of about 6.5 s here right after the loading screen. Starting a match added another 1.2 s.
+  - Now they compile for the real render state, in parallel on driver threads (`KHR_parallel_shader_compile`). One real frame is drawn behind the loading screen, and every buffer and texture is uploaded in a 1×1-pixel pass.
+  - First menu frame: **6.5 s → 0.16 s**. First match frame: **1.2 s → ~0.3 s**. Two small programs are still compiled late.
+  - Nothing new is uploaded the first time you turn to face a part of the map.
+- **Lost GPU context** (driver reset, out of video memory): the procedural textures used to come back black. They are now baked again when the context is restored.
+
+### Loading: 32 s → about 2–3 s of CPU work
+
+| Phase (this test setup) | Before | After |
+| --- | --- | --- |
+| Terrain height field | 10.4 s | 1.3 s on worker threads, overlapped with start-up; **0.05 s** from cache on later visits |
+| Navigation graph | 9.0 s | 0.35 s |
+| Texture baking (GPU) | ~15 s of stalls | ~1 s |
+| Weapon models (≈70 builds) | ~2 s | 17 builds + cheap clones |
+| Sounds (~400 recordings) | 2.5 s, blocking | in the background |
+| Time to ready, CPU side | ~32 s | **~2.5 s** first visit, **~1.9 s** cached |
+
+- **Terrain:**
+  - Each height sample tested every building pad with trigonometry and an fbm noise call, and each road lookup scanned every road segment. Both now use spatial grids.
+  - Results are bit-identical: 874k samples were compared against the old code.
+  - The height field is computed in parallel Web Workers from the first millisecond of boot, and cached in IndexedDB under a fingerprint of the map functions.
+- **Physics queries:** rapier.js's `intersectionWithShape` scans every collider: 3.6 ms per call with this map's 4,800 colliders. The callback form walks the BVH and gives the same answer (3,000 random tests, 0 mismatches) in **0.015 ms**. This also removes a stutter in gameplay: it is the stance check for crouch, stand and prone.
+- **Texture baker:**
+  - One multiple-render-target pass evaluates each procedural surface **once per texel instead of six times**. The normal map is derived from an exact float height field at the same sample positions, so it is the same normal map.
+  - This halves the shader compiles, and all of them compile in parallel.
+  - The low preset bakes at half resolution: a quarter of the ~190 MB of texture memory, which matters most on integrated GPUs that share system RAM.
+- **Weapon models:** each gun is built once; soldiers, the viewmodel, the killcam and the warm-up get clones that share its geometry. Each clone still drives its own bipod and speedloader.
+- **Downloads:**
+  - The first-person arms model went from 3.1 MB to 0.94 MB. Its PNG textures were re-encoded as JPEG (same look, compared side by side), and the unused one is now a stub.
+  - Models start downloading from the HTML, in parallel with the game code.
+  - The loadout preview's separate WebGL context is created only when you open the loadout screen.
+- **Loading screen:** it is in the HTML itself, so it shows with the first byte instead of a blank page. It has a progress bar weighted by measured phase times (it never moves backwards), a percentage, the current step and rotating tips.
+
+### Smoothness
+
+- **Garbage:**
+  - Bot pathfinding (A*) allocated Maps, Sets and swap arrays on every search: about 45 % of all the garbage the game made, which meant GC pauses mid-fight.
+  - It now reuses typed arrays: the same paths on 400 test routes, 2.2× faster.
+  - With the soldiers' per-frame vectors and the door checks also fixed, garbage is down from **500 KB to 234 KB per frame**.
+- Match simulation in the 12 v 12 regression test: **2.7 ms/frame** (Updates 20–24 measured 3.4–4.6 ms).
+
+### Automatic performance scaling
+
+- **Hardware detection on first launch:** the GPU (integrated Intel/AMD, Apple silicon, GeForce/Radeon generations, software renderers), CPU threads and memory pick a starting preset. Existing players keep their preset. A different GPU (e.g. a laptop switching graphics) is re-detected. The toggle is **Settings → Graphics → Automatic graphics**; choosing a preset by hand turns it off.
+- **Frame-time governor:**
+  - It measures the display's refresh rate, so the target is the lower of the frame-rate target and the screen's refresh.
+  - It steps the internal resolution in small steps with hysteresis and back-off, so it settles instead of see-sawing.
+  - It uses GPU timer queries, where the browser offers them, to know there is headroom before stepping back up.
+  - Only if the resolution is already at its floor and the frame rate still can't hold for 4 s does it switch off, one by one: ambient occlusion, sun shafts, bloom, shadow resolution, anti-aliasing. It tells you each time, and it never touches your saved settings.
+- The **F3 overlay** also shows the render resolution and scale, the detected refresh rate and target, the preset and the GPU.
+
+### Tested
+
+- 12 v 12 match (240 s): kills, flags, respawns and radio all work.
+- Two-browser multiplayer: join, sync, chat, kills, commands.
+- 132-route walk test and every ladder.
+- Every gun: fire, empty reload, ADS, scope picture.
+- LMG bipod and revolver speedloader clones.
+- Production build: terrain worker and cache.
+- Live governor run: resolution stepping with zero canvas resizes and no console errors.
 
 ## Update 24: HVAL-47 pushed out, nameplates that work while aiming
 
@@ -1294,7 +1368,7 @@ The environment this was built in could only reach GitHub and npm. Sketchfab, Po
 - **Music:** the menu theme, the tension underscore and the victory sting were generated for this game with **Stable Audio 2.5** through the Stability AI API (original text prompts, no reference material; see `tools/music_build.py`). Use them under Stability AI's terms for API outputs. The defeat sting, the night-vision power-up / power-down, the glass crack / shatter sounds, the three door-breach impacts and the ten death screams were made with **ElevenLabs sound generation**, under the same free-plan terms as the voices (attribution, non-commercial).
 - **Hitmarker and elimination sounds** (`public/assets/sounds/ui/hitmarker.ogg`, `killsound.ogg`) were supplied by the project owner.
 - **Interface stings, ambience loops and the helicopter rotor** (flag captured/lost, killstreak ready, radio, UAV ping, heartbeat, mortar whistle, wind, waves, rain) are synthesized in code.
-- **fps_arms.glb**: "fps arms" by DJMaesen (https://sketchfab.com/bumstrum), licensed **CC BY 4.0**. Its material was rebuilt for three.js.
+- **fps_arms.glb**: "fps arms" by DJMaesen (https://sketchfab.com/bumstrum), licensed **CC BY 4.0**. Changes: its material was rebuilt for three.js, and its textures were re-encoded from PNG to JPEG (the unused specular-glossiness map was replaced by a stub) to cut the download (`tools/glb_compress.py`).
 - **Footstep and impact recordings**: Kenney "Impact Sounds" (CC0), via the GitHub mirror `Boyquotes/kenney-impact-sounds-for-godot`.
 - **Soldier.glb** (the bot character and its animations) comes from the three.js examples (`examples/models/gltf/Soldier.glb`, MIT-licensed repository, character originally from Mixamo).
 - **waternormals.jpg** comes from the three.js examples (MIT-licensed repository).

@@ -6,10 +6,44 @@
     <title>FJORDFRONT</title>
     <meta name="description" content="A first-person shooter set on the Norwegian coast." />
     <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' fill='%23ba0c2f'/%3E%3Crect x='9' width='6' height='32' fill='%23fff'/%3E%3Crect y='13' width='32' height='6' fill='%23fff'/%3E%3Crect x='10.5' width='3' height='32' fill='%2300205b'/%3E%3Crect y='14.5' width='32' height='3' fill='%2300205b'/%3E%3C/svg%3E" />
+    <!-- the big downloads start right away, in parallel with the game code -->
+    <link rel="preload" href="assets/models/Soldier.glb" as="fetch" crossorigin="anonymous" />
+    <link rel="preload" href="assets/models/fps_arms.glb" as="fetch" crossorigin="anonymous" />
+    <link rel="preload" href="assets/textures/waternormals.jpg" as="image" crossorigin="anonymous" />
+    <style>
+      /* instant loading screen: painted with the first byte of HTML, before any script runs; the
+         game adopts this element and drives its progress bar */
+      html, body { margin: 0; height: 100%; background: #0b0e10; overflow: hidden; }
+      #boot { position: fixed; inset: 0; z-index: 50; display: flex; flex-direction: column; align-items: center; justify-content: center;
+        background: radial-gradient(ellipse at 30% 40%, #1d2a30 0%, #0b0e10 70%); color: #e9ece6;
+        font-family: 'Barlow Condensed', 'Arial Narrow', 'Roboto Condensed', sans-serif; transition: opacity .6s; pointer-events: auto; }
+      #boot.fade { opacity: 0; }
+      #boot .brand { display: flex; align-items: center; gap: 16px; }
+      #boot h1 { margin: 0; font-weight: 700; font-size: 64px; letter-spacing: .14em; line-height: 1; }
+      #boot .flag { width: 44px; height: 32px; position: relative; box-shadow: 0 2px 12px rgba(0,0,0,.4); background:
+        linear-gradient(90deg, transparent 12px, #fff 12px, #fff 20px, transparent 20px), linear-gradient(180deg, transparent 12px, #fff 12px, #fff 20px, transparent 20px), #ba0c2f; }
+      #boot .flag::after { content: ''; position: absolute; inset: 0; background:
+        linear-gradient(90deg, transparent 14px, #00205b 14px, #00205b 18px, transparent 18px), linear-gradient(180deg, transparent 14px, #00205b 14px, #00205b 18px, transparent 18px); }
+      #boot .sub { color: #98a29b; letter-spacing: .32em; font-size: 15px; margin-top: 10px; }
+      #boot .bar { position: relative; width: min(420px, 70vw); height: 3px; background: rgba(255,255,255,.08); margin-top: 48px; overflow: hidden; }
+      #boot .fill { height: 100%; width: 2%; background: #e8c547; transition: width .35s ease-out; box-shadow: 0 0 10px rgba(232,197,71,.6); }
+      #boot .bar::after { content: ''; position: absolute; inset: 0; width: 30%; background: linear-gradient(90deg, transparent, rgba(255,255,255,.35), transparent); animation: bootsheen 1.4s linear infinite; }
+      @keyframes bootsheen { from { transform: translateX(-100%); } to { transform: translateX(400%); } }
+      #boot .row { display: flex; justify-content: space-between; width: min(420px, 70vw); margin-top: 14px; color: #98a29b; letter-spacing: .2em; font-size: 14px; text-transform: uppercase; }
+      #boot .pct { font-variant-numeric: tabular-nums; color: #e9ece6; }
+      #boot .tip { position: absolute; bottom: 40px; padding: 0 24px; text-align: center; color: #98a29b; font-family: Inter, system-ui, sans-serif; font-size: 13px; transition: opacity .4s; }
+    </style>
   </head>
   <body>
     <canvas id="game"></canvas>
     <div id="ui"></div>
+    <div id="boot">
+      <div class="brand"><div class="flag"></div><h1>FJORDFRONT</h1></div>
+      <div class="sub">KVITVIKA · LOFOTEN</div>
+      <div class="bar"><div class="fill"></div></div>
+      <div class="row"><span class="status">Loading game files</span><span class="pct">0%</span></div>
+      <div class="tip">TIP — Double-tap SHIFT for tactical sprint. Crouch while sprinting to slide.</div>
+    </div>
     <script type="module" src="/src/main.ts"></script>
   </body>
 </html>

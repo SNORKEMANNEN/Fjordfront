@@ -5,6 +5,10 @@ import { Physics } from '../core/Physics';
 import { Input } from '../core/Input';
 import { MaterialLib } from '../render/Materials';
 import { Pipeline } from '../render/Pipeline';
+import { GpuTimer, PerfGovernor } from '../render/PerfGovernor';
+import { compileWithProgress } from '../render/TextureBaker';
+import { startTerrainHeights, terrainStats } from '../world/TerrainData';
+import { detectHardware, presetForTier, HardwareInfo } from '../render/Hardware';
 import { Environment } from '../world/Environment';
 import { Terrain } from '../world/Terrain';
 import { World } from '../world/World';
@@ -441,11 +445,24 @@ export class Game {
       onLoadout: () => this.onLoadoutChanged(),
       onSettings: () => this.applySettings(),
     });
+    const bootT0 = performance.now();
+    const bootLog: [string, number][] = ((window as any).__bootLog = []);
+    const mark = (s: string) => bootLog.push(['  · ' + s, Math.round(performance.now() - bootT0)]);
+    (window as any).__bootMark = mark;
     const step = async (p: number, s: string) => {
+      bootLog.push([s, Math.round(performance.now() - bootT0)]);
       this.ui.setLoading(p, s);
       await new Promise((r) => setTimeout(r, 16));
     };
-    await step(0.02, 'Starting renderer');
+    // the terrain height field starts computing right away, in parallel workers (or from cache)
+    const terrainP = startTerrainHeights();
+    // network assets (also preloaded by index.html) download while everything else starts up
+    const assetsP = Promise.all([
+      new THREE.TextureLoader().loadAsync(import.meta.env.BASE_URL + 'assets/textures/waternormals.jpg'),
+      new GLTFLoader().loadAsync(import.meta.env.BASE_URL + 'assets/models/Soldier.glb'),
+      new GLTFLoader().loadAsync(import.meta.env.BASE_URL + 'assets/models/fps_arms.glb').catch(() => null),
+    ]);
+    await step(0.03, 'Starting renderer');
     const r = new THREE.WebGLRenderer({ canvas: this.canvas, antialias: false, powerPreference: 'high-performance', stencil: false, preserveDrawingBuffer: this.testMode });
     r.outputColorSpace = THREE.SRGBColorSpace;
     r.toneMapping = THREE.NoToneMapping;
@@ -457,34 +474,53 @@ export class Game {
     r.shadowMap.autoUpdate = false;
     this.scene.matrixWorldAutoUpdate = false; // updated once per frame in renderFrame
     this.renderer = r;
+    // first launch (or a different GPU): start from a preset that suits the hardware
+    this.hw = detectHardware(r.getContext() as WebGL2RenderingContext);
+    const urlQ = new URLSearchParams(location.search).get('quality');
+    if (Settings.data.autoQualityGpu === 'keep') {
+      Settings.data.autoQualityGpu = this.hw.gpu;
+      Settings.save();
+    } else if (Settings.data.autoQuality && !urlQ && Settings.data.autoQualityGpu !== this.hw.gpu) {
+      Settings.data.autoQualityGpu = this.hw.gpu;
+      Settings.applyPreset(presetForTier(this.hw.tier));
+    }
+    console.log(`[hw] ${this.hw.gpu || 'unknown GPU'} · tier ${this.hw.tier} · ${this.hw.cores} threads · parallel compile ${this.hw.parallelCompile} · preset ${Settings.data.quality}`);
     this.mats = new MaterialLib(r);
+    // texture bakes are recorded while the world is built and compiled/run together further down
+    this.mats.baker.defer = true;
     await step(0.06, 'Initialising physics');
     this.physics = await Physics.create();
     this.audio = new AudioEngine();
     this.radio = new Radio(this.audio, this.ui);
     this.audio.music.preload();
+    // sound loads in the background (fetch + decode run off the main thread): the menu doesn't wait
+    // for ~400 recordings; anything played before they're in is simply skipped
+    this.audioLoad = this.audio.load().then(
+      () => bootLog.push(['  · audio ready (background)', Math.round(performance.now() - bootT0)]),
+      (e) => reportError('audio', e),
+    );
     // browsers start audio only after a gesture: the menu theme begins on the first click / key
     const wake = () => this.audio.resume();
     window.addEventListener('pointerdown', wake);
     window.addEventListener('keydown', wake);
     await step(0.1, 'Loading assets');
-    const [waterNormals, gltf, armsGltf] = await Promise.all([
-      new THREE.TextureLoader().loadAsync(import.meta.env.BASE_URL + 'assets/textures/waternormals.jpg'),
-      new GLTFLoader().loadAsync(import.meta.env.BASE_URL + 'assets/models/Soldier.glb'),
-      new GLTFLoader().loadAsync(import.meta.env.BASE_URL + 'assets/models/fps_arms.glb').catch(() => null),
-    ]);
+    const [waterNormals, gltf, armsGltf] = await assetsP;
     this.botAsset = { scene: gltf.scene, clips: gltf.animations };
-    await step(0.15, 'Lighting the fjord');
+    await step(0.14, 'Lighting the fjord');
     this.env = new Environment(r, this.scene, waterNormals);
-    await step(0.2, 'Shaping terrain');
+    await step(0.18, 'Shaping terrain');
     Vegetation.multiDraw = this.renderer.extensions.has('WEBGL_multi_draw') && !location.search.includes('nomultidraw');
-    this.world = new World(this.mats, this.physics, this.scene, () => {});
+    const heights = await terrainP.catch(() => undefined);
+    mark(`terrain heights (${terrainStats.source}, ${Math.round(terrainStats.ms)} ms)`);
+    this.world = new World(this.mats, this.physics, this.scene, () => {}, heights);
     this.terrain = this.world.terrain;
+    mark('world built');
     this.vmScene.environment = this.scene.environment;
     (this.vmScene as any).environmentIntensity = 0.75;
     this.physics.step();
-    await step(0.55, 'Surveying routes');
+    await step(0.48, 'Surveying routes');
     this.nav = new NavGraph(this.physics, this.terrain, this.world.buildings.nav, this.world.buildings.navPoints);
+    mark('nav');
     this.director = new BotDirector(this.nav, () => this.rng.next());
     // doors are hung after the nav graph is built so routes run through doorways
     this.doors = new Doors(this.world.buildings.doors, this.physics, this.scene, this.world.buildings.materials);
@@ -494,7 +530,7 @@ export class Game {
       this.audio.play('imp_plank', { pos: tip, gain: Math.min(1.2, 0.5 + speed * 0.06), ref: 5, reverb: 0.4, vary: 0.08, rate: 0.8 });
       if (tip.distanceTo(this.camera.position) < 5) this.rig.addTrauma(0.08);
     };
-    await step(0.62, 'Arming squads');
+    await step(0.56, 'Arming squads');
 
     // ---- player ----
     const sp = SPAWNS[0];
@@ -592,7 +628,7 @@ export class Game {
     };
     this.wmats = makeWeaponMaterials(this.mats);
     // loadout screen: studio preview + silhouette thumbnails of every gun
-    this.ui.preview = new WeaponPreview((id) => WEAPON_BUILDERS[id as WeaponId](this.wmats).root);
+    this.ui.previewFactory = () => new WeaponPreview((id) => WEAPON_BUILDERS[id as WeaponId](this.wmats).root);
     this.vm = new Viewmodel(this.vmScene, makeArmMaterials(this.mats));
     if (armsGltf) {
       try {
@@ -726,16 +762,25 @@ export class Game {
     this.pipeline = new Pipeline(r, this.scene, this.camera, this.vmScene, this.vmCamera);
     window.addEventListener('resize', () => this.resize());
     this.resize();
-    await step(0.7, 'Recording the soundscape');
-    await this.audio.load((p) => this.ui.setLoading(0.7 + p * 0.25, 'Recording the soundscape'));
-    await step(0.96, 'Letting the snow settle');
+    await step(0.72, 'Painting surfaces');
+    await this.mats.baker.flush((k) => this.ui.setLoading(0.72 + k * 0.12, 'Painting surfaces'));
+    await step(0.84, 'Letting the snow settle');
     patchSnow(this.scene);
     bakeSnowCover(r, this.scene, [this.env.sky.mesh, this.env.water, this.world.veg.grass, ...this.weather.objects(), ...this.glints]);
-    await step(0.97, 'Compiling shaders');
-    this.warmShaders();
+    await step(0.86, 'Compiling shaders');
+    await this.warmShaders((k) => this.ui.setLoading(0.86 + k * 0.13, 'Compiling shaders'));
 
     installErrorReport();
-    this.perf = new PerfOverlay(this.renderer, document.body);
+    this.gpuTimer = new GpuTimer(this.renderer);
+    this.governor = new PerfGovernor(this.pipeline, this.gpuTimer);
+    this.governor.onNotice = (msg) => this.ui.notify('AUTO GRAPHICS', msg.toUpperCase());
+    this.perf = new PerfOverlay(this.renderer, document.body, this.gpuTimer);
+    this.perf.extra = () => {
+      const p = this.pipeline, g = this.governor;
+      return `<div>${p.rw}×${p.rh} px (${Math.round(Settings.data.renderScale * p.dynScale * 100)} %)</div>` +
+        `<div>display ${Math.round(1000 / g.refreshMs)} Hz · target ${Math.round(1000 / g.stats.target)} fps</div>` +
+        `<div>${Settings.data.quality}${Settings.data.autoQuality ? ' (auto)' : ''} · ${this.hw.gpu.replace(/ANGLE \(|\)$/g, '').slice(0, 48)}</div>`;
+    };
     this.perf.visible = !!Settings.data.perfOverlay;
     window.addEventListener('keydown', (e) => {
       if (e.code !== 'F3') return;
@@ -752,6 +797,12 @@ export class Game {
     });
     this.canvas.addEventListener('webglcontextrestored', () => {
       console.warn('[render] WebGL context restored');
+      // render-target contents don't survive a context loss: re-bake every procedural texture
+      try {
+        this.mats.baker.rebakeAll();
+      } catch (e) {
+        reportError('gpu', e);
+      }
       this.pipeline.setSize(window.innerWidth, window.innerHeight);
     });
 
@@ -766,13 +817,17 @@ export class Game {
     };
     window.addEventListener('pointerdown', () => this.audio.resume());
 
+    bootLog.push(['ready', Math.round(performance.now() - bootT0)]);
     this.ui.hideLoading();
     this.toMenu();
     this.clock.start();
     this.netg = new NetGame(this);
     const joinCode = new URLSearchParams(location.search).get('join');
     if (joinCode) this.netg.showPanel(joinCode);
-    if (!this.testMode) r.setAnimationLoop(() => this.frame());
+    if (!this.testMode) r.setAnimationLoop((t: number) => this.frame(t));
+    // automated tests start matches instantly: let them hear everything (players get the menu
+    // first and the sounds finish loading behind it)
+    if (this.testMode) await this.audioLoad;
     (window as any).__ready = true;
   }
 
@@ -1057,7 +1112,8 @@ export class Game {
   }
 
   // ================================================================ loop
-  frame() {
+  private lastFrameT = 0;
+  frame(now = performance.now()) {
     const dt = Math.min(this.clock.getDelta(), 1 / 20);
     this.fpsAcc += dt;
     this.fpsN++;
@@ -1073,37 +1129,23 @@ export class Game {
       reportError('tick', e);
     }
     const t1 = performance.now();
-    this.perf.beginGpu();
+    this.gpuTimer.begin();
     try {
       this.renderFrame(dt);
     } catch (e) {
       reportError('render', e);
     }
-    this.perf.endGpu();
+    this.gpuTimer.end();
     this.perf.frame(t1 - t0, performance.now() - t1);
     this.input.endFrame();
-    this.dynamicResolution(performance.now());
-  }
-
-  // ---- dynamic resolution: hold the frame rate on slower GPUs by trading pixels, never below 60 % ----
-  private drs = { last: 0, ema: 16.7, t: 0 };
-  private dynamicResolution(now: number) {
-    const d = this.drs;
-    const ms = d.last ? now - d.last : 16.7;
-    d.last = now;
-    if (!Settings.data.dynamicRes || this.state !== 'playing' || ms > 250) return;
-    d.ema += (ms - d.ema) * 0.05;
-    d.t += ms;
-    if (d.t < 1200) return; // re-evaluate at most every 1.2 s (resizing targets is not free)
-    d.t = 0;
-    const p = this.pipeline;
-    const target = 1000 / (Settings.data.targetFps || 60);
-    let next = p.dynScale;
-    if (d.ema > target * 1.12) next = Math.max(0.6, p.dynScale - (d.ema > target * 1.5 ? 0.12 : 0.06));
-    else if (d.ema < target * 0.82) next = Math.min(1, p.dynScale + 0.05);
-    if (Math.abs(next - p.dynScale) > 0.01) {
-      p.dynScale = next;
-      p.setSize(window.innerWidth, window.innerHeight);
+    // frame-time governor: dynamic resolution (internal targets only) + last-resort effect drops
+    const interval = this.lastFrameT ? now - this.lastFrameT : 0;
+    this.lastFrameT = now;
+    this.governor.frame(interval, this.state === 'playing' && !this.killcam);
+    if (this.governor.applied) {
+      this.governor.applied = false;
+      this.pipeline.rebuild();
+      this.env.applyShadowRes();
     }
   }
 
@@ -1592,7 +1634,9 @@ export class Game {
    * into the world: its materials under world lighting + fog + shadows were brand-new programs,
    * a freeze of up to a few seconds on Windows / ANGLE (or a lost GPU context) the first time.
    */
-  private warmShaders() {
+  private async warmShaders(progress: (k: number) => void = () => {}) {
+    // everything visible and nothing frustum-culled for the warm-up: every program compiles AND
+    // every vertex buffer / texture is uploaded now, not the first time you turn to face something
     const show = (root: THREE.Object3D) => {
       const hidden: THREE.Object3D[] = [];
       root.traverse((o) => {
@@ -1602,6 +1646,35 @@ export class Game {
         }
       });
       return () => hidden.forEach((o) => (o.visible = false));
+    };
+    // upload pass: everything drawn once with frustum culling off into a 1×1 target (no shadows,
+    // no water reflection) — every vertex buffer and texture goes to the GPU now instead of the
+    // first time you turn to face something, at almost no pixel cost
+    const uploadAll = (root: THREE.Scene, cam: THREE.Camera) => {
+      const culled: THREE.Object3D[] = [];
+      root.traverse((o) => {
+        if (o.frustumCulled) {
+          culled.push(o);
+          o.frustumCulled = false;
+        }
+      });
+      const water = this.env.water as THREE.Object3D;
+      const wob = water.onBeforeRender;
+      water.onBeforeRender = () => {};
+      const sm = this.renderer.shadowMap.needsUpdate;
+      this.renderer.shadowMap.needsUpdate = false;
+      const prev = this.renderer.getRenderTarget();
+      const rt = new THREE.WebGLRenderTarget(1, 1, { type: THREE.HalfFloatType });
+      try {
+        this.renderer.setRenderTarget(rt);
+        this.renderer.render(root, cam);
+      } finally {
+        this.renderer.setRenderTarget(prev);
+        rt.dispose();
+        water.onBeforeRender = wob;
+        this.renderer.shadowMap.needsUpdate = sm;
+        culled.forEach((o) => (o.frustumCulled = true));
+      }
     };
     const warm = new THREE.Group();
     warm.position.set(0, -300, 0);
@@ -1634,15 +1707,39 @@ export class Game {
     this.vmScene.add(vmWarm);
     const restoreW = show(this.scene);
     const restoreV = show(this.vmScene);
+    // compile for the state the game really renders in: into the composer's linear half-float
+    // targets. (Compiling with the canvas bound produced sRGB-output variants that were never
+    // used — every program compiled a second time on the first visible frame, a multi-second
+    // freeze right after the loading screen.) Compiled in parallel on driver threads where possible.
+    const prevRT = this.renderer.getRenderTarget();
+    this.renderer.setRenderTarget(this.pipeline.composer.readBuffer);
     try {
-      this.renderer.compile(this.scene, this.camera);
-      this.renderer.compile(this.vmScene, this.vmCamera);
+      await compileWithProgress(this.renderer, this.scene, this.camera, (k) => progress(k * 0.6));
+      await compileWithProgress(this.renderer, this.vmScene, this.vmCamera, (k) => progress(0.6 + k * 0.15));
+    } finally {
+      this.renderer.setRenderTarget(prevRT);
+    }
+    // one real frame through the whole pipeline with everything visible (shadow depth programs,
+    // the water's mirror pass, AO, bloom, grade, SMAA, the scope), drawn behind the loading screen
+    try {
+      const vmVis = this.vm.root.visible;
+      this.vm.root.visible = true;
+      this.renderer.shadowMap.needsUpdate = true;
+      this.scene.updateMatrixWorld();
+      this.pipeline.render(1 / 60, { dof: 0.5, dofFocus: 25, damage: 0.1, flash: 0, suppression: 0.1, underwater: 0, exposure: 1, rays: 0.5, sunDir: this.env.sunDir, sunColor: this.env.sunColor });
+      // (skipped by the automated tests: a software GPU spends seconds on it, a real one milliseconds)
+      if (!this.testMode || location.search.includes('warmupload')) {
+        uploadAll(this.scene, this.camera);
+        uploadAll(this.vmScene, this.vmCamera);
+      }
+      this.vm.root.visible = vmVis;
     } finally {
       restoreW();
       restoreV();
       this.scene.remove(warm);
       this.vmScene.remove(vmWarm);
     }
+    progress(1);
   }
 
   // ---------------------------------------------------------------- night vision
@@ -1650,6 +1747,11 @@ export class Game {
   private cantZoom = 0;
   private nightNagT = 0;
   perf!: PerfOverlay;
+  /** background sound loading (resolves when every recording is decoded) */
+  audioLoad: Promise<unknown> = Promise.resolve();
+  gpuTimer!: GpuTimer;
+  governor!: PerfGovernor;
+  hw!: HardwareInfo;
   private nvgFrame(dt: number) {
     const w = this.weapons;
     // night prompt + an occasional HQ reminder while you play without goggles

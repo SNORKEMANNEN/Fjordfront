@@ -41,6 +41,7 @@ export class CharacterBody {
     this.kcc.setApplyImpulsesToDynamicBodies(false);
   }
 
+  private fitShapes: Partial<Record<Stance, InstanceType<typeof Physics.R.Capsule>>> = {};
   private center(stance = this.stance, at = this.pos) {
     return { x: at.x, y: at.y + RADIUS + halfHeight(stance), z: at.z };
   }
@@ -49,9 +50,8 @@ export class CharacterBody {
   fits(stance: Stance, at = this.pos) {
     const c = this.center(stance, at);
     c.y += 0.04;
-    const shape = new Physics.R.Capsule(halfHeight(stance), RADIUS - 0.02);
-    const hit = this.physics.world.intersectionWithShape(c, { x: 0, y: 0, z: 0, w: 1 }, shape, undefined, groups(0xffff, GROUP_WORLD), this.collider);
-    return hit === null;
+    const shape = (this.fitShapes[stance] ??= new Physics.R.Capsule(halfHeight(stance), RADIUS - 0.02));
+    return !this.physics.overlaps(c, shape, this.collider);
   }
 
   setStance(s: Stance, force = false) {

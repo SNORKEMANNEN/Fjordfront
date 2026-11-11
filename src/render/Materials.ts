@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { TextureBaker, SurfaceTextures } from './TextureBaker';
 import { SURF } from './Surfaces';
+import { Settings } from '../game/Settings';
 
 export interface StdOpts {
   color?: THREE.ColorRepresentation;
@@ -25,6 +26,9 @@ export class MaterialLib {
 
   constructor(renderer: THREE.WebGLRenderer) {
     this.baker = new TextureBaker(renderer);
+    // low preset: half-resolution surfaces (a quarter of the ~190 MB of baked texture memory —
+    // what integrated GPUs sharing system RAM struggle with most)
+    this.baker.sizeScale = Settings.data.quality === 'low' ? 0.5 : 1;
   }
 
   surface(name: string): SurfaceTextures {

@@ -509,6 +509,12 @@ export class Bot implements Combatant {
     this.heldT = t;
   }
 
+  // per-frame scratch vectors (Bot.update used to allocate several per bot per frame)
+  private sWish = new THREE.Vector3();
+  private sTo = new THREE.Vector3();
+  private sSide = new THREE.Vector3();
+  private sMove = new THREE.Vector3();
+  private sAim = new THREE.Vector3();
   update(dt: number, now: number) {
     if (!this.alive) {
       this.updateDeath(dt);
@@ -555,7 +561,7 @@ export class Bot implements Combatant {
     const visible = this.target && this.lastSeenT < 0.35;
 
     // ---------------- movement intent ----------------
-    const wish = new THREE.Vector3();
+    const wish = this.sWish.set(0, 0, 0);
     let speed = 0;
     if (this.state === 'engage' && this.target) {
       const tp = this.target.position();
@@ -568,8 +574,8 @@ export class Bot implements Combatant {
         if (this.rng.chance(0.25) && dist > 15) this.strafeDir = 0;
         this.wantCrouchT = this.rng.chance(dist > 30 ? 0.35 : 0.12) ? this.rng.range(0.8, 2) : 0;
       }
-      const to = tp.clone().sub(this.body.pos).setY(0).normalize();
-      const side = new THREE.Vector3(-to.z, 0, to.x);
+      const to = this.sTo.copy(tp).sub(this.body.pos).setY(0).normalize();
+      const side = this.sSide.set(-to.z, 0, to.x);
       // objective players keep pushing to the flag while trading shots at range
       const pushObj = visible && dist > 22 && this.w.preferObjective?.(this) && this.goal.distanceTo(this.body.pos) > 3;
       if (pushObj) {
@@ -675,7 +681,7 @@ export class Bot implements Combatant {
     if (this.moveAcc >= mi) {
       const step = this.moveAcc;
       this.moveAcc = 0;
-      const moved = this.body.move(this.vel.clone().multiplyScalar(step), this.vel.y <= 0.1);
+      const moved = this.body.move(this.sMove.copy(this.vel).multiplyScalar(step), this.vel.y <= 0.1);
       if (this.body.grounded && this.vel.y < 0) this.vel.y = -1.5;
       this.moveSpeed = damp(this.moveSpeed, Math.hypot(moved.x, moved.z) / Math.max(step, 1e-4), 10, step);
     }
@@ -698,8 +704,8 @@ export class Bot implements Combatant {
     let wantPitch = 0;
     if (this.target && this.lastSeenT < 1.5) {
       const visibleNow = this.lastSeenT < 0.35;
-      const aimAt = visibleNow ? this.target.chest(new THREE.Vector3()) : this.lastSeen.clone().setY(this.lastSeen.y + 1.25);
-      if (this.rng.chance(0.002)) aimAt.copy(this.target.eye(new THREE.Vector3()));
+      const aimAt = visibleNow ? this.target.chest(this.sAim) : this.sAim.copy(this.lastSeen).setY(this.lastSeen.y + 1.25);
+      if (this.rng.chance(0.002)) this.target.eye(aimAt);
       const to = aimAt.sub(this.eye());
       wantYaw = Math.atan2(-to.x, -to.z) + this.aimErr.x;
       wantPitch = Math.atan2(to.y, Math.hypot(to.x, to.z)) + this.aimErr.y;

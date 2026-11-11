@@ -142,20 +142,49 @@ export class UI {
 
   // ---------------------------------------------------------------- screens
   private buildLoading() {
+    // adopt the loading screen index.html already painted (no blank frame between page and game)
+    const pre = document.getElementById('boot');
+    if (pre) {
+      pre.classList.add('screen', 'loading');
+      return pre;
+    }
     const e = h('div', 'screen loading', `
       <div class="brand"><div class="flag"></div><h1>FJORDFRONT</h1></div>
       <div class="sub">KVITVIKA · LOFOTEN</div>
       <div class="bar"><div class="fill"></div></div>
-      <div class="status">Initialising…</div>
+      <div class="row"><span class="status">Initialising…</span><span class="pct">0%</span></div>
       <div class="tip">TIP — Double-tap SHIFT for tactical sprint. Crouch while sprinting to slide.</div>`);
     return e;
   }
 
+  private loadP = 0;
+  private tipI = 0;
+  private tipT = 0;
+  private static TIPS = [
+    'TIP — Double-tap SHIFT for tactical sprint. Crouch while sprinting to slide.',
+    'TIP — Hold Q / E to lean around corners.',
+    'TIP — Press N at night to flip your goggles down.',
+    'TIP — F3 shows the performance overlay: frame time, GPU time and render resolution.',
+    'TIP — Hold V for the combat knife; throwing knives kill in one hit.',
+    'TIP — Capture and hold flags: Domination is won on ticks, not kills.',
+  ];
+  /** progress never moves backwards, the percentage counts with it */
   setLoading(p: number, status: string) {
-    (this.loading.querySelector('.fill') as HTMLElement).style.width = `${Math.round(p * 100)}%`;
+    this.loadP = Math.max(this.loadP, Math.min(1, p));
+    const pct = Math.round(this.loadP * 100);
+    (this.loading.querySelector('.fill') as HTMLElement).style.width = `${Math.max(2, pct)}%`;
     (this.loading.querySelector('.status') as HTMLElement).textContent = status;
+    const pe = this.loading.querySelector('.pct') as HTMLElement | null;
+    if (pe) pe.textContent = `${pct}%`;
+    const now = performance.now();
+    if (now - this.tipT > 3500) {
+      this.tipT = now;
+      const tip = this.loading.querySelector('.tip') as HTMLElement | null;
+      if (tip && this.tipI++ > 0) tip.textContent = UI.TIPS[this.tipI % UI.TIPS.length];
+    }
   }
   hideLoading() {
+    this.setLoading(1, 'Ready');
     this.loading.classList.add('fade');
     setTimeout(() => this.loading.classList.add('hidden'), 600);
   }
@@ -222,7 +251,15 @@ export class UI {
 
   /** Loadout: primary, sidearm, lethal and tactical. From the pause menu it applies on your next spawn (or right away if you just spawned). */
   /** set by the game: 3D weapon preview + silhouette thumbnails for the loadout screen */
-  preview: WeaponPreview | null = null;
+  previewFactory: (() => WeaponPreview) | null = null;
+  private _preview: WeaponPreview | null = null;
+  /** created on first use (the loadout screen): its own WebGL context + environment map are not
+   *  something every session should pay for at load, and a second context is a context-loss risk
+   *  on low-memory GPUs */
+  get preview(): WeaponPreview | null {
+    if (!this._preview && this.previewFactory) this._preview = this.previewFactory();
+    return this._preview;
+  }
   private ldSlot: 'p' | 's' | 'e' = 'p';
   private ldCat = '';
 
@@ -345,6 +382,7 @@ export class UI {
         ${select('botDifficulty', 'Bot difficulty', [['recruit', 'Recruit'], ['regular', 'Regular'], ['veteran', 'Veteran']])}
       </div>
       <div class="tab hidden" data-t="v">
+        ${toggle('autoQuality', 'Automatic graphics (preset from your hardware, adapts to hold the frame rate)')}
         ${select('quality', 'Quality preset', [['low', 'Low'], ['medium', 'Medium'], ['high', 'High'], ['ultra', 'Ultra']])}
         <div class="opt"><span></span><small style="color:var(--dim);grid-column:span 2">Lights, grass, terrain detail and weather particles follow the preset after reloading the page.</small></div>
         ${slider('renderScale', 'Render scale', 0.5, 1, 0.05)}
@@ -387,6 +425,8 @@ export class UI {
         let v: any = el.type === 'checkbox' ? el.checked : el.type === 'range' ? parseFloat(el.value) : el.value;
         if (k === 'shadowRes') v = parseInt(v, 10);
         if (k === 'quality') {
+          // choosing a preset by hand takes over from the automatic choice
+          Settings.data.autoQuality = false;
           Settings.applyPreset(v as Quality);
           this.showSettings(this.settingsBack);
           e.querySelector('[data-t=v]')?.dispatchEvent(new Event('click'));

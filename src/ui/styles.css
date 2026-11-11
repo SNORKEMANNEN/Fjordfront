@@ -38,7 +38,10 @@ button.primary:hover { background: #f3d76a; }
 .loading.fade { opacity: 0; }
 .loading .bar { width: 420px; height: 3px; background: rgba(255,255,255,.08); margin-top: 48px; overflow: hidden; }
 .loading .fill { height: 100%; width: 0; background: var(--accent); transition: width .25s; }
-.loading .status { margin-top: 14px; color: var(--dim); letter-spacing: .2em; font-size: 14px; text-transform: uppercase; }
+.loading .row { display: flex; justify-content: space-between; width: min(420px, 70vw); margin-top: 14px; color: var(--dim); letter-spacing: .2em; font-size: 14px; text-transform: uppercase; }
+.loading .pct { font-variant-numeric: tabular-nums; color: var(--fg); }
+.loading .row .status { margin-top: 0; position: static; display: block; }
+.loading .status { margin-top: 14px; position: static; display: block; color: var(--dim); letter-spacing: .2em; font-size: 14px; text-transform: uppercase; }
 .loading .tip { position: absolute; bottom: 40px; color: var(--dim); font-family: Inter, sans-serif; font-size: 13px; }
 
 /* main menu */

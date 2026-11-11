@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import type { GpuTimer } from '../render/PerfGovernor';
 
 /**
  * F3 performance overlay: frame rate, frame time (avg / worst), simulation and render CPU time,
@@ -7,20 +8,16 @@ import * as THREE from 'three';
  */
 export class PerfOverlay {
   el: HTMLDivElement;
-  private gl: WebGL2RenderingContext;
-  private ext: any;
-  private queries: WebGLQuery[] = [];
-  private active: WebGLQuery | null = null;
-  private acc = { n: 0, frame: 0, worst: 0, sim: 0, cpu: 0, gpu: 0, gpuN: 0, calls: 0, tris: 0, t: 0 };
+  private acc = { n: 0, frame: 0, worst: 0, sim: 0, cpu: 0, calls: 0, tris: 0, t: 0 };
   private last = performance.now();
+  /** extra lines (resolution scale, refresh rate, auto-graphics notes) */
+  extra: () => string = () => '';
 
-  constructor(private renderer: THREE.WebGLRenderer, parent: HTMLElement) {
+  constructor(private renderer: THREE.WebGLRenderer, parent: HTMLElement, private gpu: GpuTimer) {
     this.el = document.createElement('div');
     this.el.className = 'perfov';
     this.el.style.display = 'none';
     parent.appendChild(this.el);
-    this.gl = renderer.getContext() as WebGL2RenderingContext;
-    this.ext = this.gl.getExtension('EXT_disjoint_timer_query_webgl2');
   }
 
   get visible() {
@@ -29,19 +26,6 @@ export class PerfOverlay {
   set visible(v: boolean) {
     this.el.style.display = v ? 'block' : 'none';
     this.renderer.info.autoReset = !v;
-  }
-
-  beginGpu() {
-    if (!this.visible || !this.ext || this.active) return;
-    const q = this.gl.createQuery()!;
-    this.gl.beginQuery(this.ext.TIME_ELAPSED_EXT, q);
-    this.active = q;
-  }
-  endGpu() {
-    if (!this.active) return;
-    this.gl.endQuery(this.ext.TIME_ELAPSED_EXT);
-    this.queries.push(this.active);
-    this.active = null;
   }
 
   /** once per frame, after rendering */
@@ -60,31 +44,18 @@ export class PerfOverlay {
     a.calls += info.render.calls;
     a.tris += info.render.triangles;
     info.reset();
-    // collect finished GPU timings
-    while (this.queries.length) {
-      const q = this.queries[0];
-      if (!this.gl.getQueryParameter(q, this.gl.QUERY_RESULT_AVAILABLE)) break;
-      const disjoint = this.gl.getParameter(this.ext.GPU_DISJOINT_EXT);
-      const ns = this.gl.getQueryParameter(q, this.gl.QUERY_RESULT) as number;
-      if (!disjoint) {
-        a.gpu += ns / 1e6;
-        a.gpuN++;
-      }
-      this.gl.deleteQuery(q);
-      this.queries.shift();
-    }
     a.t += ft;
     if (a.t < 500) return;
-    const sz = this.renderer.getDrawingBufferSize(new THREE.Vector2());
     const f = (v: number) => v.toFixed(1);
+    const g = this.gpu.ms;
     this.el.innerHTML =
       `<b>${Math.round(1000 / (a.frame / a.n))} FPS</b>` +
       `<div>frame ${f(a.frame / a.n)} ms · worst ${f(a.worst)}</div>` +
       `<div>sim (CPU) ${f(a.sim / a.n)} ms</div>` +
       `<div>render (CPU) ${f(a.cpu / a.n)} ms</div>` +
-      `<div>GPU ${this.ext ? (a.gpuN ? f(a.gpu / a.gpuN) + ' ms' : '…') : 'n/a in this browser'}</div>` +
+      `<div>GPU ${this.gpu.available ? (g >= 0 ? f(g) + ' ms' : '…') : 'n/a in this browser'}</div>` +
       `<div>draw calls ${Math.round(a.calls / a.n)} · tris ${Math.round(a.tris / a.n / 1000)}k</div>` +
-      `<div>${sz.x}×${sz.y} px</div>`;
-    this.acc = { n: 0, frame: 0, worst: 0, sim: 0, cpu: 0, gpu: 0, gpuN: 0, calls: 0, tris: 0, t: 0 };
+      this.extra();
+    this.acc = { n: 0, frame: 0, worst: 0, sim: 0, cpu: 0, calls: 0, tris: 0, t: 0 };
   }
 }

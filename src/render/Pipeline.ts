@@ -7,6 +7,22 @@ import { SMAAPass } from 'three/examples/jsm/postprocessing/SMAAPass.js';
 import { N8AOPass } from 'n8ao';
 import { Settings } from '../game/Settings';
 
+/**
+ * Every lit material's output is sanitised before it reaches the half-float targets: a NaN (from a
+ * degenerate normal / zero-length vector in some driver's math) or a value past the half-float
+ * range (a mirror-like specular highlight of the sun) used to survive into the post chain, where
+ * the AO / bloom blurs and the grade's mix() smeared it into black blocks for a frame or two.
+ */
+THREE.ShaderChunk.opaque_fragment = THREE.ShaderChunk.opaque_fragment.replace(
+  'gl_FragColor = vec4( outgoingLight, diffuseColor.a );',
+  `vec3 safeLight = min( outgoingLight, vec3( 30000.0 ) );
+safeLight = any( isnan( safeLight ) ) ? vec3( 0.0 ) : max( safeLight, vec3( 0.0 ) );
+gl_FragColor = vec4( safeLight, diffuseColor.a );`,
+);
+
+/** GLSL: replace NaN / out-of-range texels by something finite (post passes reading HDR input) */
+const SAFE_GLSL = `vec3 safe3(vec3 c){ return any(isnan(c)) ? vec3(0.0) : clamp(c, vec3(0.0), vec3(30000.0)); }`;
+
 /** Renders the first-person viewmodel on top of the world after clearing depth. */
 class ViewmodelPass extends Pass {
   constructor(public scene: THREE.Scene, public camera: THREE.Camera) {
@@ -145,10 +161,12 @@ class LiteBloomPass extends Pass {
       uniforms: { tSrc: { value: null }, uTexel: { value: new THREE.Vector2() }, uThr: { value: 2.2 } },
       vertexShader: vs,
       fragmentShader: /* glsl */ `uniform sampler2D tSrc; uniform vec2 uTexel; uniform float uThr; varying vec2 vUv;
+        ${SAFE_GLSL}
         void main(){
-          // 4-tap box downsample, then a soft-knee threshold
-          vec3 c = texture2D(tSrc, vUv + uTexel * vec2(-1.0, -1.0)).rgb + texture2D(tSrc, vUv + uTexel * vec2(1.0, -1.0)).rgb
-                 + texture2D(tSrc, vUv + uTexel * vec2(-1.0, 1.0)).rgb + texture2D(tSrc, vUv + uTexel * vec2(1.0, 1.0)).rgb;
+          // 4-tap box downsample, then a soft-knee threshold (each tap sanitised: one bad texel
+          // would otherwise be blurred over a quarter of the screen)
+          vec3 c = safe3(texture2D(tSrc, vUv + uTexel * vec2(-1.0, -1.0)).rgb) + safe3(texture2D(tSrc, vUv + uTexel * vec2(1.0, -1.0)).rgb)
+                 + safe3(texture2D(tSrc, vUv + uTexel * vec2(-1.0, 1.0)).rgb) + safe3(texture2D(tSrc, vUv + uTexel * vec2(1.0, 1.0)).rgb);
           c *= 0.25;
           float br = max(c.r, max(c.g, c.b));
           float k = clamp((br - uThr * 0.6) / (uThr * 0.8), 0.0, 1.0);
@@ -276,6 +294,7 @@ class GradePass extends Pass {
           return pow(max(v, 0.0), vec3(2.2));
         }
         float rand(vec2 c){ return fract(sin(dot(c, vec2(12.9898, 78.233))) * 43758.5453); }
+        ${SAFE_GLSL}
         void main(){
           vec2 uv = vUv;
           vec2 dc = uv - 0.5;
@@ -286,6 +305,7 @@ class GradePass extends Pass {
           c.g = texture2D(tDiffuse, uv).g;
           c.b = texture2D(tDiffuse, uv + dc * ca * 4.0 * r2 * 4.0).b;
           if (uBloom > 0.001) c += (texture2D(tBloom0, uv).rgb * 0.6 + texture2D(tBloom1, uv).rgb * 0.8) * uBloom;
+          c = safe3(c);
           c *= uExposure;
           c = agx(c);
           // grade: cool shadows, neutral-warm highlights, slight desaturation
@@ -436,18 +456,45 @@ export class Pipeline {
     if (q.antialias) c.addPass(this.smaa);
   }
 
+  /** CSS size of the canvas and the device-pixel ratio it was last allocated with */
+  private canvasKey = '';
+  /** render-target resolution (device pixels) the composer currently runs at */
+  rw = 1;
+  rh = 1;
+
+  /**
+   * Size the canvas (only when the window or the HiDPI setting changed) and the internal render
+   * targets. Dynamic resolution only ever touches the internal targets: resizing a canvas clears
+   * its drawing buffer, and doing that after a frame was drawn presented a cleared (black) frame —
+   * the "black flash" every time the resolution stepped. The final pass now upscales to the
+   * canvas instead (bilinear), so a resolution change is invisible apart from sharpness.
+   */
   setSize(w: number, h: number) {
     this.w = w;
     this.h = h;
-    const s = Settings.data.renderScale * this.dynScale;
-    this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, Settings.data.hiDpi ? 2 : 1) * s);
-    this.renderer.setSize(w, h, false);
-    this.composer.setPixelRatio(Math.min(window.devicePixelRatio, Settings.data.hiDpi ? 2 : 1) * s);
-    this.composer.setSize(w, h);
-    const pr = this.renderer.getPixelRatio();
-    this.bloom.setSize(w * pr, h * pr);
-    this.grade.mat.uniforms.uRes.value.set(w * pr, h * pr);
-    this.world.mat.uniforms.uRes.value.set(w * pr, h * pr);
+    const basePr = Math.min(window.devicePixelRatio, Settings.data.hiDpi ? 2 : 1);
+    const key = `${w}x${h}@${basePr}`;
+    if (key !== this.canvasKey) {
+      this.canvasKey = key;
+      this.renderer.setPixelRatio(basePr);
+      this.renderer.setSize(w, h, false);
+    }
+    this.applyScale(true);
+  }
+
+  /** (re)allocate the composer's targets for renderScale × dynScale; the canvas is left alone */
+  applyScale(force = false) {
+    const basePr = Math.min(window.devicePixelRatio, Settings.data.hiDpi ? 2 : 1);
+    const s = Math.max(0.25, Math.min(1, Settings.data.renderScale * this.dynScale));
+    const rw = Math.max(1, Math.round(this.w * basePr * s)), rh = Math.max(1, Math.round(this.h * basePr * s));
+    if (!force && rw === this.rw && rh === this.rh) return;
+    this.rw = rw;
+    this.rh = rh;
+    this.composer.setPixelRatio(1);
+    this.composer.setSize(rw, rh);
+    this.bloom.setSize(rw, rh);
+    this.grade.mat.uniforms.uRes.value.set(rw, rh);
+    this.world.mat.uniforms.uRes.value.set(rw, rh);
   }
 
   render(dt: number, fx: { dofFocus: number; dof: number; damage: number; flash: number; suppression: number; underwater: number; exposure?: number; rays?: number; sunDir?: THREE.Vector3; sunColor?: THREE.Color }) {

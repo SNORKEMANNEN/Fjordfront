@@ -232,7 +232,7 @@ export function inletZ(x: number) {
   return -80 + 4 * Math.sin(x * 0.035 + 0.6);
 }
 
-interface Pad { x: number; z: number; hw: number; hd: number; rot: number; y: number | null; feather: number }
+export interface Pad { x: number; z: number; hw: number; hd: number; rot: number; y: number | null; feather: number; c: number; s: number; r: number; fy: number }
 let PADS: Pad[] | null = null;
 
 function padFor(b: BuildingDef): Pad {
@@ -242,7 +242,9 @@ function padFor(b: BuildingDef): Pad {
     hjell: [12, 5], containers: [36, 26], rorbu: [9, 8], lighthouse: [11, 11], tower: [6, 6], radome: [12, 12],
   };
   const s = sizes[b.kind] ?? [(b.w ?? 8) + 4, (b.d ?? 7) + 4];
-  return { x: b.x, z: b.z, hw: s[0] / 2 + 1.5, hd: s[1] / 2 + 1.5, rot: b.rot, y: b.padY ?? null, feather: 7 };
+  const hw = s[0] / 2 + 1.5, hd = s[1] / 2 + 1.5, feather = 7;
+  // (rotation, bounding radius and the pad height are fixed: precomputed once instead of per sample)
+  return { x: b.x, z: b.z, hw, hd, rot: b.rot, y: b.padY ?? null, feather, c: Math.cos(-b.rot), s: Math.sin(-b.rot), r: Math.hypot(hw + feather, hd + feather), fy: 0 };
 }
 
 /** Natural terrain before roads/pads. */
@@ -347,17 +349,40 @@ export function naturalHeight(x: number, z: number): number {
   return h;
 }
 
+/** Pads bucketed on a coarse grid: a height sample only tests the few pads whose feathered
+ *  footprint can reach it (it used to test every building, with trig and an fbm call each). */
+const PAD_CELL = 32;
+let padGrid: Map<number, Pad[]> | null = null;
+const EMPTY_PADS: Pad[] = [];
 function buildPads() {
   PADS = BUILDINGS.map(padFor);
+  padGrid = new Map();
+  for (const p of PADS) {
+    p.fy = p.y ?? Math.max(naturalHeight(p.x, p.z), 1.6);
+    const i0 = Math.floor((p.x - p.r) / PAD_CELL), i1 = Math.floor((p.x + p.r) / PAD_CELL);
+    const j0 = Math.floor((p.z - p.r) / PAD_CELL), j1 = Math.floor((p.z + p.r) / PAD_CELL);
+    for (let i = i0; i <= i1; i++) for (let j = j0; j <= j1; j++) {
+      const k = (i + 512) * 1024 + (j + 512);
+      let l = padGrid.get(k);
+      if (!l) padGrid.set(k, (l = []));
+      l.push(p);
+    }
+  }
+}
+export function padsNear(x: number, z: number): Pad[] {
+  if (!padGrid) buildPads();
+  const i = Math.floor(x / PAD_CELL), j = Math.floor(z / PAD_CELL);
+  if (i < -512 || i > 511 || j < -512 || j > 511) return EMPTY_PADS;
+  return padGrid!.get((i + 512) * 1024 + (j + 512)) ?? EMPTY_PADS;
 }
 
 function padInfluence(p: Pad, x: number, z: number) {
-  const c = Math.cos(-p.rot), s = Math.sin(-p.rot);
   const dx = x - p.x, dz = z - p.z;
-  const lx = Math.abs(dx * c - dz * s) - p.hw;
-  const lz = Math.abs(dx * s + dz * c) - p.hd;
+  if (dx > p.r || dx < -p.r || dz > p.r || dz < -p.r) return 0;
+  const lx = Math.abs(dx * p.c - dz * p.s) - p.hw;
+  const lz = Math.abs(dx * p.s + dz * p.c) - p.hd;
   const d = Math.max(lx, lz);
-  return 1 - smoothstep(0, p.feather, d);
+  return d >= p.feather ? 0 : 1 - smoothstep(0, p.feather, d);
 }
 
 const roadCache: { r: Road; ys: number[] }[] = [];
@@ -395,31 +420,65 @@ function roadHeights() {
 }
 
 function naturalWithPads(x: number, z: number) {
-  if (!PADS) buildPads();
   let h = naturalHeight(x, z);
-  for (const p of PADS!) {
+  const pads = padsNear(x, z);
+  for (let i = 0; i < pads.length; i++) {
+    const p = pads[i];
     const inf = padInfluence(p, x, z);
-    if (inf > 0) {
-      const y = p.y ?? Math.max(naturalHeight(p.x, p.z), 1.6);
-      h = lerp(h, y, inf);
-    }
+    if (inf > 0) h = lerp(h, p.fy, inf);
   }
   return h;
 }
 
-/** Returns {d, y, t, road} for the nearest road to (x,z). */
-export function nearestRoad(x: number, z: number) {
-  let best = { d: 1e9, y: 0, road: ROADS[0], seg: 0, t: 0 };
-  for (const { r, ys } of roadHeights()) {
-    for (let i = 0; i < r.pts.length - 1; i++) {
-      const [ax, az] = r.pts[i];
-      const [bx, bz] = r.pts[i + 1];
-      if (x < Math.min(ax, bx) - 30 || x > Math.max(ax, bx) + 30 || z < Math.min(az, bz) - 30 || z > Math.max(az, bz) + 30) continue;
-      const { d, t } = distToSegment2(x, z, ax, az, bx, bz);
-      if (d < best.d) best = { d, y: lerp(ys[i], ys[i + 1], t), road: r, seg: i, t };
+/** Road segments bucketed on a grid (each segment listed in every cell its 30 m-padded box
+ *  touches, in road order): a lookup tests a handful of segments instead of all of them. */
+interface RoadSeg { ys: number[]; r: Road; i: number; ax: number; az: number; bx: number; bz: number; x0: number; x1: number; z0: number; z1: number }
+const SEG_CELL = 32;
+let segGrid: Map<number, RoadSeg[]> | null = null;
+const NO_SEGS: RoadSeg[] = [];
+function roadSegs(x: number, z: number) {
+  if (!segGrid) {
+    segGrid = new Map();
+    for (const { r, ys } of roadHeights()) {
+      for (let i = 0; i < r.pts.length - 1; i++) {
+        const [ax, az] = r.pts[i];
+        const [bx, bz] = r.pts[i + 1];
+        const sg: RoadSeg = { ys, r, i, ax, az, bx, bz, x0: Math.min(ax, bx) - 30, x1: Math.max(ax, bx) + 30, z0: Math.min(az, bz) - 30, z1: Math.max(az, bz) + 30 };
+        for (let ci = Math.floor(sg.x0 / SEG_CELL); ci <= Math.floor(sg.x1 / SEG_CELL); ci++)
+          for (let cj = Math.floor(sg.z0 / SEG_CELL); cj <= Math.floor(sg.z1 / SEG_CELL); cj++) {
+            const k = (ci + 512) * 1024 + (cj + 512);
+            let l = segGrid.get(k);
+            if (!l) segGrid.set(k, (l = []));
+            l.push(sg);
+          }
+      }
     }
   }
-  return best;
+  const ci = Math.floor(x / SEG_CELL), cj = Math.floor(z / SEG_CELL);
+  if (ci < -512 || ci > 511 || cj < -512 || cj > 511) return NO_SEGS;
+  return segGrid.get((ci + 512) * 1024 + (cj + 512)) ?? NO_SEGS;
+}
+
+/** Returns {d, y, t, road} for the nearest road to (x,z). */
+export function nearestRoad(x: number, z: number) {
+  const segs = roadSegs(x, z);
+  let bd = 1e9, bs: RoadSeg | null = null, bt = 0;
+  for (let k = 0; k < segs.length; k++) {
+    const sg = segs[k];
+    if (x < sg.x0 || x > sg.x1 || z < sg.z0 || z > sg.z1) continue;
+    const dx = sg.bx - sg.ax, dz = sg.bz - sg.az;
+    const l2 = dx * dx + dz * dz;
+    let t = l2 > 0 ? ((x - sg.ax) * dx + (z - sg.az) * dz) / l2 : 0;
+    t = t < 0 ? 0 : t > 1 ? 1 : t;
+    const d = Math.hypot(x - (sg.ax + dx * t), z - (sg.az + dz * t));
+    if (d < bd) {
+      bd = d;
+      bs = sg;
+      bt = t;
+    }
+  }
+  if (!bs) return { d: 1e9, y: 0, road: ROADS[0], seg: 0, t: 0 };
+  return { d: bd, y: lerp(bs.ys[bs.i], bs.ys[bs.i + 1], bt), road: bs.r, seg: bs.i, t: bt };
 }
 
 export function roadHeightAt(r: Road, i: number, t: number) {

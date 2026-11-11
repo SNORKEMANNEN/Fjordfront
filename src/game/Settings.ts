@@ -16,6 +16,11 @@ export interface SettingsData {
   toggleCrouch: boolean;
   toggleAds: boolean;
   quality: Quality;
+  /** pick the preset from the detected hardware and let the frame-time governor drop costly effects
+   *  (for the session) when even the lowest render resolution can't hold the frame rate */
+  autoQuality: boolean;
+  /** GPU the automatic preset was chosen for (re-detected when it changes, e.g. a laptop switching GPUs) */
+  autoQualityGpu: string;
   renderScale: number;
   /** lower the render resolution automatically when the frame rate drops */
   dynamicRes: boolean;
@@ -66,6 +71,8 @@ const DEFAULTS: SettingsData = {
   toggleCrouch: true,
   toggleAds: false,
   quality: 'high',
+  autoQuality: true,
+  autoQualityGpu: '',
   renderScale: 1,
   dynamicRes: true,
   hiDpi: false,
@@ -99,7 +106,13 @@ class SettingsStore {
   constructor() {
     try {
       const raw = localStorage.getItem('fjordfront.settings');
-      if (raw) this.data = { ...DEFAULTS, ...JSON.parse(raw) };
+      if (raw) {
+        const saved = JSON.parse(raw);
+        this.data = { ...DEFAULTS, ...saved };
+        // settings saved before automatic graphics existed: keep the player's preset (the GPU is
+        // recorded on the next boot without re-picking one)
+        if (!('autoQualityGpu' in saved)) this.data.autoQualityGpu = 'keep';
+      }
     } catch {
       /* storage unavailable */
     }

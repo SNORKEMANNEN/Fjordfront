@@ -27,6 +27,7 @@ export const GROUP_WORLD = 0x0001;
 export const GROUP_CHARACTER = 0x0002;
 export const GROUP_BULLET_ONLY = 0x0004; // e.g. foliage that stops nothing but is hittable — unused
 export const groups = (member: number, filter: number) => (member << 16) | filter;
+const IDENT_Q = { x: 0, y: 0, z: 0, w: 1 };
 
 export class Physics {
   static R = RAPIER;
@@ -109,6 +110,20 @@ export class Physics {
       collider: hit.collider,
       info,
     };
+  }
+
+  /**
+   * Does a shape placed at `pos` overlap any world collider? (rapier.js' singular
+   * intersectionWithShape scans every collider — ~3.5 ms with this map's ~4800 — while the
+   * callback form walks the BVH: same answer in ~15 µs.)
+   */
+  overlaps(pos: { x: number; y: number; z: number }, shape: RAPIER.Shape, exclude?: RAPIER.Collider, filter = GROUP_WORLD, rot = IDENT_Q) {
+    let hit = false;
+    this.world.intersectionsWithShape(pos, rot, shape, () => {
+      hit = true;
+      return false; // first overlap is enough
+    }, undefined, groups(0xffff, filter), exclude);
+    return hit;
   }
 
   /** True if the segment a→b is unobstructed by world geometry. */

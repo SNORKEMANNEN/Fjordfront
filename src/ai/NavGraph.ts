@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { Physics, groups, GROUP_WORLD } from '../core/Physics';
+import { Physics } from '../core/Physics';
 import { Terrain } from '../world/Terrain';
 import { NavHint } from '../world/Buildings';
 import { PLAY_HALF } from '../world/MapLayout';
@@ -16,15 +16,22 @@ export interface NavNode {
 /** Waypoint graph over the playable area with A* search. */
 export class NavGraph {
   nodes: NavNode[] = [];
-  private grid = new Map<string, number[]>();
+  private grid = new Map<number, number[]>();
   private cell = 12;
+  // A* scratch (see path)
+  private sG = new Float64Array(0);
+  private sCame = new Int32Array(0);
+  private sSeen = new Uint32Array(0);
+  private sClosed = new Uint32Array(0);
+  private sGen = 0;
+  private hF = new Float64Array(256);
+  private hI = new Int32Array(256);
 
   constructor(private physics: Physics, private terrain: Terrain, hints: NavHint[], points: THREE.Vector3[]) {
     const t0 = performance.now();
     const step = 7;
     const capsule = new Physics.R.Capsule(0.5, 0.3);
-    const free = (p: THREE.Vector3) =>
-      physics.world.intersectionWithShape({ x: p.x, y: p.y + 0.9, z: p.z }, { x: 0, y: 0, z: 0, w: 1 }, capsule, undefined, groups(0xffff, GROUP_WORLD)) === null;
+    const free = (p: THREE.Vector3) => !physics.overlaps({ x: p.x, y: p.y + 0.9, z: p.z }, capsule);
     // surface height: highest walkable surface below terrain+3 (docks, bridges) — else terrain
     const surface = (x: number, z: number) => {
       const th = terrain.heightAt(x, z);
@@ -96,8 +103,9 @@ export class NavGraph {
     console.log(`[nav] ${this.nodes.length} nodes, ${this.nodes.reduce((a, n) => a + n.links.length, 0) / 2} links in ${(performance.now() - t0).toFixed(0)}ms`);
   }
 
+  /** numeric cell key (string keys allocated a string per lookup, thousands per frame) */
   private key(x: number, z: number) {
-    return `${Math.floor(x / this.cell)},${Math.floor(z / this.cell)}`;
+    return (Math.floor(x / this.cell) + 4096) * 8192 + (Math.floor(z / this.cell) + 4096);
   }
 
   private add(p: THREE.Vector3, indoor: boolean) {
@@ -124,11 +132,12 @@ export class NavGraph {
     const z0 = Math.floor((p.z - r) / c), z1 = Math.floor((p.z + r) / c);
     for (let x = x0; x <= x1; x++)
       for (let z = z0; z <= z1; z++) {
-        const ids = this.grid.get(`${x},${z}`);
+        const ids = this.grid.get((x + 4096) * 8192 + (z + 4096));
         if (!ids) continue;
-        for (const id of ids) {
-          const n = this.nodes[id];
-          if (n.p.distanceTo(p) <= r) out.push(n);
+        const r2 = r * r;
+        for (let k = 0; k < ids.length; k++) {
+          const n = this.nodes[ids[k]];
+          if (n.p.distanceToSquared(p) <= r2) out.push(n);
         }
       }
     return out;
@@ -137,7 +146,8 @@ export class NavGraph {
   nearest(p: THREE.Vector3, maxR = 30, requireLinks = true): NavNode | null {
     let best: NavNode | null = null;
     let bd = Infinity;
-    for (const r of [8, 16, maxR]) {
+    for (let ri = 0; ri < 3; ri++) {
+      const r = ri === 0 ? 8 : ri === 1 ? 16 : maxR;
       for (const n of this.near(p, r)) {
         if (requireLinks && n.links.length === 0) continue;
         const d = n.p.distanceToSquared(p) + Math.abs(n.p.y - p.y) * 20;
@@ -176,72 +186,101 @@ export class NavGraph {
       const h = Math.sin(id * 12.9898 + seed * 78.233) * 43758.5453;
       return 1 + noise * (h - Math.floor(h));
     };
-    const gScore = new Map<number, number>([[s.id, 0]]);
-    const came = new Map<number, number>();
-    const closed = new Set<number>();
-    // binary min-heap of [f, id]
-    const heapF: number[] = [], heapI: number[] = [];
+    // scratch state reused across searches (sized to the graph; a generation stamp marks which
+    // entries belong to this search) — no Maps / Sets / swap arrays allocated per call: with 24
+    // bots re-planning, A* was ~45 % of all garbage the game produced (→ GC pauses mid-fight)
+    const N = this.nodes.length;
+    if (this.sG.length < N) {
+      this.sG = new Float64Array(N);
+      this.sCame = new Int32Array(N);
+      this.sSeen = new Uint32Array(N);
+      this.sClosed = new Uint32Array(N);
+    }
+    const gen = ++this.sGen;
+    const G = this.sG, came = this.sCame, seen = this.sSeen, closedA = this.sClosed;
+    seen[s.id] = gen;
+    G[s.id] = 0;
+    came[s.id] = -1;
+    // binary min-heap of (f, id) in growable typed arrays
+    let heapF = this.hF, heapI = this.hI;
+    let hn = 0;
     const push = (f: number, id: number) => {
-      let i = heapF.length;
-      heapF.push(f); heapI.push(id);
+      if (hn === heapF.length) {
+        const nf = new Float64Array(hn * 2), ni = new Int32Array(hn * 2);
+        nf.set(heapF);
+        ni.set(heapI);
+        heapF = this.hF = nf;
+        heapI = this.hI = ni;
+      }
+      let i = hn++;
+      heapF[i] = f;
+      heapI[i] = id;
       while (i > 0) {
         const pnt = (i - 1) >> 1;
         if (heapF[pnt] <= heapF[i]) break;
-        [heapF[pnt], heapF[i]] = [heapF[i], heapF[pnt]];
-        [heapI[pnt], heapI[i]] = [heapI[i], heapI[pnt]];
+        const tf = heapF[pnt], ti = heapI[pnt];
+        heapF[pnt] = heapF[i]; heapI[pnt] = heapI[i];
+        heapF[i] = tf; heapI[i] = ti;
         i = pnt;
       }
     };
     const pop = () => {
       const id = heapI[0];
-      const lf = heapF.pop()!, li = heapI.pop()!;
-      if (heapF.length) {
+      hn--;
+      const lf = heapF[hn], li = heapI[hn];
+      if (hn > 0) {
         heapF[0] = lf; heapI[0] = li;
         let i = 0;
         for (;;) {
           const l = 2 * i + 1, r = l + 1;
           let m = i;
-          if (l < heapF.length && heapF[l] < heapF[m]) m = l;
-          if (r < heapF.length && heapF[r] < heapF[m]) m = r;
+          if (l < hn && heapF[l] < heapF[m]) m = l;
+          if (r < hn && heapF[r] < heapF[m]) m = r;
           if (m === i) break;
-          [heapF[m], heapF[i]] = [heapF[i], heapF[m]];
-          [heapI[m], heapI[i]] = [heapI[i], heapI[m]];
+          const tf = heapF[m], ti = heapI[m];
+          heapF[m] = heapF[i]; heapI[m] = heapI[i];
+          heapF[i] = tf; heapI[i] = ti;
           i = m;
         }
       }
       return id;
     };
-    push(s.p.distanceTo(g.p), s.id);
+    const gp = g.p;
+    push(s.p.distanceTo(gp), s.id);
     let iter = 0;
-    while (heapF.length && iter++ < maxIter) {
+    while (hn > 0 && iter++ < maxIter) {
       const cur = pop();
-      if (closed.has(cur)) continue;
+      if (closedA[cur] === gen) continue;
       if (cur === g.id) {
         const out: THREE.Vector3[] = [];
-        let c: number | undefined = cur;
-        while (c !== undefined && c !== s.id) {
+        let c = cur;
+        while (c !== -1 && c !== s.id) {
           out.push(this.nodes[c].p.clone());
-          c = came.get(c);
+          c = came[c];
         }
         out.reverse();
         return out;
       }
-      closed.add(cur);
+      closedA[cur] = gen;
       const cn = this.nodes[cur];
-      const cg = gScore.get(cur)!;
-      for (const nid of cn.links) {
-        if (closed.has(nid)) continue;
+      const cg = G[cur];
+      const links = cn.links;
+      for (let li = 0; li < links.length; li++) {
+        const nid = links[li];
+        if (closedA[nid] === gen) continue;
         const nn = this.nodes[nid];
         let cost = cn.p.distanceTo(nn.p) * (1 + nn.cover * 0.3) * jitter(nid);
-        for (const a of avoid) {
+        for (let ai = 0; ai < avoid.length; ai++) {
+          const a = avoid[ai];
           const d2 = (a.x - nn.p.x) ** 2 + (a.z - nn.p.z) ** 2;
           if (d2 < 144) cost *= 1 + 0.8 * (1 - d2 / 144);
         }
         const tg = cg + cost;
-        if (tg < (gScore.get(nid) ?? Infinity)) {
-          came.set(nid, cur);
-          gScore.set(nid, tg);
-          push(tg + nn.p.distanceTo(g.p), nid);
+        if (seen[nid] !== gen || tg < G[nid]) {
+          seen[nid] = gen;
+          came[nid] = cur;
+          G[nid] = tg;
+          push(tg + nn.p.distanceTo(gp), nid);
         }
       }
     }

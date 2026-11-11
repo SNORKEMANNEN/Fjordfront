@@ -1810,15 +1810,10 @@ export function buildLMG(mats: WeaponMats): WeaponModel {
     piv.userData.w = w;
     bipod.push(piv);
   }
-  const setBipod = (k: number) => {
-    for (const piv of bipod) {
-      // folded: legs swung forward under the barrel; deployed: straight down, splayed out
-      piv.rotation.set((1 - k) * (Math.PI / 2 - 0.08), 0, (piv.userData.w as number) * 0.22 * k);
-    }
-  };
-  setBipod(0);
-  root.userData.setBipod = setBipod;
+  for (const piv of bipod) piv.name = 'bipodLeg';
   root.add(b.build(mats, 'body'), coverPivot, belt, mag, charge, trigger, ...bipod);
+  root.userData.setBipod = bipodSetter(root);
+  root.userData.setBipod(0);
   const sockets = addSockets(root, [
     socket('muzzle', 0.676, bore, 0),
     socket('eject', 0.03, -0.02, 0.0),
@@ -2308,7 +2303,21 @@ export function buildKR98(mats: WeaponMats): WeaponModel {
   return { root, parts: { bolt, trigger, magRounds, clip, hround }, sockets, adsDist: 0.34 };
 }
 
-export const WEAPON_BUILDERS = {
+/** setBipod for a model root (finds its own legs, so a cloned model drives its own bipod) */
+function bipodSetter(root: THREE.Object3D) {
+  const legs: THREE.Object3D[] = [];
+  root.traverse((o) => {
+    if (o.name === 'bipodLeg') legs.push(o);
+  });
+  return (k: number) => {
+    for (const piv of legs) {
+      // folded: legs swung forward under the barrel; deployed: straight down, splayed out
+      piv.rotation.set((1 - k) * (Math.PI / 2 - 0.08), 0, (piv.userData.w as number) * 0.22 * k);
+    }
+  };
+}
+
+const RAW_BUILDERS = {
   k416: buildCarbine,
   mp7: buildMP7,
   pump12: buildShotgun,
@@ -2327,4 +2336,50 @@ export const WEAPON_BUILDERS = {
   hval47: buildHval47,
   kr98: buildKR98,
 } as const;
+
+/**
+ * Every gun is modelled once per material set; each further copy (24 soldiers, the viewmodel, the
+ * killcam ghost, the loadout preview, shader warm-up) is a clone that shares the geometry. Building
+ * from the modelling kit is the slow part (rounded boxes, extrusions, merges: ~70 builds used to
+ * cost ~2 s of loading), cloning is a few hundred object copies.
+ */
+const templates = new WeakMap<WeaponMats, Map<string, WeaponModel>>();
+function cloneModel(t: WeaponModel): WeaponModel {
+  const root = t.root.clone(true);
+  const map = new Map<THREE.Object3D, THREE.Object3D>();
+  const walk = (a: THREE.Object3D, b: THREE.Object3D) => {
+    map.set(a, b);
+    // shallow copy (Object3D.clone JSON-round-trips userData, which breaks vectors / functions)
+    b.userData = { ...a.userData };
+    for (let i = 0; i < a.children.length; i++) walk(a.children[i], b.children[i]);
+  };
+  walk(t.root, root);
+  // parts kept outside the gun (the revolver's speedloader rides in the hand): clone those too
+  const refs = [...Object.values(t.parts), ...Object.values(t.sockets), t.scopeLens, t.reticle];
+  for (const o of refs) {
+    if (!o || map.has(o)) continue;
+    let top: THREE.Object3D = o;
+    while (top.parent && !map.has(top.parent)) top = top.parent;
+    if (map.has(top)) continue;
+    const c = top.clone(true);
+    walk(top, c);
+  }
+  const remap = <T extends THREE.Object3D>(o: T | undefined) => (o ? ((map.get(o) as T) ?? o) : undefined);
+  const parts: Record<string, THREE.Object3D> = {};
+  for (const [k, v] of Object.entries(t.parts)) parts[k] = remap(v)!;
+  const sockets: Record<string, THREE.Object3D> = {};
+  for (const [k, v] of Object.entries(t.sockets)) sockets[k] = remap(v)!;
+  if (t.root.userData.setBipod) root.userData.setBipod = bipodSetter(root);
+  return { ...t, root: root as THREE.Group, parts, sockets, scopeLens: remap(t.scopeLens), reticle: remap(t.reticle) };
+}
+function cachedBuild(id: keyof typeof RAW_BUILDERS, mats: WeaponMats): WeaponModel {
+  let m = templates.get(mats);
+  if (!m) templates.set(mats, (m = new Map()));
+  let t = m.get(id);
+  if (!t) m.set(id, (t = RAW_BUILDERS[id](mats)));
+  return cloneModel(t);
+}
+export const WEAPON_BUILDERS = Object.fromEntries(
+  (Object.keys(RAW_BUILDERS) as (keyof typeof RAW_BUILDERS)[]).map((id) => [id, (mats: WeaponMats) => cachedBuild(id, mats)]),
+) as { [K in keyof typeof RAW_BUILDERS]: (mats: WeaponMats) => WeaponModel };
 export type WeaponId = keyof typeof WEAPON_BUILDERS;

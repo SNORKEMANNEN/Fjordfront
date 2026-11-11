@@ -5,7 +5,7 @@ const { chromium } = require('playwright');
   const p = await b.newPage({ viewport: { width: 480, height: 270 } });
   p.on('pageerror', (e) => console.log('[pageerror] ' + e.message + ' ' + (e.stack || '').split('\n').slice(1, 3).join(' | ')));
   p.on('console', (m) => { if (m.type() === 'error') console.log('[error] ' + m.text().slice(0, 300)); });
-  await p.goto('http://127.0.0.1:5173/?test&quality=low&weather=clear&' + (process.env.Q || ''), { timeout: 180000 });
+  await p.goto('http://127.0.0.1:5173/?test&' + (process.env.Q || 'quality=low') + '&weather=clear', { timeout: 180000 });
   await p.waitForFunction(() => window.__ready || document.querySelector('.fatal'), null, { timeout: 300000, polling: 500 });
   for (const js of process.argv.slice(2)) {
     const t = Date.now();
