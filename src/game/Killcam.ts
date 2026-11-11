@@ -12,7 +12,7 @@ import { Bot } from '../ai/Bot';
  * muzzle flashes, sound). The final half-second runs in slow motion. Afterwards every bot's
  * visual state is restored exactly.
  */
-export const SNAP = 11; // floats per bot / player
+export const SNAP = 20; // floats per bot / player (Bot.replayState layout)
 const HZ = 60;
 const KEEP = 6.5; // seconds kept
 
@@ -88,7 +88,7 @@ export function sample(p: Playback, slot: number, t: number, out: Float32Array) 
       let d = b - a;
       d = ((d + Math.PI) % (Math.PI * 2) + Math.PI * 2) % (Math.PI * 2) - Math.PI;
       out[j] = a + d * k;
-    } else if (j >= 7 && j !== 9) out[j] = k < 0.5 ? a : b; // flags
+    } else if (j === 7 || j === 8 || j === 10 || j === 11 || j === 12 || j === 14) out[j] = k < 0.5 ? a : b; // flags
     else out[j] = a + (b - a) * k;
   }
   // teleports (respawns): no smearing across the map

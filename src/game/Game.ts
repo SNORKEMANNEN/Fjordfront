@@ -24,7 +24,10 @@ import { RiggedArms } from '../weapons/RiggedArms';
 import { Effects } from '../fx/Effects';
 import { WeaponDef, WEAPONS } from '../weapons/WeaponDefs';
 import { NavGraph } from '../ai/NavGraph';
-import { Bot, BotAsset } from '../ai/Bot';
+import { Bot } from '../ai/Bot';
+import { Soldier, SoldierStyle } from '../character/Soldier';
+import { Impostors } from '../character/Impostors';
+import { roleFor } from '../character/SoldierMesh';
 import { Combat } from './Combat';
 import { Combatant, HitPart } from './Combatant';
 import { SpawnSystem } from './SpawnSystem';
@@ -173,7 +176,7 @@ export class Game {
   recorder!: KillcamRecorder;
   private ghost!: Bot;
   private legs!: Bot;
-  private legsBuf = new Float32Array(11);
+  private legsBuf = new Float32Array(SNAP);
   private killcam: Playback | null = null;
   private killcamSlot = -1;
   private deathTime = 0;
@@ -234,8 +237,6 @@ export class Game {
   private suppression = 0;
   private menuT = 0;
   private rng = new RNG(5);
-  private botAsset!: BotAsset;
-  private teamMats: THREE.Material[] = [];
   private slideAudio = 0;
   private lastBotShot = new Map<number, number>();
   radar!: Radar;
@@ -459,7 +460,6 @@ export class Game {
     // network assets (also preloaded by index.html) download while everything else starts up
     const assetsP = Promise.all([
       new THREE.TextureLoader().loadAsync(import.meta.env.BASE_URL + 'assets/textures/waternormals.jpg'),
-      new GLTFLoader().loadAsync(import.meta.env.BASE_URL + 'assets/models/Soldier.glb'),
       new GLTFLoader().loadAsync(import.meta.env.BASE_URL + 'assets/models/fps_arms.glb').catch(() => null),
     ]);
     await step(0.03, 'Starting renderer');
@@ -504,8 +504,7 @@ export class Game {
     window.addEventListener('pointerdown', wake);
     window.addEventListener('keydown', wake);
     await step(0.1, 'Loading assets');
-    const [waterNormals, gltf, armsGltf] = await assetsP;
-    this.botAsset = { scene: gltf.scene, clips: gltf.animations };
+    const [waterNormals, armsGltf] = await assetsP;
     await step(0.14, 'Lighting the fjord');
     this.env = new Environment(r, this.scene, waterNormals);
     await step(0.18, 'Shaping terrain');
@@ -688,33 +687,24 @@ export class Game {
       },
       onBulletPass: () => {},
     });
-    let base: THREE.MeshStandardMaterial | null = null;
-    gltf.scene.traverse((o) => {
-      const m = o as THREE.Mesh;
-      if (m.isMesh && m.name.includes('vanguard_Mesh')) base = m.material as THREE.MeshStandardMaterial;
-    });
-    this.teamMats = [0, 1].map((t) => {
-      const mat = (base as unknown as THREE.MeshStandardMaterial).clone();
-      mat.color = new THREE.Color(t === 0 ? 0x9aa48c : 0x8c8478);
-      mat.envMapIntensity = 0.8;
-      return mat;
-    });
+    // faction camouflage (baked with the other procedural textures)
+    SoldierStyle.init(this.mats.baker);
     this.match = new Match([this.avatar], this.physics, this.terrain);
     this.match.spawns = new SpawnSystem(this.physics, this.terrain, this.nav, () => this.time);
     this.spawnBots();
     this.match.players.push(...this.bots);
     this.recorder = new KillcamRecorder(this.bots.length + 1);
     // stand-in soldier for the player in killcam replays
-    this.ghost = new Bot(100, 'YOU', 0, this.botAsset, WEAPON_BUILDERS['k416'](this.wmats), 'k416', {
+    this.ghost = new Bot(100, 'YOU', 0, { role: 'rifleman', seed: 4242 }, WEAPON_BUILDERS['k416'](this.wmats), 'k416', {
       physics: this.physics, nav: this.nav, combatants: () => [], fire: () => {}, footstep: () => {}, objectiveFor: () => new THREE.Vector3(), difficulty: 0,
-    }, this.teamMats[0]);
+    });
     this.ghost.body.setEnabled(false);
     this.ghost.root.visible = false;
     this.scene.add(this.ghost.root);
     // the player's own legs (seen when looking down) and their shadow
-    this.legs = new Bot(101, 'legs', 0, this.botAsset, WEAPON_BUILDERS['p80'](this.wmats), 'p80', {
+    this.legs = new Bot(101, 'legs', 0, { role: 'rifleman', seed: 4242 }, WEAPON_BUILDERS['p80'](this.wmats), 'p80', {
       physics: this.physics, nav: this.nav, combatants: () => [], fire: () => {}, footstep: () => {}, objectiveFor: () => new THREE.Vector3(), difficulty: 0,
-    }, this.teamMats[0]);
+    });
     this.legs.body.setEnabled(false);
     this.legs.makeLegsOnly();
     this.legs.root.visible = false;
@@ -770,6 +760,8 @@ export class Game {
     await step(0.86, 'Compiling shaders');
     await this.warmShaders((k) => this.ui.setLoading(0.86 + k * 0.13, 'Compiling shaders'));
 
+    // far soldiers as billboards (atlas rendered now that the camo textures exist)
+    this.impostors = new Impostors(r, this.scene, [WEAPON_BUILDERS.k416(this.wmats), WEAPON_BUILDERS.hval47(this.wmats)]);
     installErrorReport();
     this.gpuTimer = new GpuTimer(this.renderer);
     this.governor = new PerfGovernor(this.pipeline, this.gpuTimer);
@@ -841,7 +833,7 @@ export class Game {
     for (const team of [0, 1] as const) {
       ids[team].forEach((wid, i) => {
         const model = WEAPON_BUILDERS[wid](this.wmats);
-        const bot = new Bot(id++, NAMES[team][i], team, this.botAsset, model, wid, {
+        const bot = new Bot(id++, NAMES[team][i], team, { role: roleFor(WEAPONS[wid].cls, wid), seed: id * 37 + team * 11 }, model, wid, {
           physics: this.physics,
           nav: this.nav,
           combatants: () => this.match.players,
@@ -889,7 +881,9 @@ export class Game {
             for (const m of this.bots) if (m !== from && m.alive && m.team === from.team && m.position().distanceTo(from.position()) < 70 && !m.target) m.hear(pos);
           },
           difficulty: diff,
-        }, this.teamMats[team]);
+          night: () => this.env.night > 0.5,
+          animEvent: (b, ev, p) => this.botAnimEvent(b, ev, p),
+        });
         // soldiers are fine detail for the water reflection (layer 1: main + scope cameras and
         // the sun's shadow camera see it, the reflection camera does not)
         bot.root.traverse((o) => o.layers.set(1));
@@ -1034,6 +1028,7 @@ export class Game {
     this.winter = winter;
     this.env.winter = winter;
     this.terrain.winter = winter;
+    SoldierStyle.setWinter(winter);
     this.world.veg.grass.visible = !winter;
     const r = this.rng.next();
     let wx: 'clear' | 'overcast' | 'rain' | 'snow' = w === 'auto'
@@ -1091,6 +1086,9 @@ export class Game {
   }
 
   private respawnPlayer() {
+    // your own legs / killcam stand-in wear your side's uniform
+    this.legs?.setTeam(this.avatar.team);
+    this.ghost?.setTeam(this.avatar.team);
     const s = this.match.pickSpawn(this.avatar.team);
     this.player.teleport(s.pos, s.yaw);
     this.player.dead = false;
@@ -1138,6 +1136,8 @@ export class Game {
     this.gpuTimer.end();
     this.perf.frame(t1 - t0, performance.now() - t1);
     this.input.endFrame();
+    // background work: soldiers' nearer detail levels (a few ms a frame, mostly while in the menu)
+    Soldier.idleBuild(this.state === 'playing' ? 2 : 6);
     // frame-time governor: dynamic resolution (internal targets only) + last-resort effect drops
     const interval = this.lastFrameT ? now - this.lastFrameT : 0;
     this.lastFrameT = now;
@@ -1450,12 +1450,25 @@ export class Game {
   private shadowFrame = 0;
   private shadowT = 0;
   renderFrame(dt: number) {
+    Bot.nightView.night = this.env.night > 0.5;
+    Bot.nightView.nvg = !!this.nvg?.active;
     // world matrices once per frame (three otherwise walks the whole scene graph again inside
     // every render() call: scope, AO beauty + its two transparency passes, water reflection)
     this.scene.updateMatrixWorld();
-    // soldiers: shadows / armbands by distance (few state flips per second, not per frame)
+    // soldiers: detail level and shadows by distance; past 150 m a billboard instead of the mesh
     const cp = this.camera.position;
-    for (const b of this.bots) if (b.root.visible) b.visualLod(b.position().distanceTo(cp));
+    const imp = this.impostors;
+    imp?.begin();
+    const scoped = !!(this.weapons?.cur.def.scope && this.weapons.ads > 0.5);
+    for (const b of this.bots) {
+      if (!b.root.visible) continue;
+      const d = b.position().distanceTo(cp);
+      // (not through a magnifying scope: there a far soldier is big on screen)
+      const far = imp && d > 150 && !scoped && b.alive && !this.killcam && imp.add(b.position(), cp, b.yaw, b.team, b.moveSpeed > 1, b.soldier.anim.phase);
+      b.soldier.model.visible = !far;
+      if (!far) b.visualLod(d);
+    }
+    imp?.end(1 - this.env.night * 0.85);
     this.terrain.updateLod(cp);
     // sun shadows refresh at a fixed rate per preset (the light matrices only change together
     // with the map, so between refreshes the last map stays exact for everything static; only
@@ -1509,15 +1522,50 @@ export class Game {
     const n = this.bots.length;
     this.recorder.record(this.time, (a) => {
       for (let i = 0; i < n; i++) writeBot(this.bots[i], a, i * SNAP);
-      const o = n * SNAP, p = this.player.pos;
-      a[o] = p.x; a[o + 1] = p.y; a[o + 2] = p.z;
-      a[o + 3] = this.player.yaw; a[o + 4] = this.player.yaw; a[o + 5] = this.player.pitch;
-      a[o + 6] = Math.hypot(this.player.vel.x, this.player.vel.z);
-      a[o + 7] = this.avatar.alive ? 1 : 0;
-      a[o + 8] = this.player.stance !== 'stand' ? 1 : 0;
-      a[o + 9] = this.avatar.alive ? 0 : this.time - this.deathTime;
-      a[o + 10] = this.weapons.ads > 0.5 ? 1 : 0;
+      this.playerPose(a, n * SNAP);
     });
+  }
+
+  /**
+   * The local player's full pose state (same layout as Bot.replayState): what killcam replays,
+   * multiplayer peers and your own first-person legs animate from.
+   */
+  playerPose(a: { [i: number]: number }, o = 0) {
+    const pl = this.player;
+    const p = pl.pos;
+    a[o] = p.x; a[o + 1] = p.y; a[o + 2] = p.z;
+    a[o + 3] = pl.yaw; a[o + 4] = pl.yaw; a[o + 5] = pl.pitch;
+    a[o + 6] = Math.hypot(pl.vel.x, pl.vel.z);
+    a[o + 7] = this.avatar.alive ? 1 : 0;
+    a[o + 8] = pl.stance !== 'stand' ? 1 : 0;
+    a[o + 9] = this.avatar.alive ? 0 : this.time - this.deathTime;
+    a[o + 10] = this.weapons.ads > 0.3 || this.time - this.lastShotT < 2 ? 1 : 0;
+    a[o + 11] = pl.stance === 'prone' ? 2 : pl.stance === 'crouch' ? 1 : 0;
+    a[o + 12] = (pl.sprinting ? 1 : 0) | (pl.tactical ? 2 : 0) | (pl.sliding ? 4 : 0) | (pl.diving ? 8 : 0) | (pl.ladder ? 16 : 0) | (pl.mantle ? 32 : 0) | (!pl.grounded ? 64 : 0) | (this.nvg?.active ? 128 : 0);
+    a[o + 13] = clamp(this.peekLean / 0.4, -1, 1);
+    const act = this.vm.action;
+    let code = 0;
+    if (act) {
+      const ty = act.type;
+      code = ty.startsWith('reload') || ty === 'breakReload' || ty === 'karReload' || ty.startsWith('shell') ? 1
+        : ty.startsWith('lethal') || ty === 'throw' || ty === 'tactical' || ty.endsWith('Throw') ? 2
+        : ty === 'melee' ? 3 : ty.startsWith('knife') ? 4 : ty === 'draw' || ty === 'holster' ? 5 : ty === 'bolt' || ty === 'karCycle' || ty === 'pump' ? 6 : ty === 'claymore' || ty === 'trophy' ? 7 : 0;
+    }
+    a[o + 14] = code;
+    a[o + 15] = act ? act.t : 0;
+    a[o + 16] = pl.vel.x; a[o + 17] = pl.vel.z; a[o + 18] = pl.vel.y; a[o + 19] = 0;
+  }
+
+  /** third-person animation events: magazines dropped by soldiers reloading near you */
+  private magProtos = new Map<string, THREE.Object3D | null>();
+  private botAnimEvent(b: Bot, ev: string, p: THREE.Vector3) {
+    if (ev !== 'magOut' || p.distanceTo(this.camera.position) > 30 || b.def.id === 'db12' || b.def.cls === 'Shotgun') return;
+    const id = b.def.id;
+    if (!this.magProtos.has(id)) this.magProtos.set(id, WEAPON_BUILDERS[id as WeaponId](this.wmats).parts.mag ?? null);
+    const proto = this.magProtos.get(id);
+    if (!proto) return;
+    const q = b.weapon.root.getWorldQuaternion(new THREE.Quaternion());
+    this.fx.debris(proto, p, q, new THREE.Vector3(b.velocity.x * 0.5, -0.5, b.velocity.z * 0.5), new THREE.Vector3(Math.random() * 4 - 2, 0, Math.random() * 3), 'mag');
   }
 
   private startKillcam() {
@@ -1684,7 +1732,7 @@ export class Game {
       warm.add(WEAPON_BUILDERS[id](this.wmats).root); // dropped mags / loaders / bot guns
       vmWarm.add(WEAPON_BUILDERS[id](this.wmats).root); // every gun in first person
     }
-    warm.add(Pickups.model(), Killstreaks.heliModel());
+    warm.add(Pickups.model(), Killstreaks.heliModel(), ...Bot.gearWarmMeshes());
     // one of every effect, far under the map (lazily created decal / particle materials)
     {
       const P = new THREE.Vector3(0, -300, 0), up = new THREE.Vector3(0, 1, 0), fwd = new THREE.Vector3(0, 0, -1);
@@ -1750,6 +1798,7 @@ export class Game {
   /** background sound loading (resolves when every recording is decoded) */
   audioLoad: Promise<unknown> = Promise.resolve();
   gpuTimer!: GpuTimer;
+  impostors: Impostors | null = null;
   governor!: PerfGovernor;
   hw!: HardwareInfo;
   private nvgFrame(dt: number) {
@@ -2963,8 +3012,10 @@ export class Game {
     return p.sub(o).normalize().multiplyScalar(dist).add(o);
   }
 
+  private lastShotT = -99;
   private onPlayerShot(req: ShotRequest) {
     const d = req.def;
+    this.lastShotT = this.time;
     this.firedSinceSpawn = true;
     const muzzle = this.screenToWorld(req.muzzleScreen, 0.9);
     this.fx.muzzleWorld(muzzle, req.dirs[0], !!d.sound.suppressed, d.cls === 'Shotgun' ? 1.4 : 1);
@@ -2997,6 +3048,14 @@ export class Game {
       const occluded = dist > 4 && dist < 250 && !this.physics.lineOfSight(cam, muzzle);
       void key;
       this.gunshot(def, muzzle, dist, occluded);
+      // brass from soldiers firing close by (pump / bolt guns eject when cycled, not here)
+      const mode = def.modes[0];
+      if (dist < 24 && mode !== 'pump' && mode !== 'bolt' && def.id !== 'db12' && def.id !== 'rv357') {
+        const ej = (bot.weapon.sockets.eject ?? bot.weapon.sockets.muzzle).getWorldPosition(new THREE.Vector3());
+        const r = new THREE.Vector3(Math.cos(bot.aimYaw), 0, -Math.sin(bot.aimYaw));
+        const v = r.multiplyScalar(2 + Math.random()).add(new THREE.Vector3(0, 1.5 + Math.random(), 0)).add(bot.velocity.clone().setY(0));
+        this.fx.shell(ej, v, def.cls === 'Pistol' || def.cls === 'SMG' ? 'pistol' : def.cls === 'Sniper' || def.cls === 'Marksman' ? 'big' : def.cls === 'Shotgun' ? 'shotgun' : 'rifle');
+      }
     }
     // near-miss whiz & suppression on the player (bullets passing within 2.5 m with a clear line)
     if (bot.team !== this.avatar.team && this.avatar.alive) {
@@ -3814,7 +3873,11 @@ export class Game {
       if (Math.abs(d) < 1.2) yaw = pl.yaw + d * 0.8;
       else if (Math.abs(d) > 2.2) yaw = pl.yaw + (d - Math.sign(d) * Math.PI) * 0.6; // backpedal
     }
-    s[3] = yaw; s[4] = yaw; s[5] = 0; s[6] = hv; s[7] = 1; s[8] = 0; s[9] = 0; s[10] = 0;
+    this.playerPose(s);
+    s[0] = pl.pos.x + Math.sin(pl.yaw) * back;
+    s[2] = pl.pos.z + Math.cos(pl.yaw) * back;
+    s[3] = pl.yaw; s[4] = pl.yaw; s[5] = 0; s[14] = 0; s[13] = 0;
+    void yaw;
     this.legs.puppet(s, dt);
   }
 

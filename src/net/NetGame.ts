@@ -2,7 +2,7 @@ import * as THREE from 'three';
 import { Net, NetMsg, cleanCode } from './Net';
 import { NETF } from './NetFlags';
 import type { Combatant, HitPart } from '../game/Combatant';
-import { Bot } from '../ai/Bot';
+import { POSE_N, Bot } from '../ai/Bot';
 import { WEAPONS, WeaponDef } from '../weapons/WeaponDefs';
 
 /**
@@ -20,9 +20,32 @@ import { WEAPONS, WeaponDef } from '../weapons/WeaponDefs';
  */
 const RATE = 1 / 20;
 const VER = 1;
+const HIDDEN = [0, -100, 0, ...new Array(17).fill(0)];
 const SLOTS = 24;
 type Slot = { slot: number; name: string; team: 0 | 1; human: boolean; disabled: boolean; peer?: string };
 const r2 = (v: number) => Math.round(v * 100) / 100;
+/**
+ * Snapshot poses travel as quantised 16-bit integers (base64 inside the message) instead of JSON
+ * number text: 24 slots × 20 values in ~1.3 KB instead of ~2.4 KB.
+ */
+const QS = [50, 50, 50, 5000, 5000, 5000, 100, 1, 1, 100, 1, 1, 1, 1000, 1, 1000, 100, 100, 100, 1];
+function packPoses(v: number[]) {
+  const q = new Int16Array(v.length);
+  for (let i = 0; i < v.length; i++) q[i] = Math.max(-32768, Math.min(32767, Math.round(v[i] * QS[i % POSE_N])));
+  const b = new Uint8Array(q.buffer);
+  let str = '';
+  for (let i = 0; i < b.length; i++) str += String.fromCharCode(b[i]);
+  return btoa(str);
+}
+function unpackPoses(s: string) {
+  const bin = atob(s);
+  const b = new Uint8Array(bin.length);
+  for (let i = 0; i < b.length; i++) b[i] = bin.charCodeAt(i);
+  const q = new Int16Array(b.buffer);
+  const out = new Array<number>(q.length);
+  for (let i = 0; i < q.length; i++) out[i] = q[i] / QS[i % POSE_N];
+  return out;
+}
 
 export class NetGame {
   net = new Net();
@@ -341,7 +364,7 @@ export class NetGame {
     for (const s of others) {
       const b = bots.find((x) => x.id === s.slot);
       if (!b) continue;
-      if (b.team !== s.team) b.setTeam(s.team, g.teamMats[s.team]);
+      if (b.team !== s.team) b.setTeam(s.team);
       b.name = s.name;
       b.netHuman = s.human;
       b.isPlayer = s.human;
@@ -637,12 +660,12 @@ export class NetGame {
       else if (this.poses.has(slot)) p = this.poses.get(slot);
       else if (c instanceof Bot) {
         const r = c.replayState();
-        p = c.netDisabled || (!c.alive && (c as any).deathT > 6) ? [0, -100, 0, 0, 0, 0, 0, 0, 0, 0, 0] : r;
+        p = c.netDisabled || (!c.alive && (c as any).deathT > 6) ? HIDDEN : r;
       }
-      for (let i = 0; i < 11; i++) s.push(r2(p ? p[i] : 0));
+      for (let i = 0; i < POSE_N; i++) s.push(r2(p ? p[i] : 0));
     }
     const m: any = {
-      t: 'snap', s, sc: g.match.scores, tl: r2(g.match.timeLeft),
+      t: 'snap', sb: packPoses(s), sc: g.match.scores, tl: r2(g.match.timeLeft),
       fl: g.dom.flags.map((f: any) => [f.owner, f.capTeam, r2(f.progress), f.contested ? 1 : 0]),
       uav: g.streaks.uavUntil.map((u: number) => r2(u - g.time)),
     };
@@ -661,18 +684,19 @@ export class NetGame {
   }
 
   private myPose() {
-    const g = this.g, p = g.player, a = g.avatar;
-    return [r2(p.pos.x), r2(p.pos.y), r2(p.pos.z), r2(p.yaw), r2(p.yaw), r2(p.pitch), r2(p.horizSpeed()), a.alive ? 1 : 0, p.stance !== 'stand' ? 1 : 0, 0, 0];
+    const a = new Array(POSE_N).fill(0);
+    this.g.playerPose(a);
+    return a.map(r2);
   }
 
   private applySnap(m: any) {
     const g = this.g;
-    const s = m.s as number[];
+    const s = (m.sb ? unpackPoses(m.sb) : m.s) as number[];
     for (let slot = 0; slot < SLOTS; slot++) {
       if (slot === this.mySlot) continue;
       const b = this.bySlot(slot);
       if (!(b instanceof Bot) || b.netDisabled) continue;
-      const st = s.slice(slot * 11, slot * 11 + 11);
+      const st = s.slice(slot * POSE_N, slot * POSE_N + POSE_N);
       if (st[1] < -50) {
         if (b.alive) b.netHide();
         continue;
@@ -855,7 +879,7 @@ export class NetGame {
           if (!other) return reply('No free slot on the other side.');
           const bot = this.bySlot(other.slot) as Bot;
           other.team = me.team;
-          bot.setTeam(me.team, g.teamMats[me.team]);
+          bot.setTeam(me.team);
           me.team = want;
           g.avatar.team = want;
           g.dom.myTeam = want;

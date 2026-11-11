@@ -1,7 +1,9 @@
 import * as THREE from 'three';
 import { NETF } from '../net/NetFlags';
 import { bakeFlat, bakeProxy } from '../render/Batch';
-import { clone as cloneSkinned } from 'three/examples/jsm/utils/SkeletonUtils.js';
+import { Soldier } from '../character/Soldier';
+import { roleFor, SoldierLook } from '../character/SoldierMesh';
+import { AnimState, ActionKind, newAnimState, ReloadStyle } from '../character/SoldierAnim';
 import { CharacterBody } from '../player/CharacterBody';
 import { Physics } from '../core/Physics';
 import { NavGraph } from './NavGraph';
@@ -11,9 +13,21 @@ import { clamp, damp, dampAngle, lerp, RNG, wrapAngle, easeOutCubic, Spring } fr
 import { Combatant, HitPart } from '../game/Combatant';
 import { Ragdoll } from './Ragdoll';
 
-export interface BotAsset {
-  scene: THREE.Object3D;
-  clips: THREE.AnimationClip[];
+/** replicated / recorded pose: see Bot.replayState */
+export const POSE_N = 20;
+const ACTIONS: ActionKind[] = ['none', 'reload', 'throw', 'melee', 'knife', 'switch', 'bolt', 'plant'];
+export function actionCode(a: ActionKind) {
+  return Math.max(0, ACTIONS.indexOf(a));
+}
+export function reloadStyleFor(def: WeaponDef): ReloadStyle {
+  const id = def.id;
+  if (id === 'db12') return 'break';
+  if (id === 'pump12' || id === 'as20') return 'shell';
+  if (id === 'skv338' || id === 'kr98') return 'bolt';
+  if (id === 'lmg') return 'box';
+  if (id === 'rv357') return 'rev';
+  if (def.cls === 'Pistol') return 'pistol';
+  return 'mag';
 }
 
 export interface BotWorld {
@@ -33,6 +47,10 @@ export interface BotWorld {
   moveInterval?(bot: Bot): number;
   /** seconds between animation/IK updates for this bot (0 = every frame) */
   animInterval?(bot: Bot): number;
+  /** animation events with a world position (third-person mag drops) */
+  animEvent?(bot: Bot, ev: string, pos: THREE.Vector3): void;
+  /** soldiers wear their goggles down */
+  night?(): boolean;
   /** how far soldiers can see right now (fog / snowstorm shrink it) */
   viewDist?(): number;
   callout?: (from: Bot, enemyPos: THREE.Vector3) => void;
@@ -81,7 +99,7 @@ export class Bot implements Combatant {
   /** disabled slot (bot count reduced): never spawns */
   netDisabled = false;
   private netTarget: Float32Array | null = null;
-  private netCur = new Float32Array(11);
+  private netCur = new Float32Array(POSE_N);
   private netDeadT = 0;
   /** the bot's own name, restored when a human leaves the slot */
   botName = '';
@@ -92,8 +110,11 @@ export class Bot implements Combatant {
   body: CharacterBody;
   root = new THREE.Group();
   model: THREE.Object3D;
-  mixer: THREE.AnimationMixer;
-  actions: Record<string, THREE.AnimationAction> = {};
+  soldier: Soldier;
+  /** the animation inputs, rebuilt every frame from what the bot is doing */
+  anim: AnimState = newAnimState();
+  private throwT = -1;
+  private reloadDur = 1;
   weapon: WeaponModel;
   def: WeaponDef;
   mag = 30;
@@ -133,7 +154,7 @@ export class Bot implements Combatant {
   lastAttacker: Combatant | null = null;
   heardAt: THREE.Vector3 | null = null;
   private rng: RNG;
-  private moveSpeed = 0;
+  moveSpeed = 0;
   private wantCrouchT = 0;
   respawnT = 0;
   goalSet = 0;
@@ -144,50 +165,29 @@ export class Bot implements Combatant {
     return this.goal;
   }
   private hitbox = { head: new THREE.Vector3(), neck: new THREE.Vector3(), hips: new THREE.Vector3(), lf: new THREE.Vector3(), rf: new THREE.Vector3(), lh: new THREE.Vector3(), rh: new THREE.Vector3(), ls: new THREE.Vector3(), rs: new THREE.Vector3() };
-  armband: THREE.Mesh[] = [];
   gunMesh: THREE.Mesh | null = null;
   /** low-poly stand-in drawn beyond ~12 m */
   gunProxy: THREE.Mesh | null = null;
   private gunNear = true;
   visibleToPlayer = false;
 
-  constructor(public id: number, public name: string, public team: 0 | 1, asset: BotAsset, weaponModel: WeaponModel, defId: keyof typeof WEAPONS, private w: BotWorld, teamMat: THREE.Material) {
+  constructor(public id: number, public name: string, public team: 0 | 1, look: SoldierLook | null, weaponModel: WeaponModel, defId: keyof typeof WEAPONS, private w: BotWorld) {
     this.rng = new RNG(id * 7919 + 13);
     this.tacKind = (['flash', 'stun', 'smoke'] as const)[id % 3];
     this.def = WEAPONS[defId];
     this.body = new CharacterBody(w.physics, new THREE.Vector3(0, -100, 0));
-    this.model = cloneSkinned(asset.scene);
-    this.model.traverse((o) => {
-      const m = o as THREE.SkinnedMesh;
-      if (m.isMesh) {
-        m.castShadow = true;
-        m.receiveShadow = true;
-        // cullable with a fixed, generous sphere (bind pose ×1.8: covers crouch, aim, ragdoll
-        // flail) instead of never culled — 24 soldiers behind you were still two draws each
-        if ((m as THREE.SkinnedMesh).isSkinnedMesh) {
-          m.geometry.computeBoundingSphere();
-          m.boundingSphere = m.geometry.boundingSphere!.clone();
-          m.boundingSphere.radius *= 1.8;
-          m.frustumCulled = true;
-        } else m.frustumCulled = false;
-        if (m.name.includes('vanguard_Mesh')) m.material = teamMat;
-      }
-      if ((o as THREE.Bone).isBone) this.bones[o.name.replace('mixamorig', '').replace(':', '')] = o as THREE.Bone;
-    });
-    this.root.add(this.model);
-    this.mixer = new THREE.AnimationMixer(this.model);
-    for (const c of asset.clips) {
-      const a = this.mixer.clipAction(c);
-      a.play();
-      a.setEffectiveWeight(c.name === 'Idle' ? 1 : 0);
-      this.actions[c.name] = a;
-    }
     this.weapon = weaponModel;
     this.weapon.root.scale.setScalar(1);
-    this.root.add(this.weapon.root);
     this.weapon.root.traverse((o) => {
       if ((o as THREE.Mesh).isMesh) o.castShadow = true;
     });
+    // our own soldier: skeleton, one skinned mesh (role kit + per-soldier variety), team camo
+    this.soldier = new Soldier(look ?? { role: roleFor(this.def.cls, this.def.id), seed: id * 31 + 7 }, team, weaponModel);
+    this.model = this.soldier.model;
+    this.bones = this.soldier.bones;
+    this.root.add(this.model);
+    this.anim.reloadStyle = reloadStyleFor(this.def);
+    this.anim.pistol = this.def.cls === 'Pistol';
     // third-person guns never animate their parts: bake ~25 meshes (5-7 materials, lens shaders)
     // into ONE vertex-coloured mesh — one draw + one shadow draw per bot gun
     // distance stand-in (~200 triangles instead of 20-40k) built from the same parts
@@ -199,18 +199,6 @@ export class Bot implements Combatant {
       this.gunProxy.visible = false;
       this.gunProxy.castShadow = false;
       this.weapon.root.add(this.gunProxy);
-    }
-    // team armbands on both upper arms
-    const bandGeo = new THREE.CylinderGeometry(6.2, 6.2, 5, 10, 1, true);
-    const bandMat = new THREE.MeshStandardMaterial({ color: team === 0 ? 0x2a6ad8 : 0xc8281c, emissive: team === 0 ? 0x0a1a40 : 0x400806, roughness: 0.6, side: THREE.DoubleSide });
-    for (const bn of ['LeftArm', 'RightArm']) {
-      const b = this.bones[bn];
-      if (!b) continue;
-      const m = new THREE.Mesh(bandGeo, bandMat);
-      m.position.y = 12;
-      m.castShadow = false;
-      b.add(m);
-      this.armband.push(m);
     }
     this.mag = this.def.mag;
     this.frags = 1;
@@ -226,7 +214,7 @@ export class Bot implements Combatant {
   }
 
   private visLod = -1;
-  /** Render LOD by camera distance: shadows only near, armbands only where they can be read. */
+  /** Render LOD by camera distance: mesh detail level, shadows only near, gun stand-in far. */
   visualLod(d: number) {
     const near = d < (this.gunNear ? 13 : 11);
     if (near !== this.gunNear && this.gunMesh && this.gunProxy) {
@@ -234,15 +222,14 @@ export class Bot implements Combatant {
       this.gunMesh.visible = near;
       this.gunProxy.visible = !near;
     }
-    const lv = d < 32 ? 0 : d < 60 ? 1 : 2;
-    if (lv === this.visLod) return;
+    // (hysteresis so a soldier on a boundary doesn't flip every frame)
+    const cur = this.visLod;
+    const lv = d < (cur === 0 ? 17 : 14) ? 0 : d < (cur === 1 ? 46 : 40) ? 1 : 2;
+    if (lv === cur) return;
     this.visLod = lv;
-    const shadow = lv === 0;
-    this.model.traverse((o) => {
-      if ((o as THREE.SkinnedMesh).isSkinnedMesh) (o as THREE.Mesh).castShadow = shadow;
-    });
+    this.soldier.setLod(this.legsOnly ? 0 : lv);
+    this.soldier.mesh.castShadow = lv < 2 || this.legsOnly;
     if (this.gunMesh) this.gunMesh.castShadow = d < 22;
-    for (const a of this.armband) a.visible = lv < 2 && !this.legsOnly;
   }
   eye(out = new THREE.Vector3()) {
     return out.copy(this.body.pos).setY(this.body.pos.y + (this.crouch ? 1.05 : 1.58));
@@ -530,13 +517,9 @@ export class Bot implements Combatant {
       this.aimPitch = 0.1;
       this.vel.set(0, 0, 0);
       this.moveSpeed = 0;
-      this.actions.Run?.setEffectiveWeight(0);
-      this.actions.Walk?.setEffectiveWeight(0);
-      this.actions.Idle?.setEffectiveWeight(1);
-      this.mixer.update(dt * 0.4);
       this.root.position.copy(this.body.pos);
       this.root.rotation.y = this.yaw + Math.PI;
-      this.poseUpperBody();
+      this.poseSoldier(dt * 0.4);
       this.updateHitbox();
       void dy;
       return;
@@ -633,11 +616,13 @@ export class Bot implements Combatant {
       this.nadeCd = 6 + this.rng.range(0, 8);
       if (d > 9 && d < 32 && this.rng.chance(0.55)) {
         this.frags--;
+        this.throwT = 0;
         this.w.voice?.(this, 'frag');
         this.w.throwGrenade?.(this, this.lastSeen.clone());
       } else if (this.tacticals > 0 && d > 7 && d < 26 && this.tacKind !== 'smoke' && this.rng.chance(0.5)) {
         // flash / stun the room before pushing it
         this.tacticals--;
+        this.throwT = 0;
         this.w.voice?.(this, this.tacKind);
         this.w.throwTactical?.(this, this.lastSeen.clone(), this.tacKind);
       }
@@ -746,23 +731,16 @@ export class Bot implements Combatant {
     else this.root.position.copy(this.body.pos);
     this.root.rotation.y = this.yaw + Math.PI; // soldier model faces +Z
     const sp = this.moveSpeed;
-    const wRun = clamp((sp - 3.2) / 2.0, 0, 1);
-    const wWalk = clamp(sp / 2.0, 0, 1) * (1 - wRun);
-    const wIdle = 1 - Math.max(wRun, wWalk);
-    this.actions.Run?.setEffectiveWeight(wRun);
-    this.actions.Walk?.setEffectiveWeight(wWalk);
-    this.actions.Idle?.setEffectiveWeight(wIdle);
-    if (this.actions.Run) this.actions.Run.timeScale = clamp(sp / 5.2, 0.7, 1.3);
-    if (this.actions.Walk) this.actions.Walk.timeScale = clamp(sp / 1.6, 0.6, 1.6);
+    if (this.throwT >= 0) {
+      this.throwT += dt / 0.9;
+      if (this.throwT >= 1) this.throwT = -1;
+    }
     // animation LOD: full rate near/on screen, reduced for far or off-screen soldiers
     this.animAcc += dt;
     const lod = this.w.animInterval?.(this) ?? 0;
     if (this.animAcc >= lod) {
-      this.mixer.update(this.animAcc);
+      this.poseSoldier(this.animAcc);
       this.animAcc = 0;
-      if (this.crouch) this.model.position.y = damp(this.model.position.y, -0.45, 10, dt);
-      else this.model.position.y = damp(this.model.position.y, 0, 10, dt);
-      this.poseUpperBody();
       this.updateHitbox();
     }
     // footsteps
@@ -793,7 +771,7 @@ export class Bot implements Combatant {
 
   private shoot(spreadDeg: number, dist: number) {
     if (this.mag <= 0) {
-      this.reloadT = this.def.reload * 1.1;
+      this.reloadT = this.reloadDur = this.def.reload * 1.1;
       return;
     }
     this.mag--;
@@ -816,63 +794,160 @@ export class Bot implements Combatant {
       dd.addScaledVector(right, Math.cos(a) * r).addScaledVector(up, Math.sin(a) * r).normalize();
       this.w.fire(this, eye, dd, this.def, muzzle);
     }
+    this.soldier.anim.fire(this.def.cls === 'Sniper' || this.def.cls === 'Shotgun' ? 1.6 : this.def.cls === 'Pistol' ? 0.6 : 1);
     if (this.mag <= 0) {
-      this.reloadT = this.def.reload * 1.15;
+      this.reloadT = this.reloadDur = this.def.reload * 1.15;
       this.w.voice?.(this, 'reload');
     }
     void dist;
   }
 
-  /** Aim the spine, place the weapon in front of the chest and IK both arms onto it. */
-  private poseUpperBody() {
-    const b = this.bones;
-    this.model.updateMatrixWorld(true);
-    const pitch = this.aimPitch;
-    const yawRel = wrapAngle(this.aimYaw - this.yaw);
-    const right = new THREE.Vector3(Math.cos(this.aimYaw), 0, -Math.sin(this.aimYaw));
-    for (const n of ['Spine', 'Spine1', 'Spine2']) {
-      const bone = b[n];
-      if (!bone) continue;
-      rotateBoneWorld(bone, new THREE.Vector3(0, 1, 0), yawRel / 3);
-      rotateBoneWorld(bone, right, -pitch / 3);
+  private flinchState = { axis: new THREE.Vector3(1, 0, 0), body: 0, head: 0 };
+  /** Fill the animation inputs from what the bot is doing and pose the soldier. */
+  private poseSoldier(dt: number) {
+    const a = this.anim;
+    a.vel.copy(this.vel);
+    a.vel.y = 0;
+    a.yaw = this.yaw;
+    a.aimYaw = this.aimYaw;
+    a.aimPitch = this.aimPitch;
+    a.stance = this.crouch ? 1 : 0;
+    a.sprint = this.moveSpeed > 5.3 && this.state !== 'engage';
+    a.tactical = false;
+    a.slide = a.dive = a.ladder = false;
+    a.mantle = -1;
+    a.air = !this.body.grounded && this.vel.y > 1;
+    a.lean = 0;
+    a.ready = this.state === 'engage' || this.state === 'search' || (this.target !== null && this.lastSeenT < 3);
+    a.calm = this.state === 'roam' && !this.target;
+    if (this.reloadT > 0) {
+      a.action = 'reload';
+      a.actionT = THREE.MathUtils.clamp(1 - this.reloadT / this.reloadDur, 0, 1);
+    } else if (this.throwT >= 0) {
+      a.action = 'throw';
+      a.actionT = this.throwT;
+    } else {
+      a.action = 'none';
+      a.actionT = 0;
     }
-    // keep chest upright relative to running lean (only the spine subtree moved: arms, head and
-    // the weapon hang off it, the legs did not change)
-    (b.Spine ?? this.model).updateMatrixWorld(true);
-    const chest = new THREE.Vector3();
-    (b.Spine2 ?? b.Spine).getWorldPosition(chest);
-    const aim = this.lookDir();
-    const up = new THREE.Vector3().crossVectors(right, aim).normalize();
-    const g = this.weapon.root;
-    const gp = chest.clone().addScaledVector(aim, 0.3).addScaledVector(right, 0.13).addScaledVector(up, 0.03);
-    g.position.copy(gp).sub(this.root.position);
-    g.position.applyAxisAngle(new THREE.Vector3(0, 1, 0), -this.root.rotation.y);
-    g.quaternion.setFromRotationMatrix(new THREE.Matrix4().makeBasis(right, up, aim.clone().negate()));
-    g.quaternion.premultiply(new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), -this.root.rotation.y));
-    g.updateMatrixWorld(true);
-    const rt = new THREE.Vector3(), lt = new THREE.Vector3();
-    this.weapon.sockets.rightHand.getWorldPosition(rt);
-    this.weapon.sockets.leftHand.getWorldPosition(lt);
-    if (b.RightArm && b.RightForeArm && b.RightHand) solveTwoBone(b.RightArm, b.RightForeArm, b.RightHand, rt, right.clone().multiplyScalar(0.7).add(new THREE.Vector3(0, -1, 0)));
-    if (b.LeftArm && b.LeftForeArm && b.LeftHand) solveTwoBone(b.LeftArm, b.LeftForeArm, b.LeftHand, lt, right.clone().multiplyScalar(-0.8).add(new THREE.Vector3(0, -1, 0)));
-    if (b.Head) rotateBoneWorld(b.Head, right, -pitch * 0.3);
-    // hit reactions on top of the aim pose
+    this.poseFromAnim(dt);
+  }
+
+  // ---------------------------------------------------------------- night gear
+  /** set by the game every frame: is it dark, is the player wearing goggles */
+  static nightView = { night: false, nvg: false };
+  private gearLight: THREE.Object3D | null = null;
+  private static beamGeo: THREE.BufferGeometry | null = null;
+  private static beamMat: THREE.ShaderMaterial | null = null;
+  private static laserMat: THREE.MeshBasicMaterial | null = null;
+  private static glareMat: THREE.SpriteMaterial | null = null;
+  /** half the soldiers run a white weapon light, the rest an IR laser only goggles can see */
+  private get irGear() {
+    return this.id % 2 === 0;
+  }
+  private updateGearLight() {
+    const nv = Bot.nightView;
+    const on = nv.night && this.alive && this.root.visible && !this.legsOnly && this.visLod < 2 && (this.irGear ? nv.nvg : true);
+    if (!on) {
+      if (this.gearLight) this.gearLight.visible = false;
+      return;
+    }
+    if (!this.gearLight) {
+      const g = new THREE.Group();
+      g.name = 'gearLight';
+      Bot.ensureGearMats();
+      if (this.irGear) {
+        const beam = new THREE.Mesh(new THREE.CylinderGeometry(0.004, 0.004, 45, 4, 1, true).rotateX(Math.PI / 2).translate(0, 0, -22.5), Bot.laserMat!);
+        g.add(beam);
+      } else {
+        g.add(new THREE.Mesh(Bot.beamGeo!, Bot.beamMat!));
+        const glare = new THREE.Sprite(Bot.glareMat!);
+        glare.scale.setScalar(0.16);
+        glare.position.z = -0.02;
+        g.add(glare);
+      }
+      g.traverse((o) => {
+        o.layers.set(1);
+        (o as THREE.Mesh).castShadow = false;
+        o.renderOrder = 30;
+      });
+      (this.weapon.sockets.muzzle ?? this.weapon.root).add(g);
+      this.gearLight = g;
+    }
+    this.gearLight.visible = true;
+  }
+
+  /** the night-gear materials (also used by the shader warm-up) */
+  static ensureGearMats() {
+    Bot.laserMat ??= new THREE.MeshBasicMaterial({ color: new THREE.Color(0.6, 2.4, 0.9), transparent: true, opacity: 0.55, blending: THREE.AdditiveBlending, depthWrite: false, fog: false });
+    {
+      {
+        if (!Bot.beamGeo) {
+          // open cone from the muzzle: soft along its length and towards its rim
+          Bot.beamGeo = new THREE.ConeGeometry(1.5, 11, 18, 1, true).rotateX(-Math.PI / 2).translate(0, 0, -5.5);
+          Bot.beamMat = new THREE.ShaderMaterial({
+            uniforms: {},
+            vertexShader: `varying float vT; varying vec3 vN; varying vec3 vV;
+              void main(){ vT = clamp(-position.z / 11.0, 0.0, 1.0); vec4 mv = modelViewMatrix * vec4(position, 1.0);
+                vN = normalize(normalMatrix * normal); vV = normalize(-mv.xyz); gl_Position = projectionMatrix * mv; }`,
+            fragmentShader: `varying float vT; varying vec3 vN; varying vec3 vV;
+              void main(){ float edge = pow(abs(dot(vN, vV)), 2.0); float a = pow(1.0 - vT, 3.0) * edge * 0.06;
+                gl_FragColor = vec4(vec3(1.0, 0.96, 0.88) * a, a); }`,
+            transparent: true, blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide,
+          });
+          const c = document.createElement('canvas');
+          c.width = c.height = 64;
+          const x = c.getContext('2d')!;
+          const gr = x.createRadialGradient(32, 32, 0, 32, 32, 32);
+          gr.addColorStop(0, 'rgba(255,255,255,1)');
+          gr.addColorStop(0.12, 'rgba(255,248,232,0.5)');
+          gr.addColorStop(0.4, 'rgba(255,240,220,0.08)');
+          gr.addColorStop(1, 'rgba(255,240,220,0)');
+          x.fillStyle = gr;
+          x.fillRect(0, 0, 64, 64);
+          Bot.glareMat = new THREE.SpriteMaterial({ map: new THREE.CanvasTexture(c), color: new THREE.Color(2.2, 2.1, 1.9), blending: THREE.AdditiveBlending, depthWrite: false, transparent: true });
+        }
+      }
+    }
+  }
+  static gearWarmMeshes() {
+    Bot.ensureGearMats();
+    return [new THREE.Mesh(Bot.beamGeo!, Bot.beamMat!), new THREE.Mesh(new THREE.BoxGeometry(0.1, 0.1, 0.1), Bot.laserMat!), new THREE.Sprite(Bot.glareMat!)];
+  }
+
+  /** pose the soldier from `this.anim` (bots, network puppets and killcam replays share this) */
+  private poseFromAnim(dt: number) {
+    this.updateGearLight();
     this.flinch.update(1 / 60);
     this.headSnap.update(1 / 60);
-    if (Math.abs(this.flinch.value) > 1e-3) {
-      if (b.Spine1) rotateBoneWorld(b.Spine1, this.flinchAxis, this.flinch.value * 0.12);
-      if (b.Spine2) rotateBoneWorld(b.Spine2, this.flinchAxis, this.flinch.value * 0.16);
+    const f = this.flinchState;
+    f.axis.copy(this.flinchAxis);
+    f.body = this.flinch.value;
+    f.head = this.headSnap.value;
+    this.soldier.setNVG(!!this.w.night?.());
+    this.soldier.pose(this.anim, dt, this.root, f, this.legsOnly);
+    const ev = this.soldier.takeEvents();
+    if (ev && this.w.animEvent) {
+      const p = (this.weapon.sockets.magWell ?? this.weapon.root).getWorldPosition(new THREE.Vector3());
+      for (const e of ev) this.w.animEvent(this, e, p);
     }
-    if (b.Head && Math.abs(this.headSnap.value) > 1e-3) rotateBoneWorld(b.Head, this.flinchAxis, this.headSnap.value * 0.08);
   }
 
   // ---------------------------------------------------------------- killcam replay
-  private rs = new Float32Array(11);
-  /** [x, y, z, yaw, aimYaw, aimPitch, speed, alive, crouch, deathT, engaging] */
+  private rs = new Float32Array(POSE_N);
+  /**
+   * [x, y, z, yaw, aimYaw, aimPitch, speed, alive, crouch, deathT, ready,
+   *  stance, flags (1 sprint 2 tac 4 slide 8 dive 16 ladder 32 mantle 64 air 128 nvg), lean,
+   *  action, actionT, vx, vz, vy, 0]
+   */
   replayState() {
-    const r = this.rs, p = this.body.pos;
+    const r = this.rs, p = this.body.pos, a = this.anim;
     r[0] = p.x; r[1] = p.y; r[2] = p.z; r[3] = this.yaw; r[4] = this.aimYaw; r[5] = this.aimPitch;
-    r[6] = this.moveSpeed; r[7] = this.alive ? 1 : 0; r[8] = this.crouch ? 1 : 0; r[9] = this.deathT; r[10] = this.state === 'engage' ? 1 : 0;
+    r[6] = this.moveSpeed; r[7] = this.alive ? 1 : 0; r[8] = this.crouch ? 1 : 0; r[9] = this.deathT; r[10] = a.ready ? 1 : 0;
+    r[11] = a.stance;
+    r[12] = (a.sprint ? 1 : 0) | (a.tactical ? 2 : 0) | (a.slide ? 4 : 0) | (a.dive ? 8 : 0) | (a.ladder ? 16 : 0) | (a.mantle >= 0 ? 32 : 0) | (a.air ? 64 : 0) | (this.w.night?.() ? 128 : 0);
+    r[13] = a.lean; r[14] = actionCode(a.action); r[15] = a.actionT;
+    r[16] = this.vel.x; r[17] = this.vel.z; r[18] = this.vel.y; r[19] = 0;
     return r;
   }
   /** Visual-only state touched by puppet(); saved before a replay and restored after. */
@@ -943,16 +1018,14 @@ export class Bot implements Combatant {
   legsOnly = false;
   makeLegsOnly() {
     this.legsOnly = true;
-    for (const n of ['Spine', 'Spine1', 'Spine2', 'Neck', 'Head']) this.bones[n]?.scale.setScalar(0.0001);
+    for (const n of ['Spine1', 'Spine2', 'Neck', 'Head']) this.bones[n]?.scale.setScalar(0.0001);
     this.weapon.root.visible = false;
-    for (const a of this.armband) a.visible = false;
-    this.model.traverse((o) => {
-      if ((o as THREE.Mesh).isMesh) (o as THREE.Mesh).castShadow = true;
-    });
+    this.soldier.setLod(0);
+    this.soldier.mesh.castShadow = true;
   }
 
-  /** Pose the model from a recorded state (no AI, no physics). */
-  puppet(s: Float32Array, dt: number) {
+  /** Pose the model from a recorded / replicated state (no AI, no physics). */
+  puppet(s: ArrayLike<number>, dt: number) {
     const alive = s[7] > 0.5;
     this.root.position.set(s[0], s[1], s[2]);
     this.root.visible = s[1] > -50 && (alive || s[9] < 6);
@@ -973,31 +1046,35 @@ export class Bot implements Combatant {
       return;
     }
     this.model.quaternion.identity();
+    this.model.position.set(0, 0, 0);
     this.weapon.root.visible = !this.legsOnly;
-    const sp = this.moveSpeed;
-    const wRun = clamp((sp - 3.2) / 2.0, 0, 1);
-    const wWalk = clamp(sp / 2.0, 0, 1) * (1 - wRun);
-    this.actions.Run?.setEffectiveWeight(wRun);
-    this.actions.Walk?.setEffectiveWeight(wWalk);
-    this.actions.Idle?.setEffectiveWeight(1 - Math.max(wRun, wWalk));
-    this.mixer.update(dt);
-    this.model.position.y = this.crouch ? -0.45 : 0;
+    const a = this.anim, fl = s[12] | 0;
+    if (s.length >= POSE_N) {
+      a.vel.set(s[16], 0, s[17]);
+      a.stance = s[11];
+      a.sprint = !!(fl & 1); a.tactical = !!(fl & 2); a.slide = !!(fl & 4); a.dive = !!(fl & 8); a.ladder = !!(fl & 16);
+      a.mantle = fl & 32 ? 0.5 : -1; a.air = !!(fl & 64);
+      a.vel.y = s[18];
+      a.lean = s[13];
+      a.action = ACTIONS[s[14] | 0] ?? 'none';
+      a.actionT = s[15];
+    } else {
+      // older 11-value recordings: velocity from speed along the facing
+      a.vel.set(-Math.sin(this.yaw) * s[6], 0, -Math.cos(this.yaw) * s[6]);
+      a.stance = this.crouch ? 1 : 0;
+      a.action = 'none';
+    }
+    a.yaw = this.yaw; a.aimYaw = this.aimYaw; a.aimPitch = this.aimPitch;
+    a.ready = s[10] > 0.5;
+    a.calm = !a.ready;
     this.root.updateMatrixWorld(true);
-    if (!this.legsOnly) this.poseUpperBody();
+    this.poseFromAnim(dt);
   }
 
-  /** move this soldier to the other side (network roster changes): uniform + armbands */
-  setTeam(t: 0 | 1, uniform: THREE.Material) {
+  /** move this soldier to the other side (network roster changes): camo, gear colours, armbands */
+  setTeam(t: 0 | 1) {
     this.team = t;
-    this.model.traverse((o) => {
-      const m = o as THREE.Mesh;
-      if (m.isMesh && m.name.includes('vanguard_Mesh')) m.material = uniform;
-    });
-    const band = this.armband[0]?.material as THREE.MeshStandardMaterial | undefined;
-    if (band) {
-      band.color.set(t === 0 ? 0x2a6ad8 : 0xc8281c);
-      band.emissive.set(t === 0 ? 0x0a1a40 : 0x400806);
-    }
+    this.soldier.setTeam(t);
   }
   /** hide until the owner's first state arrives */
   netHide() {
@@ -1016,7 +1093,7 @@ export class Bot implements Combatant {
   /** latest replicated state [x, y, z, yaw, aimYaw, aimPitch, speed, alive, crouch, deathT, engaging] */
   netState(s: ArrayLike<number>) {
     if (!this.netTarget) {
-      this.netTarget = new Float32Array(11);
+      this.netTarget = new Float32Array(POSE_N);
       this.netTarget.set(s as ArrayLike<number>);
       this.netCur.set(this.netTarget);
     } else this.netTarget.set(s as ArrayLike<number>);
@@ -1070,11 +1147,11 @@ export class Bot implements Combatant {
     const c = this.netCur;
     const k = 1 - Math.exp(-dt * 14);
     const far = Math.hypot(s[0] - c[0], s[2] - c[2]) > 6;
-    for (const i of [0, 1, 2, 5, 6, 8]) c[i] = far ? s[i] : c[i] + (s[i] - c[i]) * k;
+    for (const i of SMOOTH_I) c[i] = far ? s[i] : c[i] + (s[i] - c[i]) * k;
     for (const i of [3, 4]) c[i] = c[i] + wrapAngle(s[i] - c[i]) * (far ? 1 : k);
     c[7] = 1;
     c[9] = 0;
-    c[10] = s[10];
+    for (const i of COPY_I) c[i] = s[i];
     this.body.teleport(new THREE.Vector3(c[0], c[1], c[2]));
     this.vel.set((s[0] - c[0]) * 10, 0, (s[2] - c[2]) * 10);
     this.puppet(c, dt);
@@ -1104,7 +1181,6 @@ export class Bot implements Combatant {
       // knees buckle first on a crumple
       const sag = crumple ? clamp(this.deathT / 0.3, 0, 1) * (1 - raw) * 0.55 : 0;
       this.model.position.y = lerp(0, -0.05, t) - sag;
-      this.mixer.update(dt * (1 - t) * 0.5);
       if (this.deathT > 0.3) this.weapon.root.visible = false;
     }
     if (this.deathT > 6) this.root.visible = false;
@@ -1112,6 +1188,8 @@ export class Bot implements Combatant {
 }
 
 // ---------------------------------------------------------------- helpers
+const SMOOTH_I = [0, 1, 2, 5, 6, 8, 11, 13, 15, 16, 17, 18];
+const COPY_I = [10, 12, 14];
 const _q = new THREE.Quaternion();
 const _q2 = new THREE.Quaternion();
 const _v = new THREE.Vector3();

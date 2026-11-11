@@ -225,7 +225,7 @@ export class UI {
           <p>Fishing village, rorbuer and docks · Industrial harbour · Two-lane road tunnel with emergency exits up to the ridge · Inlet bridge · WW2 coastal fort</p>
         </div>
       </div>
-      <div class="credits">Procedural art · Firearm recordings: Free Firearm Sound Library (CC0) · Voices &amp; effects: ElevenLabs · Music: Stable Audio 2.5 (Stability AI) · FPS arms by DJMaesen (CC BY 4.0) · Kenney Impact Sounds (CC0) · Soldier via three.js examples (Mixamo) · Water normals: three.js</div>`);
+      <div class="credits">Procedural art · Firearm recordings: Free Firearm Sound Library (CC0) · Voices &amp; effects: ElevenLabs · Music: Stable Audio 2.5 (Stability AI) · FPS arms by DJMaesen (CC BY 4.0) · Kenney Impact Sounds (CC0) · Procedural soldiers &amp; animation · Water normals: three.js</div>`);
     e.querySelectorAll('button').forEach((b) =>
       b.addEventListener('click', () => {
         const a = (b as HTMLElement).dataset.a;
