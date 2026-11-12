@@ -1,4 +1,5 @@
 import { clamp, distToSegment2, fbm2, ridged2, smoothstep, simplex2, lerp } from '../core/math';
+import * as BR from './maps/Brosund';
 
 /**
  * "Kvitvika" — a fictional settlement on the Norwegian coast combining a Lofoten
@@ -7,7 +8,23 @@ import { clamp, distToSegment2, fbm2, ridged2, smoothstep, simplex2, lerp } from
  * Coordinates: +X east, +Z south, +Y up. Sea level y = 0. Play area ±185 m.
  */
 export const SEA_LEVEL = 0;
-export const PLAY_HALF = 185;
+/**
+ * Maps (Update 34): the layout below is Kvitvika's; Brosund lives in ./maps/Brosund. One map is
+ * active per page load — selectMap() fills the shared arrays (ROADS, BUILDINGS, …) in place and the
+ * height / forest / water functions dispatch on MAP_ID, so every system that imports from here
+ * works on either map. It runs at module load (from ?level= or the saved setting) and again in each
+ * terrain worker with the id it is sent.
+ */
+export type MapId = 'kvitvika' | 'brosund';
+export const MAPS: { id: MapId; name: string; blurb: string }[] = [
+  { id: 'kvitvika', name: 'Kvitvika', blurb: 'Lofoten fishing village, fjord inlet and a coastal fort' },
+  { id: 'brosund', name: 'Brosund', blurb: 'Jugendstil canal town on three islands, an undersea tunnel and the Sunnmøre Alps' },
+];
+export let MAP_ID: MapId = 'kvitvika';
+export let MAP_NAME = 'Kvitvika';
+export let PLAY_HALF = 185;
+/** half-size of the dense, collidable terrain region */
+export let TERRAIN_INNER = 205;
 export const TERRAIN_EXTENT = 3200;
 
 export type V2 = [number, number];
@@ -16,11 +33,13 @@ export interface Road {
   name: string;
   pts: V2[];
   width: number;
-  kind: 'asphalt' | 'gravel' | 'dirt';
+  kind: 'asphalt' | 'gravel' | 'dirt' | 'stairs';
   lines?: boolean;
+  /** fixed heights at some points (bridge abutments, tunnel portals): index → y */
+  fixed?: Record<number, number>;
 }
 
-export const ROADS: Road[] = [
+const KV_ROADS: Road[] = [
   {
     name: 'Fv. 812', kind: 'asphalt', width: 6.5, lines: true,
     pts: [[44, -128], [30, -118], [14, -108], [2, -97], [0, -80], [0, -60], [-1, -30], [0, 0], [1, 30], [0, 55], [0, 64], [0, 98], [2, 108], [10, 125], [24, 138], [40, 150]],
@@ -40,7 +59,9 @@ export const ROADS: Road[] = [
 export type BuildingKind =
   | 'house' | 'rorbu' | 'church' | 'shop' | 'warehouse' | 'office' | 'bunker' | 'gunpit'
   | 'barracks' | 'mast' | 'barn' | 'naust' | 'crane' | 'tanks' | 'hjell' | 'containers' | 'boathouse'
-  | 'lighthouse' | 'tower' | 'radome';
+  | 'lighthouse' | 'tower' | 'radome'
+  // Brosund (Update 34)
+  | 'jugend' | 'stonechurch' | 'cafe' | 'molja';
 
 export interface BuildingDef {
   kind: BuildingKind;
@@ -55,10 +76,22 @@ export interface BuildingDef {
   padY?: number;
   seed?: number;
   name?: string;
+  // ---- Brosund's Jugendstil buildings ----
+  jcolor?: BR.JugendColor;
+  /** round corner turret with a spire on the left / right front corner */
+  tower?: 'L' | 'R';
+  gable?: 'curved' | 'stepped' | 'none';
+  roofMat?: 'slate' | 'copper';
+  /** ground floor (and stairs up) can be entered */
+  enter?: boolean;
+  /** turf (grass) roof on wooden buildings */
+  turf?: boolean;
+  /** exposed side walls (not against a neighbour): 1 = left (−x), 2 = right (+x) */
+  open?: number;
 }
 
 const R90 = Math.PI / 2;
-export const BUILDINGS: BuildingDef[] = [
+const KV_BUILDINGS: BuildingDef[] = [
   // --- Village centre ---
   { kind: 'church', x: 22, z: -36, rot: R90, name: 'Kvitvika kirke' },
   { kind: 'house', x: -15, z: -44, rot: R90, w: 9, d: 7, floors: 2, color: 'white', seed: 1 },
@@ -140,13 +173,13 @@ export const BUILDINGS: BuildingDef[] = [
 ];
 
 export interface TrenchDef { pts: V2[]; depth: number; width: number }
-export const TRENCHES: TrenchDef[] = [
+const KV_TRENCHES: TrenchDef[] = [
   { pts: [[4, -128], [2, -136], [-2, -150], [6, -158], [12, -170]], depth: 1.7, width: 2.2 },
   { pts: [[30, -122], [42, -118], [54, -124], [62, -136]], depth: 1.6, width: 2.0 },
 ];
 
 export interface Landmark { name: string; x: number; z: number; r: number }
-export const LANDMARKS: Landmark[] = [
+const KV_LANDMARKS: Landmark[] = [
   { name: 'Kystfortet', x: 30, z: -142, r: 45 },
   { name: 'Brua', x: 0, z: -80, r: 18 },
   { name: 'Kirka', x: 22, z: -36, r: 18 },
@@ -167,7 +200,7 @@ export const LANDMARKS: Landmark[] = [
 ];
 
 export interface SpawnPoint { x: number; z: number; yaw: number; team: 0 | 1 | -1 }
-export const SPAWNS: SpawnPoint[] = [
+const KV_SPAWNS: SpawnPoint[] = [
   // team 0 (Kystjegerne) — harbour side
   { x: 60, z: 177, yaw: 0, team: 0 }, { x: 10, z: 170, yaw: 0, team: 0 }, { x: -20, z: 172, yaw: 0, team: 0 },
   { x: 58, z: 146, yaw: 0, team: 0 }, { x: -60, z: 118, yaw: 0, team: 0 }, { x: 85, z: 140, yaw: 0, team: 0 },
@@ -213,12 +246,20 @@ export const FOOTBRIDGE = { x: -56, z0: -100, z1: -69, deckY: 3.4, width: 2.4 };
 /** Second crossing over the inlet (east), and climbable ladders: base position, outward normal, top height. */
 export const PLANK_BRIDGE = { x: 38, z0: -96, z1: -65, width: 2.0 };
 export interface LadderDef { x: number; z: number; nx: number; nz: number; y0: number; y1: number; exit: [number, number, number]; /** climb speed m/s (default 3.4) */ speed?: number }
-export const LADDERS: LadderDef[] = [
+const KV_LADDERS: LadderDef[] = [
   { x: -27, z: 147.1, nx: 0, nz: 1, y0: 2.55, y1: 11.5, exit: [-27, 11.9, 145.6] }, // Lager 1 roof
   { x: 66.65, z: 125, nx: 1, nz: 0, y0: 2.7, y1: 9.75, exit: [65.2, 10.0, 125] }, // harbour office roof
   { x: 71.65, z: 168, nx: 1, nz: 0, y0: 2.9, y1: 11.4, exit: [69.5, 11.7, 168] }, // fuel tank
   { x: -78.35, z: 154, nx: 1, nz: 0, y0: 2.5, y1: 24.3, exit: [-79, 24.7, 153.4] }, // harbour crane
 ];
+
+// ---------------- the active map's data (filled by selectMap) ----------------
+export const ROADS: Road[] = [];
+export const BUILDINGS: BuildingDef[] = [];
+export const TRENCHES: TrenchDef[] = [];
+export const LANDMARKS: Landmark[] = [];
+export const SPAWNS: SpawnPoint[] = [];
+export const LADDERS: LadderDef[] = [];
 
 // ---------------- Terrain shaping ----------------
 
@@ -249,6 +290,9 @@ function padFor(b: BuildingDef): Pad {
 
 /** Natural terrain before roads/pads. */
 export function naturalHeight(x: number, z: number): number {
+  return MAP_ID === 'brosund' ? BR.brNatural(x, z) : kvNatural(x, z);
+}
+function kvNatural(x: number, z: number): number {
   let h = 4.2 + fbm2(x * 0.007, z * 0.007, 4) * 3.2 + fbm2(x * 0.03 + 7, z * 0.03, 3) * 0.9;
   // East forest hills
   h += smoothstep(40, 130, x) * (5 + 7 * (0.5 + 0.5 * fbm2(x * 0.012 + 3, z * 0.012 - 2, 4)));
@@ -391,13 +435,13 @@ function roadHeights() {
   // the tunnel floor constraint applies BEFORE smoothing so the
   // approaches ramp into them instead of leaving raised berms / cut walls at the portals
   const constrain = (r: Road, x: number, z: number, y: number) => {
-    if (r !== ROADS[0]) return y;
+    if (r !== ROADS[0] || MAP_ID !== 'kvitvika') return y;
     // (bridge deck heights are applied after smoothing only: the approaches are built from the terrain)
     if (z >= TUNNEL.z0 - 6 && z <= TUNNEL.z1 + 6 && Math.abs(x) < 3) return 4.0;
     return y;
   };
   for (const r of ROADS) {
-    const raw = r.pts.map(([x, z]) => constrain(r, x, z, naturalWithPads(x, z)));
+    const raw = r.pts.map(([x, z], i) => r.fixed?.[i] ?? constrain(r, x, z, naturalWithPads(x, z)));
     // smooth along road
     const ys = raw.map((_, i) => {
       let s = 0, n = 0;
@@ -408,8 +452,10 @@ function roadHeights() {
       }
       return s / n;
     });
+    if (r.fixed) for (const k in r.fixed) ys[+k] = r.fixed[k];
     roadCache.push({ r, ys });
   }
+  if (MAP_ID !== 'kvitvika') return roadCache;
   // Tunnel/bridge constraints on the main road
   const main = roadCache[0];
   main.r.pts.forEach(([x, z], i) => {
@@ -497,12 +543,15 @@ export function terrainHeight(x: number, z: number): number {
   let h = naturalWithPads(x, z);
   // Roads
   const nr = nearestRoad(x, z);
-  const onSpan = nr.road === ROADS[0] && ((z > BRIDGE.z0 - 1 && z < BRIDGE.z1 + 1) || (z > TUNNEL.z0 && z < TUNNEL.z1));
+  const kv = MAP_ID === 'kvitvika';
+  const onSpan = kv && nr.road === ROADS[0] && ((z > BRIDGE.z0 - 1 && z < BRIDGE.z1 + 1) || (z > TUNNEL.z0 && z < TUNNEL.z1));
   if (!onSpan && nr.d < nr.road.width * 0.5 + 8) {
     const hw = nr.road.width * 0.5;
-    const m = 1 - smoothstep(hw + 0.6, hw + 7, nr.d);
+    // stairs cut a narrow notch into the hillside; roads blend out over 7 m
+    const m = nr.road.kind === 'stairs' ? 1 - smoothstep(hw + 0.2, hw + 2.2, nr.d) : 1 - smoothstep(hw + 0.6, hw + 7, nr.d);
     h = lerp(h, nr.y - (nr.d < hw + 0.3 ? 0.06 : 0), m);
   }
+  if (!kv) return BR.brTerrainPost(x, z, h);
   // Trenches
   for (const t of TRENCHES) {
     for (let i = 0; i < t.pts.length - 1; i++) {
@@ -546,11 +595,39 @@ export function tunnelCapHeight(x: number, z: number) {
 }
 
 export function isWater(x: number, z: number, h: number) {
+  if (MAP_ID === 'brosund' && BR.tunnelFloorAt(x, z, 3) !== null) return false;
   return h < SEA_LEVEL - 0.05;
+}
+
+/** Distance inland from the sea (≤ 0 at sea). */
+export function shoreDist(x: number, z: number): number {
+  return MAP_ID === 'brosund' ? BR.seaDist(x, z) : x - coastX(z);
+}
+
+/** Inside a road tunnel's bore (acoustics, no underwater filter, no splashes). */
+export function inTunnel(x: number, y: number, z: number): boolean {
+  if (MAP_ID === 'brosund') return BR.inBrosundTunnel(x, y, z);
+  const W = TUNNEL.width / 2;
+  return Math.abs(x - TUNNEL.x) < W + TUNNEL_EXIT.gx1 + 1 && z > TUNNEL.z0 - 4 && z < TUNNEL.z1 + 4 && y < TUNNEL_EXIT.floor + TUNNEL.height + 2;
+}
+
+/** Open water at a point (a bullet / grenade there splashes; the camera there is under water). */
+export function isWet(x: number, y: number, z: number, ground: number): boolean {
+  if (y > SEA_LEVEL || ground > y) return false;
+  if (MAP_ID === 'brosund' && BR.inBrosundTunnel(x, y, z, 2)) return false;
+  return true;
+}
+
+/** Height of the ground mesh over a tunnel (the cap), or null where there is no cap. */
+export function capHeightAt(x: number, z: number): number | null {
+  if (MAP_ID === 'brosund') return BR.brCapCovers(x, z) ? BR.brCapHeight(x, z, naturalWithPads(x, z)) : null;
+  if (Math.abs(x - TUNNEL.x) < TUNNEL.width / 2 + TUNNEL_EXIT.carve + 1 && z > TUNNEL.z0 - 1 && z < TUNNEL.z1 + 1) return tunnelCapHeight(x, z);
+  return null;
 }
 
 /** Forest density 0..1 used for trees and forest-floor texturing. */
 export function forestDensity(x: number, z: number, h: number): number {
+  if (MAP_ID === 'brosund') return BR.brForest(x, z, h);
   if (h < 1.6) return 0;
   let f = 0.5 + 0.5 * fbm2(x * 0.018 + 11, z * 0.018 - 5, 4);
   // zones
@@ -568,7 +645,7 @@ export function forestDensity(x: number, z: number, h: number): number {
 }
 
 export function landmarkAt(x: number, z: number): string {
-  let best = 'Kvitvika';
+  let best = MAP_NAME;
   let bd = 1e9;
   for (const l of LANDMARKS) {
     const d = Math.hypot(x - l.x, z - l.z) / l.r;
@@ -587,7 +664,7 @@ export function getPads() {
 
 
 // ---------------- ladders on the towers / lighthouse / radar station (from their placement) ----------------
-{
+function placeLadders() {
   const L: Record<string, { lx: number; lz: number; y0: number; y1: number; ex: [number, number, number] }> = {
     tower: { lx: 0, lz: 1.78, y0: 0.05, y1: 6.45, ex: [0, 6.75, 0.2] },
     lighthouse: { lx: 0, lz: 2.38, y0: 1.05, y1: 16.3, ex: [0, 16.55, 1.4] },
@@ -608,10 +685,75 @@ export function getPads() {
 }
 
 // ---------------- tunnel exit shafts: a ladder up the outer wall of each shaft to the crest ----------------
-for (const sh of tunnelShafts()) {
+function shaftLadders() {
+  for (const sh of tunnelShafts()) {
   const lx = sh.sx > 0 ? sh.x1 : sh.x0; // the outer wall's inner face
   LADDERS.push({
     x: lx, z: TUNNEL_EXIT.shaftZ, nx: -sh.sx, nz: 0, y0: TUNNEL_EXIT.floor + 0.05, y1: sh.top - 0.3, speed: 5.2,
     exit: [lx + sh.sx * 1.0, sh.top + 0.05, TUNNEL_EXIT.shaftZ],
   });
 }
+}
+
+// ---------------- map selection ----------------
+function fill<T>(dst: T[], src: T[]) {
+  dst.length = 0;
+  dst.push(...src.map((v) => ({ ...v })));
+}
+/** Activate a map: fill the shared arrays and reset every derived cache. */
+export function selectMap(id: MapId) {
+  if (!MAPS.some((m) => m.id === id)) id = 'kvitvika';
+  MAP_ID = id;
+  MAP_NAME = MAPS.find((m) => m.id === id)!.name;
+  PADS = null;
+  padGrid = null;
+  segGrid = null;
+  roadCache.length = 0;
+  bridgeEndsCache = null;
+  shaftCache = null;
+  if (id === 'brosund') {
+    PLAY_HALF = BR.BR_PLAY;
+    TERRAIN_INNER = BR.BR_INNER;
+    fill(ROADS, BR.brRoads());
+    fill(BUILDINGS, BR.brBuildings());
+    fill(TRENCHES, []);
+    fill(LANDMARKS, BR.BR_LANDMARKS);
+    fill(SPAWNS, BR.BR_SPAWNS);
+    fill(LADDERS, []);
+  } else {
+    PLAY_HALF = 185;
+    TERRAIN_INNER = 205;
+    fill(ROADS, KV_ROADS);
+    fill(BUILDINGS, KV_BUILDINGS);
+    fill(TRENCHES, KV_TRENCHES);
+    fill(LANDMARKS, KV_LANDMARKS);
+    fill(SPAWNS, KV_SPAWNS);
+    fill(LADDERS, KV_LADDERS);
+  }
+  ladderPlaced = false;
+}
+let ladderPlaced = false;
+/** Ladders that depend on the terrain (towers, the tunnel shafts): placed on first use after selection. */
+export function finishLadders() {
+  if (ladderPlaced) return;
+  ladderPlaced = true;
+  placeLadders();
+  if (MAP_ID === 'kvitvika') shaftLadders();
+}
+
+/** The map asked for by the page (?level=) or the saved settings. */
+export function requestedMap(): MapId {
+  try {
+    if (typeof location !== 'undefined' && typeof window !== 'undefined') {
+      const q = new URLSearchParams(location.search).get('level');
+      if (q === 'brosund' || q === 'kvitvika') return q;
+      const raw = localStorage.getItem('fjordfront.settings');
+      const lv = raw ? (JSON.parse(raw).level as string | undefined) : undefined;
+      if (lv === 'brosund' || lv === 'kvitvika') return lv;
+    }
+  } catch {
+    /* no storage */
+  }
+  return 'kvitvika';
+}
+selectMap(requestedMap());

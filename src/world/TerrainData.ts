@@ -1,6 +1,8 @@
-import { terrainHeight, TERRAIN_EXTENT } from './MapLayout';
+import { terrainHeight, TERRAIN_EXTENT, MAP_ID } from './MapLayout';
 
-export const INNER = 205; // half-size of the dense, collidable region
+// half-size of the dense, collidable region (per map; a live binding)
+export { TERRAIN_INNER as INNER } from './MapLayout';
+import { TERRAIN_INNER as INNER } from './MapLayout';
 export const STEP = 1.25;
 
 export function axisCoords(): number[] {
@@ -40,7 +42,7 @@ function fingerprint(ax: number[]) {
     mix(terrainHeight(x, z));
   }
   mix(terrainHeight(ax[3], ax[ax.length - 4]));
-  return 'terrain-v1-' + h.toString(36);
+  return 'terrain-v1-' + MAP_ID + '-' + h.toString(36);
 }
 
 function idb(): Promise<IDBDatabase | null> {
@@ -75,10 +77,14 @@ async function cachePut(key: string, data: Float32Array) {
   try {
     const tx = db.transaction('blobs', 'readwrite');
     const st = tx.objectStore('blobs');
-    // one terrain entry: drop stale ones from older map versions
+    // one terrain entry per map: drop stale ones from older versions of this map
     const keys = st.getAllKeys();
+    const mine = 'terrain-v1-' + MAP_ID + '-';
     keys.onsuccess = () => {
-      for (const k of keys.result) if (String(k).startsWith('terrain-') && k !== key) st.delete(k);
+      for (const k of keys.result) {
+        const ks = String(k);
+        if (ks !== key && ks.startsWith('terrain-') && (ks.startsWith(mine) || !/^terrain-v1-(kvitvika|brosund)-/.test(ks))) st.delete(k);
+      }
       st.put(data, key);
     };
   } catch {
@@ -111,7 +117,7 @@ async function computeWorkers(ax: number[]): Promise<Float32Array> {
       w.terminate();
       reject(e);
     };
-    w.postMessage({ ax, j0, j1 });
+    w.postMessage({ ax, j0, j1, map: MAP_ID });
   })));
   return out;
 }

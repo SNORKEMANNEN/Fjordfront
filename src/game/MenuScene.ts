@@ -4,6 +4,8 @@ import { newAnimState, AnimState } from '../character/SoldierAnim';
 import { roleFor } from '../character/SoldierMesh';
 import { WEAPONS } from '../weapons/WeaponDefs';
 import type { WeaponModel, WeaponId } from '../weapons/WeaponModels';
+import { MAP_ID } from '../world/MapLayout';
+import { BR_MENU } from '../world/maps/Brosund';
 import type { Terrain } from '../world/Terrain';
 
 /**
@@ -23,6 +25,8 @@ export class MenuScene {
   private yaw = 0;
   private camYaw = 0;
   private head = new THREE.Vector3();
+  /** look a little down past the soldier (a viewpoint over a town) */
+  private lookDown = 0;
   /** clear(a, b): nothing solid between two points (physics line of sight) */
   constructor(private scene: THREE.Scene, private terrain: Terrain, private buildWeapon: (id: WeaponId) => WeaponModel, private clear: (a: THREE.Vector3, b: THREE.Vector3) => boolean) {
     this.root.name = 'menuSoldier';
@@ -36,6 +40,47 @@ export class MenuScene {
    */
   private pickSpot() {
     const t = this.terrain;
+    if (MAP_ID === 'brosund') {
+      // the signature view: on Aksla by Fjellstua, the soldier with the town, the canal, the
+      // islands, the sound and the white peaks spread out below and behind them. Search the summit
+      // for a level spot whose camera (uphill, in front of the soldier) has a clear line and whose
+      // view behind (down to the south-east) is open.
+      let best: { x: number; z: number; yaw: number; s: number } | null = null;
+      for (let x = BR_MENU.x - 22; x <= BR_MENU.x + 22; x += 1.5) {
+        for (let z = BR_MENU.z - 22; z <= BR_MENU.z + 22; z += 1.5) {
+          const h = t.heightAt(x, z);
+          const slope = Math.abs(t.heightAt(x + 1, z) - t.heightAt(x - 1, z)) + Math.abs(t.heightAt(x, z + 1) - t.heightAt(x, z - 1));
+          if (slope > 0.9 || h < 35) continue;
+          for (const dy of [-0.35, -0.15, 0, 0.15, 0.35]) {
+            const yaw = BR_MENU.yaw + dy;
+            const fx = -Math.sin(yaw), fz = -Math.cos(yaw);
+            const cam = new THREE.Vector3(x + fx * 6.2, h + 1.35, z + fz * 6.2);
+            if (t.heightAt(cam.x, cam.z) > cam.y - 0.6) continue;
+            const head = new THREE.Vector3(x, h + 1.5, z);
+            if (!this.clear(cam, head) || !this.clear(cam, new THREE.Vector3(x, h + 0.6, z))) continue;
+            // the view: open behind and below, across the whole frame (rays fanned left and right)
+            let open = 0;
+            const rx = Math.cos(yaw), rz = -Math.sin(yaw);
+            for (const d of [6, 12, 25, 50, 100, 170]) {
+              for (const side of [-0.45, 0, 0.45]) {
+                const v = new THREE.Vector3(x - fx * d + rx * d * side, h + 1.2 - d * 0.1, z - fz * d + rz * d * side);
+                if (this.clear(head, v)) open++;
+              }
+            }
+            // and nothing solid round the camera's frame edges near the soldier
+            for (const side of [-1, 1]) if (this.clear(cam, new THREE.Vector3(x + rx * side * 3.5, h + 1.4, z + rz * side * 3.5))) open++;
+            const sc = open * 10 + h * 0.15 - Math.abs(dy) * 4;
+            if (!best || sc > best.s) best = { x, z, yaw, s: sc };
+          }
+        }
+      }
+      const b = best ?? { x: BR_MENU.x, z: BR_MENU.z, yaw: BR_MENU.yaw, s: 0 };
+      this.spot.set(b.x, t.heightAt(b.x, b.z), b.z);
+      this.camYaw = b.yaw;
+      this.yaw = b.yaw - 0.3;
+      this.lookDown = 1.1;
+      return;
+    }
     const cands: { x: number; z: number; yaw: number; s: number }[] = [];
     for (let x = -170; x <= 170; x += 5) {
       for (let z = -170; z <= 170; z += 5) {
@@ -133,7 +178,7 @@ export class MenuScene {
     const p = this.spot.clone().addScaledVector(fwd, dist).addScaledVector(right, 0.9 + Math.sin(this.t * 0.07) * 0.12);
     p.y += 1.35 + Math.sin(this.t * 0.11) * 0.04;
     cam.position.copy(p);
-    const look = this.spot.clone().addScaledVector(right, 0.9 + 0.12 * Math.min(1.2, wide / 1.78)).setY(this.spot.y + 1.0);
+    const look = this.spot.clone().addScaledVector(right, 0.9 + 0.12 * Math.min(1.2, wide / 1.78)).setY(this.spot.y + 1.0 - this.lookDown);
     cam.lookAt(look);
     cam.fov = 38;
     cam.updateProjectionMatrix();

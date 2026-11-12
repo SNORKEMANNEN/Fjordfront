@@ -2,7 +2,8 @@ import * as THREE from 'three';
 import { Combatant } from './Combatant';
 import { NavGraph } from '../ai/NavGraph';
 import { Terrain } from '../world/Terrain';
-import { LANDMARKS } from '../world/MapLayout';
+import { LANDMARKS, MAP_ID } from '../world/MapLayout';
+import { brFlagSites } from '../world/maps/Brosund';
 
 /**
  * Domination: three flags (A, B, C). Standing in a flag's zone captures it — a neutral flag
@@ -16,7 +17,7 @@ import { LANDMARKS } from '../world/MapLayout';
 export type Owner = -1 | 0 | 1;
 
 export interface Flag {
-  letter: 'A' | 'B' | 'C';
+  letter: 'A' | 'B' | 'C' | 'D' | 'E';
   name: string;
   pos: THREE.Vector3;
   radius: number;
@@ -64,6 +65,23 @@ export class Domination {
   setup(home0: THREE.Vector3, home1: THREE.Vector3) {
     for (const f of this.flags) this.root.remove(f.group);
     this.flags = [];
+    if (MAP_ID === 'brosund') {
+      // Brosund: five fixed flags, two on each side of the sound and one in the tunnel under it
+      for (const f of brFlagSites()) {
+        let p: THREE.Vector3;
+        if (f.y !== undefined) p = new THREE.Vector3(f.x, f.y + 0.02, f.z);
+        else {
+          const c = new THREE.Vector3(f.x, this.terrain.heightAt(f.x, f.z), f.z);
+          const out = this.nav.near(c, 12).filter((n) => !n.indoor && n.links.length >= 2).sort((a, b) => a.p.distanceToSquared(c) - b.p.distanceToSquared(c));
+          p = out[0] ? out[0].p.clone() : c;
+        }
+        this.flags.push(this.makeFlag(f.letter, f.name, p));
+      }
+      this.tickT = 0;
+      void home0;
+      void home1;
+      return;
+    }
     // about two matches in three keep the flags out of the village core entirely, so the fight
     // happens at the fort, the camp, the forest, the radar station, the cabins …
     const village = Math.random() < 0.25;

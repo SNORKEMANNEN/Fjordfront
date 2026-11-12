@@ -4,7 +4,7 @@ import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js
 import { MaterialLib } from '../render/Materials';
 import { Physics } from '../core/Physics';
 import { RNG, clamp, smoothstep, fbm2 } from '../core/math';
-import { forestDensity, nearestRoad, PLAY_HALF, coastX, TUNNEL } from './MapLayout';
+import { forestDensity, nearestRoad, PLAY_HALF, TUNNEL, MAP_ID, shoreDist, capHeightAt, isWater } from './MapLayout';
 import { Terrain } from './Terrain';
 
 const WIND_GLSL = /* glsl */ `
@@ -351,6 +351,9 @@ export class Vegetation {
     const spruceMat = foliageMat(spruceTex);
     const pineMat = foliageMat(spruceTex, 0xb8c8a8);
     const birchMat = foliageMat(birchTex);
+    const brosund = MAP_ID === 'brosund';
+    // Brosund is high summer: the birches are fresh green, not turning
+    if (brosund) birchMat.color.setRGB(0.72, 1.0, 0.62);
     const barkMat = L.std('bark', { tile: 1, roughness: 1 }, 'treeBark');
     const birchBarkMat = new THREE.MeshStandardMaterial({ map: birchBark.albedo, normalMap: birchBark.normal, roughness: 0.75 });
     patchWind(barkMat, 1);
@@ -381,7 +384,9 @@ export class Vegetation {
       if (nr.d < nr.road.width * 0.5 + margin) return true;
       const p = new THREE.Vector3(x, 0, z);
       for (const b of this.exclude) if (x > b.min.x - margin && x < b.max.x + margin && z > b.min.z - margin && z < b.max.z + margin) return true;
-      if (Math.abs(x - TUNNEL.x) < TUNNEL.width / 2 + 9 && z > TUNNEL.z0 - 10 && z < TUNNEL.z1 + 10) return true;
+      if (MAP_ID === 'kvitvika' && Math.abs(x - TUNNEL.x) < TUNNEL.width / 2 + 9 && z > TUNNEL.z0 - 10 && z < TUNNEL.z1 + 10) return true;
+      // over a tunnel bore the ground is the cap mesh, not the carved terrain: nothing grows there
+      if (MAP_ID !== 'kvitvika' && capHeightAt(x, z) !== null) return true;
       void p;
       return false;
     };
@@ -399,7 +404,12 @@ export class Vegetation {
         const birchy = smoothstep(0.3, 0.7, 0.5 + 0.5 * fbm2(jx * 0.02 + 40, jz * 0.02, 3));
         let v: number;
         const r = this.rng.next();
-        if (r < birchy * 0.35) v = 4 + (this.rng.chance(0.5) ? 1 : 0);
+        if (brosund) {
+          // Sunnmøre: birch woods with white trunks, pine on the rocky knolls, a little spruce
+          if (r < 0.55 + birchy * 0.25) v = 4 + (this.rng.chance(0.5) ? 1 : 0);
+          else if (r < 0.88) v = 3;
+          else v = this.rng.int(0, 2);
+        } else if (r < birchy * 0.35) v = 4 + (this.rng.chance(0.5) ? 1 : 0);
         else if (r < 0.15 + birchy * 0.35) v = 3;
         else v = this.rng.int(0, 2);
         const s = this.rng.range(0.75, 1.2);
@@ -413,11 +423,12 @@ export class Vegetation {
       }
     }
     // scattered trees in the village / along shore & roads
-    for (let i = 0; i < 70; i++) {
-      const x = this.rng.range(-80, 70), z = this.rng.range(-70, 95);
+    for (let i = 0; i < (brosund ? 260 : 70); i++) {
+      const x = brosund ? this.rng.range(-185, 230) : this.rng.range(-80, 70), z = brosund ? this.rng.range(-200, 190) : this.rng.range(-70, 95);
       const h = terrain.heightAt(x, z);
-      if (h < 1.6 || blocked(x, z, 4) || x < coastX(z) + 8) continue;
-      const v = this.rng.chance(0.6) ? 4 + this.rng.int(0, 1) : this.rng.int(0, 2);
+      if (h < 1.6 || blocked(x, z, 4) || shoreDist(x, z) < 8) continue;
+      if (brosund && (forestDensity(x, z, h) > 0.2 || terrain.normalAt(x, z).y < 0.85)) continue;
+      const v = brosund || this.rng.chance(0.6) ? 4 + this.rng.int(0, 1) : this.rng.int(0, 2);
       const s = this.rng.range(0.7, 1.0);
       addInst(x, z, v, s, false);
       physics.addCylinder(new THREE.Vector3(x, h + 2, z), 2.5, variants[v].trunkR * s + 0.04, { surface: 'wood', penetrable: 0.25 });
@@ -460,13 +471,16 @@ export class Vegetation {
     const rockMat = L.std('rock', { tile: 3 }, 'boulder');
     const rocks = [rockGeo(this.rng), rockGeo(this.rng), rockGeo(this.rng)];
     const rockLists: THREE.Matrix4[][] = [[], [], []];
-    for (let i = 0; i < 520; i++) {
-      const x = this.rng.range(-PLAY_HALF - 60, PLAY_HALF + 60), z = this.rng.range(-PLAY_HALF - 60, PLAY_HALF + 60);
+    const rockR = brosund ? PLAY_HALF + 15 : PLAY_HALF + 60; // (beyond the dense terrain the coarse mesh would leave rocks floating)
+    for (let i = 0; i < (brosund ? 900 : 520); i++) {
+      const x = this.rng.range(-rockR, rockR), z = this.rng.range(-rockR, rockR);
       const h = terrain.heightAt(x, z);
       const n = terrain.normalAt(x, z);
       const f = forestDensity(x, z, h);
-      const shore = x < coastX(z) + 12 && h > -1.5;
-      const chance = (1 - n.y) * 3 + f * 0.25 + (shore ? 0.5 : 0);
+      const shore = shoreDist(x, z) < 12 && h > -1.5;
+      if (brosund && n.y < 0.62) continue; // (a rock on a cliff face hangs in the air)
+      if (isWater(x, z, h + 0.6) && !shore) continue;
+      const chance = (1 - n.y) * 3 + f * (brosund ? 0.6 : 0.25) + (shore ? 0.5 : 0);
       if (this.rng.next() > chance || blocked(x, z, 2.5)) continue;
       const s = this.rng.range(0.4, 2.2) * (shore ? 1.2 : 1);
       const v = this.rng.int(0, 2);
@@ -515,6 +529,74 @@ export class Vegetation {
     bim.castShadow = true;
     bim.receiveShadow = true;
     this.group.add(bim);
+
+    // ---------------- Brosund: heather tufts and wildflower meadows (blue and purple) ----------------
+    if (brosund) {
+      const flowerTex = baker.raw('veg.flowers', `void main(){
+          vec2 p = vUv;
+          // stems
+          float stem = 0.0;
+          for (int i = 0; i < 7; i++) {
+            float x = 0.1 + float(i) * 0.13 + (hash12(vec2(float(i), 3.0)) - 0.5) * 0.06;
+            float top = 0.55 + hash12(vec2(float(i), 7.0)) * 0.35;
+            stem = max(stem, smoothstep(0.012, 0.0, abs(p.x - x - (p.y * 0.05))) * step(p.y, top));
+          }
+          // flower heads: blue harebells / violet cranesbill / purple clover
+          vec3 v = tvoronoi(p * vec2(6.0, 5.0) + vec2(0.0, 0.3), vec2(6.0, 5.0));
+          float head = smoothstep(0.24, 0.12, v.x) * step(0.45, p.y);
+          vec3 c1 = hex(92., 110., 222.), c2 = hex(156., 84., 196.), c3 = hex(206., 120., 200.);
+          vec3 fc = v.z < 0.45 ? c1 : v.z < 0.8 ? c2 : c3;
+          vec3 col = mix(hex(60., 96., 40.), fc, head);
+          float a = max(stem, head);
+          gl_FragColor = vec4(col, a);
+        }`, 256, true);
+      const heatherTex = baker.raw('veg.heather', `void main(){
+          vec2 p = vUv;
+          vec3 v = tvoronoi(p * 9.0, vec2(9.0));
+          float r = length((p - vec2(0.5, 0.0)) * vec2(1.0, 0.9));
+          float a = smoothstep(0.32, 0.1, v.x) * smoothstep(0.75, 0.45, r);
+          vec3 col = mix(hex(120., 60., 120.), hex(186., 98., 170.), v.z);
+          col = mix(col, hex(64., 84., 44.), smoothstep(0.55, 0.85, hash12(floor(p * 9.0))));
+          gl_FragColor = vec4(col, a);
+        }`, 256, true);
+      const cross = (w: number, hgt: number) => {
+        const g1 = new THREE.PlaneGeometry(w, hgt);
+        g1.translate(0, hgt / 2, 0);
+        const g2 = g1.clone().rotateY(Math.PI / 2);
+        const g3 = g1.clone().rotateY(Math.PI / 4);
+        const g = mergeGeometries([g1, g2, g3])!;
+        addWindAttr(g, (p) => clamp(p.y * 0.35, 0, 0.25));
+        return g;
+      };
+      const flowerMat = foliageMat(flowerTex);
+      const heatherMat = foliageMat(heatherTex);
+      for (const [geo, mat, count, near] of [[cross(0.9, 0.55), flowerMat, 5200, 0.0], [cross(1.1, 0.5), heatherMat, 3800, 1.0]] as const) {
+        const list: THREE.Matrix4[] = [];
+        for (let i = 0; i < count * 3 && list.length < count; i++) {
+          const x = this.rng.range(-PLAY_HALF, PLAY_HALF), z = this.rng.range(-PLAY_HALF, PLAY_HALF);
+          const h = terrain.heightAt(x, z);
+          if (h < 2.2 || blocked(x, z, 1.2)) continue;
+          const n = terrain.normalAt(x, z);
+          if (n.y < 0.8) continue;
+          const f = forestDensity(x, z, h);
+          if (f > 0.55) continue;
+          // flowers in the meadows low down, heather on the open slopes higher up
+          const want = near ? smoothstep(10, 30, h) : 1 - smoothstep(25, 60, h);
+          if (this.rng.next() > want * (0.4 + 0.6 * smoothstep(0.35, 0.65, 0.5 + 0.5 * fbm2(x * 0.03 + (near ? 7 : 0), z * 0.03, 2)))) continue;
+          // clumps: a few instances together
+          for (let k = 0; k < 3 && list.length < count; k++) {
+            const cx = x + this.rng.range(-1.2, 1.2), cz = z + this.rng.range(-1.2, 1.2);
+            const s = this.rng.range(0.7, 1.3);
+            list.push(new THREE.Matrix4().compose(new THREE.Vector3(cx, terrain.heightAt(cx, cz) - 0.04, cz), new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), this.rng.range(0, 6.3)), new THREE.Vector3(s, s * this.rng.range(0.8, 1.2), s)));
+          }
+        }
+        const im = new THREE.InstancedMesh(geo, mat, list.length);
+        list.forEach((m, i) => im.setMatrixAt(i, m));
+        im.receiveShadow = true;
+        im.computeBoundingSphere();
+        this.group.add(im);
+      }
+    }
 
     // ---------------- grass field near the camera ----------------
     const blades: THREE.BufferGeometry[] = [];

@@ -897,6 +897,25 @@ export class AudioEngine {
     } catch {
       /* no equipment bank */
     }
+    // ambience bank (Update 34): waterfalls, streams, tunnel drips, pumps and fans from CC0
+    // recordings (tools/env_sfx_build.py)
+    try {
+      const man = await (await fetch(import.meta.env.BASE_URL + 'assets/sounds/ambience/manifest.json')).json() as Record<string, { file: string }[]>;
+      await Promise.all(Object.entries(man).map(async ([key, list]) => {
+        const bufs: AudioBuffer[] = [];
+        for (const { file } of list) {
+          try {
+            const r = await fetch(`${import.meta.env.BASE_URL}assets/sounds/ambience/${file}`);
+            if (r.ok) bufs.push(await this.ctx.decodeAudioData(await r.arrayBuffer()));
+          } catch {
+            /* skip this take */
+          }
+        }
+        if (bufs.length) this.bank[key] = bufs;
+      }));
+    } catch {
+      /* no ambience bank */
+    }
     this.ready = true;
   }
 

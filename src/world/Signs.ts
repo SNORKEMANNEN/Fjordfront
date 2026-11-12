@@ -157,3 +157,100 @@ export function signMaterials(): Record<string, THREE.Material> {
     exitLamp: new THREE.MeshBasicMaterial({ color: new THREE.Color(0.4, 3.2, 1.2), toneMapped: false }),
   };
 }
+
+/** Brosund's signs: Sundtunnelen's blue name board, the yellow turn-and-exit board, SOS / extinguisher. */
+export function brosundSignMaterials(): Record<string, THREE.Material> {
+  const F = 'Barlow Condensed, Arial Narrow, Arial, sans-serif';
+  const board = canvas(512, 512, (c) => {
+    c.fillStyle = '#1d4fa8';
+    c.fillRect(0, 0, 512, 512);
+    c.strokeStyle = '#fff';
+    c.lineWidth = 12;
+    c.strokeRect(14, 14, 484, 484);
+    // tunnel pictogram
+    c.fillStyle = '#fff';
+    c.beginPath();
+    c.moveTo(186, 150);
+    c.lineTo(186, 104);
+    c.quadraticCurveTo(256, 34, 326, 104);
+    c.lineTo(326, 150);
+    c.closePath();
+    c.fill();
+    c.fillStyle = '#1d4fa8';
+    c.beginPath();
+    c.moveTo(212, 150);
+    c.lineTo(212, 112);
+    c.quadraticCurveTo(256, 66, 300, 112);
+    c.lineTo(300, 150);
+    c.closePath();
+    c.fill();
+    c.fillStyle = '#fff';
+    c.textAlign = 'center';
+    c.textBaseline = 'middle';
+    c.font = `bold 78px ${F}`;
+    c.fillText('Sund-', 256, 232);
+    c.fillText('tunnelen', 256, 310);
+    c.font = `bold 64px ${F}`;
+    c.fillText('Lengde 0,3 km', 256, 420);
+  });
+  const turn = canvas(512, 160, (c) => {
+    c.fillStyle = '#f2c21a';
+    c.fillRect(0, 0, 512, 160);
+    c.strokeStyle = '#111';
+    c.lineWidth = 8;
+    c.strokeRect(6, 6, 500, 148);
+    // U-turn arrow
+    c.lineWidth = 14;
+    c.lineCap = 'round';
+    c.beginPath();
+    c.moveTo(56, 128);
+    c.lineTo(56, 70);
+    c.arc(82, 70, 26, Math.PI, 0);
+    c.lineTo(108, 104);
+    c.stroke();
+    c.beginPath();
+    c.moveTo(88, 92);
+    c.lineTo(108, 124);
+    c.lineTo(128, 92);
+    c.fillStyle = '#111';
+    c.fill();
+    c.fillStyle = '#111';
+    c.textAlign = 'left';
+    c.textBaseline = 'middle';
+    c.font = `bold 58px ${F}`;
+    c.fillText('Snu og køyr ut', 156, 54);
+    c.font = `56px ${F}`;
+    c.fillText('Turn and exit', 156, 116);
+  });
+  const sos = canvas(256, 384, (c) => {
+    c.fillStyle = '#1d4fa8';
+    c.fillRect(0, 0, 256, 384);
+    c.fillStyle = '#fff';
+    c.fillRect(56, 26, 144, 216);
+    c.fillStyle = '#1d4fa8';
+    c.fillRect(150, 40, 36, 190);
+    c.fillStyle = '#fff';
+    c.fillRect(14, 262, 228, 108);
+    // extinguisher
+    c.fillStyle = '#d42a1e';
+    c.fillRect(40, 286, 30, 66);
+    c.fillRect(46, 276, 10, 12);
+    // phone + SOS
+    c.fillStyle = '#111';
+    c.textAlign = 'center';
+    c.textBaseline = 'middle';
+    c.font = `bold 46px ${F}`;
+    c.fillText('SOS', 176, 330);
+    c.strokeStyle = '#111';
+    c.lineWidth = 6;
+    c.beginPath();
+    c.arc(118, 318, 20, Math.PI * 0.9, Math.PI * 2.1);
+    c.stroke();
+  });
+  const lit = (map: THREE.Texture, k = 1.4) => new THREE.MeshBasicMaterial({ map, color: new THREE.Color(k, k, k), toneMapped: false, side: THREE.DoubleSide });
+  return {
+    brTunnelBoard: new THREE.MeshStandardMaterial({ map: board, roughness: 0.4, emissive: 0xffffff, emissiveMap: board, emissiveIntensity: 0.15 }),
+    brTurn: lit(turn, 1.25),
+    brSOS: lit(sos, 1.2),
+  };
+}

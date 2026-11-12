@@ -1,0 +1,44 @@
+{
+ "wf_big": [
+  {
+   "file": "wf_big_0.ogg",
+   "loop": true
+  }
+ ],
+ "wf_stream": [
+  {
+   "file": "wf_stream_0.ogg",
+   "loop": true
+  }
+ ],
+ "drip": [
+  {
+   "file": "drip_0.ogg",
+   "loop": false
+  },
+  {
+   "file": "drip_1.ogg",
+   "loop": false
+  },
+  {
+   "file": "drip_2.ogg",
+   "loop": false
+  },
+  {
+   "file": "drip_3.ogg",
+   "loop": false
+  }
+ ],
+ "pump": [
+  {
+   "file": "pump_0.ogg",
+   "loop": true
+  }
+ ],
+ "tfan": [
+  {
+   "file": "tfan_0.ogg",
+   "loop": true
+  }
+ ]
+}

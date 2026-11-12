@@ -205,22 +205,48 @@ export class GeoBuilder {
     }
   }
 
+  /**
+   * Spatial cell size for the merged meshes (0 = one mesh per material for the whole map). With
+   * cells, a material is merged per cell so the camera and every shadow cascade can cull what is
+   * out of view (Brosund's town is dense: merged map-wide it was drawn whole in every pass).
+   */
+  static cell = 0;
+
   /** Flush accumulated geometry into meshes and add to a parent. */
   flush(parent: THREE.Object3D, castShadow = true) {
     // where each tagged geometry ends up: (material, index) -> tag
     const tagAt = new Map<string, string>();
     for (const t of this.tagged) tagAt.set(t.mat + '#' + t.idx, t.tag);
     this.tagged.length = 0;
-    for (const [mat, list] of this.geos) {
+    for (const [mat, all] of this.geos) {
+      // only heavy materials are split (a light one costs more in draw calls than it saves)
+      let verts = 0;
+      for (const g of all) verts += g.getAttribute('position').count;
+      const C = verts > 120000 ? GeoBuilder.cell : 0;
+      // group by cell (keeping each geometry's original index for the destruction tags)
+      const groups = new Map<number, number[]>();
+      all.forEach((g, i) => {
+        let k = 0;
+        if (C > 0) {
+          const p = g.getAttribute('position') as THREE.BufferAttribute;
+          const x = p.getX(0), z = p.getZ(0);
+          k = (Math.floor(x / C) + 512) * 1024 + (Math.floor(z / C) + 512);
+        }
+        let l = groups.get(k);
+        if (!l) groups.set(k, (l = []));
+        l.push(i);
+      });
+      for (const ids of groups.values()) {
       // merge in chunks to keep buffers reasonable
-      for (let i = 0; i < list.length; i += 4000) {
-        const chunk = list.slice(i, i + 4000);
+      for (let i = 0; i < ids.length; i += 4000) {
+        const chunkIds = ids.slice(i, i + 4000);
+        const chunk = chunkIds.map((j) => all[j]);
         const spans: { tag: string; start: number; count: number }[] = [];
         if (tagAt.size) {
           let off = 0;
           chunk.forEach((g, k) => {
             const n = g.getAttribute('position').count;
-            const tg = tagAt.get(mat + '#' + (i + k));
+            const tg = tagAt.get(mat + '#' + chunkIds[k]);
             if (tg) spans.push({ tag: tg, start: off, count: n });
             off += n;
           });
@@ -239,6 +265,7 @@ export class GeoBuilder {
           this.ranges.get(sp.tag)!.push({ mesh, start: sp.start, count: sp.count });
         }
         this.meshes.push(mesh);
+      }
       }
     }
     this.geos.clear();

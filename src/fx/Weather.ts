@@ -2,7 +2,7 @@ import * as THREE from 'three';
 import { Settings } from '../game/Settings';
 import { TextureBaker } from '../render/TextureBaker';
 import { Snowfall, SNOW } from './Snow';
-import { coastX } from '../world/MapLayout';
+import { shoreDist } from '../world/MapLayout';
 
 /**
  * Weather: rain streaks, snow showers (flakes + snow settling on surfaces), wind and fog banks.
@@ -32,6 +32,8 @@ export class Weather {
   inBank = 0;
   /** mid-match snowstorm intensity 0..1 (heavy snow, gale, whiteout) — driven by the game */
   storm = 0;
+  /** Atlantic gale (Brosund's storm preset / event) 0..1: wind without the snow */
+  gale = 0;
   rain: THREE.LineSegments;
   private rainMat: THREE.ShaderMaterial;
   private fogSheets: THREE.Mesh[] = [];
@@ -161,7 +163,7 @@ export class Weather {
     this.windAng += (Math.sin(this.t * 0.013) * 0.02 + (Math.random() - 0.5) * 0.01) * dt * 3;
     const base = weather === 'clear' ? 1.2 : weather === 'fair' ? 2.5 : weather === 'overcast' ? 4.5 : weather === 'rain' ? 6.5 : 7;
     this.gust += ((Math.sin(this.t * 0.37) * 0.5 + Math.sin(this.t * 0.11 + 2) * 0.5) * 0.35 - this.gust) * Math.min(1, dt);
-    this.windSpeed = Math.max(0.5, base * (1 + this.gust) * (1 + this.storm * 1.7));
+    this.windSpeed = Math.max(0.5, base * (1 + this.gust) * (1 + this.storm * 1.7 + this.gale * 2.2));
     this.wind.set(Math.cos(this.windAng) * this.windSpeed, 0, Math.sin(this.windAng) * this.windSpeed);
     // ---- snow showers & settling
     const want = Math.max(this.storm, weather === 'snow' ? 0.35 + 0.65 * Math.max(0, Math.sin(this.t * 0.021) * 0.6 + Math.sin(this.t * 0.0071 + 1) * 0.6) : 0);
@@ -189,7 +191,7 @@ export class Weather {
         const x = bk.front + u.dx + Math.sin(this.t * 0.05 + u.ph) * 6;
         const z = u.z + Math.cos(this.t * 0.04 + u.ph) * 5;
         // hugs the water over the fjord, sits a little above the ground inland
-        const ground = x < coastX(z) ? 0 : Math.max(0, this.heightAt(x, z));
+        const ground = shoreDist(x, z) < 0 ? 0 : Math.max(0, this.heightAt(x, z));
         sp.position.set(x, ground + u.y, z);
         (sp.material as THREE.SpriteMaterial).opacity = u.o * k;
         sp.visible = k > 0.01;

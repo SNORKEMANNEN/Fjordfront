@@ -37,10 +37,12 @@ export interface SettingsData {
   motionBlur: boolean;
   dof: boolean;
   grassDensity: number;
-  weather: 'auto' | 'clear' | 'fair' | 'overcast' | 'rain' | 'snow';
+  weather: 'auto' | 'clear' | 'fair' | 'overcast' | 'rain' | 'snow' | 'storm';
   /** map variant: autumn, winter (snow-covered), or random per match */
   mapVariant: 'autumn' | 'winter' | 'random';
-  timeOfDay: 'dynamic' | 'dawn' | 'day' | 'golden' | 'blue' | 'night';
+  /** which map (Update 34): changing it reloads the page */
+  level: 'kvitvika' | 'brosund';
+  timeOfDay: 'dynamic' | 'dawn' | 'day' | 'golden' | 'blue' | 'night' | 'midnight';
   godRays: boolean;
   masterVolume: number;
   sfxVolume: number;
@@ -104,6 +106,7 @@ const DEFAULTS: SettingsData = {
   grassDensity: 1,
   weather: 'auto',
   mapVariant: 'random',
+  level: 'kvitvika',
   timeOfDay: 'dynamic',
   godRays: true,
   masterVolume: 0.8,
@@ -149,6 +152,8 @@ class SettingsStore {
     if (w) this.data.weather = w;
     const mv = new URLSearchParams(location.search).get('map') as SettingsData['mapVariant'] | null;
     if (mv) this.data.mapVariant = mv;
+    const lv = new URLSearchParams(location.search).get('level') as SettingsData['level'] | null;
+    if (lv === 'kvitvika' || lv === 'brosund') this.data.level = lv;
     const tod = new URLSearchParams(location.search).get('time') as SettingsData['timeOfDay'] | null;
     if (tod) this.data.timeOfDay = tod;
   }

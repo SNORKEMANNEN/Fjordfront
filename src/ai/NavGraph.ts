@@ -2,7 +2,7 @@ import * as THREE from 'three';
 import { Physics } from '../core/Physics';
 import { Terrain } from '../world/Terrain';
 import { NavHint } from '../world/Buildings';
-import { PLAY_HALF } from '../world/MapLayout';
+import { PLAY_HALF, inTunnel, capHeightAt } from '../world/MapLayout';
 
 export interface NavNode {
   id: number;
@@ -33,15 +33,32 @@ export class NavGraph {
     const capsule = new Physics.R.Capsule(0.5, 0.3);
     const free = (p: THREE.Vector3) => !physics.overlaps({ x: p.x, y: p.y + 0.9, z: p.z }, capsule);
     // surface height: highest walkable surface below terrain+3 (docks, bridges) — else terrain
-    const surface = (x: number, z: number) => {
+    const surface = (x: number, z: number, hint?: number) => {
       const th = terrain.heightAt(x, z);
+      // over a tunnel: the ground on top (cap) when that is the floor we are looking for
+      if (hint !== undefined) {
+        const cap = capHeightAt(x, z);
+        if (cap !== null && Math.abs(hint - cap) < Math.abs(hint - th)) {
+          const hc = physics.raycast(new THREE.Vector3(x, cap + 2.6, z), new THREE.Vector3(0, -1, 0), 6);
+          return hc && hc.normal.y > 0.7 ? hc.point.y : cap;
+        }
+      }
       const hit = physics.raycast(new THREE.Vector3(x, th + 2.6, z), new THREE.Vector3(0, -1, 0), 12);
       return hit && hit.normal.y > 0.7 ? hit.point.y : th;
     };
     for (let x = -PLAY_HALF + 3; x <= PLAY_HALF - 3; x += step) {
       for (let z = -PLAY_HALF + 3; z <= PLAY_HALF - 3; z += step) {
+        // over a tunnel there are two floors: the bore (below) and the ground on top (the cap)
+        const cap = capHeightAt(x, z);
+        if (cap !== null && cap > 0.3) {
+          const q = new THREE.Vector3(x, cap + 0.05, z);
+          if (terrain.normalAt(x, z).y > 0 && free(q)) {
+            const hit = physics.raycast(new THREE.Vector3(x, cap + 2.6, z), new THREE.Vector3(0, -1, 0), 4);
+            if (hit && hit.normal.y > 0.72) this.add(new THREE.Vector3(x, hit.point.y + 0.05, z), false);
+          }
+        }
         const y = surface(x, z);
-        if (y < 0.3) continue; // water
+        if (y < 0.3 && !inTunnel(x, y + 1, z)) continue; // water (the undersea tunnel's floor is dry)
         const n = terrain.normalAt(x, z);
         if (n.y < 0.72 && Math.abs(y - terrain.heightAt(x, z)) < 0.2) continue;
         const p = new THREE.Vector3(x, y + 0.05, z);
@@ -50,7 +67,7 @@ export class NavGraph {
           let ok = false;
           for (const [ox, oz] of [[2, 0], [-2, 0], [0, 2], [0, -2]]) {
             const q = new THREE.Vector3(x + ox, surface(x + ox, z + oz) + 0.05, z + oz);
-            if (q.y > 0.3 && free(q)) {
+            if ((q.y > 0.3 || inTunnel(q.x, q.y + 1, q.z)) && free(q)) {
               p.copy(q);
               ok = true;
               break;
@@ -83,8 +100,8 @@ export class NavGraph {
         let ok = true;
         for (const t of [0.25, 0.5, 0.75]) {
           const q = n.p.clone().lerp(m.p, t);
-          const s = surface(q.x, q.z);
-          if (s < 0.25 || Math.abs(s - q.y) > 1.6) { ok = false; break; }
+          const s = surface(q.x, q.z, q.y);
+          if ((s < 0.25 && !inTunnel(q.x, q.y + 1, q.z)) || Math.abs(s - q.y) > 1.6) { ok = false; break; }
         }
         if (ok) this.connect(n.id, m.id);
       }

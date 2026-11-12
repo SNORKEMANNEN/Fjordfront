@@ -1,3 +1,4 @@
+import { MAP_ID, MAP_NAME } from '../world/MapLayout';
 import * as THREE from 'three';
 import { Net, NetMsg, cleanCode, LobbyRegistry, RoomInfo, probeRooms, myRegion } from './Net';
 import { icon } from '../ui/Icons';
@@ -524,7 +525,7 @@ export class NetGame {
   }
   private envState() {
     const e = this.g.env;
-    return { hour: e.hour, scale: e.timeScale, weather: e.weather, winter: !!this.g.winter };
+    return { hour: e.hour, scale: e.timeScale, weather: e.weather, winter: !!this.g.winter, level: MAP_ID, mid: e.midnightSun, blue: e.blueHour, sea: e.seaState, gale: this.g.weather.gale };
   }
 
   private broadcastRoster() {
@@ -535,6 +536,17 @@ export class NetGame {
   // ================================================================ client side
   private onWelcome(m: any) {
     const g = this.g;
+    // the host plays another map: load that map and rejoin the same room
+    if (m.env?.level && m.env.level !== MAP_ID) {
+      g.ui.notify('LOADING ' + String(m.env.level).toUpperCase(), 'THE HOST IS PLAYING ANOTHER MAP');
+      Settings.data.level = m.env.level;
+      Settings.save();
+      const u = new URL(location.href);
+      u.searchParams.delete('level');
+      u.searchParams.set('join', m.code ?? this.net.code);
+      setTimeout(() => (location.href = u.toString()), 1200);
+      return;
+    }
     this.mySlot = m.slot;
     this.roster = m.roster;
     this.lastCode = m.code ?? this.lastCode;
@@ -573,6 +585,10 @@ export class NetGame {
       g.env.winter = e.winter;
       g.terrain.winter = e.winter;
       g.world.veg.grass.visible = !e.winter;
+      g.env.midnightSun = !!e.mid;
+      g.env.blueHour = e.blue ?? 0;
+      g.env.seaState = e.sea ?? 0;
+      g.weather.gale = e.gale ?? 0;
       g.env.setWeather(e.weather);
       g.weather.reset(e.winter, e.weather);
     }
@@ -1478,7 +1494,7 @@ export class NetGame {
     this.reg.announce((): RoomInfo | null => {
       if (!this.isHost || !this.isPublic) return null;
       const g = this.g;
-      return { code: this.net.code, name: `${this.name}'s room`, players: this.roster.filter((s) => s.human).length, max: SLOTS, map: `${g.winter ? 'Winter' : 'Autumn'} · Domination`, region: myRegion() };
+      return { code: this.net.code, name: `${this.name}'s room`, players: this.roster.filter((s) => s.human).length, max: SLOTS, map: `${MAP_NAME}${MAP_ID === 'kvitvika' ? (g.winter ? ' · Winter' : ' · Autumn') : ''} · Domination`, region: myRegion() };
     });
   }
 

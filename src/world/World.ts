@@ -9,10 +9,13 @@ import { makeWorldMaterials } from './WorldMaterials';
 import { Settings } from '../game/Settings';
 import { LightPool, SunShafts, ShootableLights } from './Lighting';
 import { Ziplines } from './Ziplines';
-import { LADDERS } from './MapLayout';
+import { LADDERS, MAP_NAME, MAP_ID, finishLadders } from './MapLayout';
+import { Waterfalls } from './Waterfalls';
+import { GeoBuilder } from './GeoBuilder';
+import { BR_FALLS, BR_FAR_FALLS } from './maps/Brosund';
 import type { Environment } from './Environment';
 
-/** Builds and owns all static map content for "Kvitvika". */
+/** Builds and owns all static map content for the active map (Kvitvika or Brosund). */
 export class World {
   group = new THREE.Group();
   /** every climbable ladder (roofs, towers, tunnel shafts) */
@@ -27,14 +30,18 @@ export class World {
   shootable!: ShootableLights;
   zips!: Ziplines;
   shafts: SunShafts;
+  falls: Waterfalls | null = null;
 
   constructor(L: MaterialLib, physics: Physics, scene: THREE.Scene, onProgress: (s: string) => void = () => {}, heights?: Float32Array) {
     this.group.name = 'world';
     scene.add(this.group);
+    finishLadders();
+    // Brosund's dense town: merge static geometry per 90 m cell so views and shadow passes cull it
+    GeoBuilder.cell = MAP_ID === 'brosund' ? 110 : 0;
     onProgress('Shaping terrain');
     this.terrain = new Terrain(L, physics, heights);
     this.group.add(this.terrain.mesh, this.terrain.cap);
-    onProgress('Building Kvitvika');
+    onProgress('Building ' + MAP_NAME);
     this.mats = makeWorldMaterials(L);
     this.buildings = new Buildings(physics, this.mats, (x, z) => this.terrain.heightAt(x, z), this.group);
     this.infra = new Infrastructure(this.buildings.builder, this.buildings, this.terrain, this.group, this.mats);
@@ -64,6 +71,11 @@ export class World {
     // ziplines are validated with ray casts: let the query pipeline see everything built so far
     physics.step();
     this.zips = new Ziplines(physics, (x, z) => this.terrain.heightAt(x, z), this.group, this.mats);
+    if (MAP_ID === 'brosund') {
+      onProgress('Waterfalls');
+      this.falls = new Waterfalls(this.terrain, BR_FALLS, BR_FAR_FALLS, 26);
+      this.group.add(this.falls.group);
+    }
   }
 
   private lastT = 0;
@@ -71,7 +83,8 @@ export class World {
     const dt = Math.min(0.1, Math.max(0, t - this.lastT));
     this.lastT = t;
     this.veg.updateGrass(cam);
-    this.infra.update(t);
+    this.infra.update(t, cam);
+    this.falls?.update(dt, cam);
     if (env) {
       const night = env.night;
       this.pool.update(dt, cam, night, env.day);
@@ -84,6 +97,9 @@ export class World {
       glass.emissive.setRGB(1.0, 0.62, 0.3);
       glass.emissiveIntensity = night * 0.9 + env.golden * 0.05;
       glass.opacity = 0.45 + night * 0.4;
+      // Brosund's town windows light up at dusk (the blue hour reflects them in the canal)
+      const jl = this.mats.jglassLit as THREE.MeshStandardMaterial | undefined;
+      if (jl) jl.emissiveIntensity = Math.min(1.6, night * 1.5 + (1 - env.day) * 1.1 + env.blueHour * 0.9);
       const cu = this.terrain.cloudUniforms;
       if (cu.uCloudT) {
         cu.uCloudT.value = t;

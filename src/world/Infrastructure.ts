@@ -1,7 +1,8 @@
 import * as THREE from 'three';
 import { GeoBuilder } from './GeoBuilder';
 import { Buildings } from './Buildings';
-import { ROADS, BRIDGE, TUNNEL, TUNNEL_EXIT, tunnelShafts, FOOTBRIDGE, PLANK_BRIDGE, LADDERS, coastX, southCoastZ, Road, nearestRoad } from './MapLayout';
+import { ROADS, BRIDGE, TUNNEL, TUNNEL_EXIT, tunnelShafts, FOOTBRIDGE, PLANK_BRIDGE, LADDERS, coastX, southCoastZ, Road, nearestRoad, MAP_ID } from './MapLayout';
+import { BrosundBuild } from './BrosundBuild';
 import { Details } from './Details';
 import { signMaterials } from './Signs';
 import { RNG } from '../core/math';
@@ -16,9 +17,21 @@ export class Infrastructure {
   coverPoints: THREE.Vector3[] = [];
   private rng = new RNG(808);
   carCount = 0;
+  brosund: BrosundBuild | null = null;
 
-  constructor(private b: GeoBuilder, private bld: Buildings, private terrain: Terrain, private parent: THREE.Object3D, mats: Record<string, THREE.Material>) {
+  constructor(public b: GeoBuilder, public bld: Buildings, public terrain: Terrain, public parent: THREE.Object3D, mats: Record<string, THREE.Material>) {
     Object.assign(b.mats, signMaterials());
+    if (MAP_ID === 'brosund') {
+      for (const r of ROADS) if (r.kind !== 'stairs') this.road(r);
+      this.ladders();
+      this.brosund = new BrosundBuild(this, b, bld, terrain, parent, mats);
+      new Details(this.b, this.bld, this.terrain, {
+        sandbags: (x, z, r, l) => this.sandbags(x, z, r, l),
+        jersey: (x, y, z, r) => this.jersey(x, y, z, r),
+        car: (x, y, z, r, paint, wreck) => this.car(x, y, z, r, paint, wreck),
+      });
+      return;
+    }
     for (const r of ROADS) this.road(r);
     this.bridge();
     this.footbridge();
@@ -36,11 +49,11 @@ export class Infrastructure {
     });
   }
 
-  private h(x: number, z: number) {
+  h(x: number, z: number) {
     return this.terrain.heightAt(x, z);
   }
 
-  private resample(pts: [number, number][], step: number) {
+  resample(pts: [number, number][], step: number) {
     const out: { x: number; z: number; tx: number; tz: number; s: number }[] = [];
     let acc = 0;
     for (let i = 0; i < pts.length - 1; i++) {
@@ -67,7 +80,7 @@ export class Infrastructure {
   }
 
   /** Ribbon strip following the terrain. offsets: [left, right] lateral offsets. */
-  private ribbon(mat: string, samples: ReturnType<Infrastructure['resample']>, o0: number, o1: number, lift: number, skip?: (x: number, z: number) => boolean, dash?: [number, number]) {
+  ribbon(mat: string, samples: ReturnType<Infrastructure['resample']>, o0: number, o1: number, lift: number, skip?: (x: number, z: number) => boolean, dash?: [number, number]) {
     const pos: number[] = [], uv: number[] = [], nor: number[] = [];
     const lo = Math.min(o0, o1), hi = Math.max(o0, o1);
     for (let i = 0; i < samples.length - 1; i++) {
@@ -100,7 +113,7 @@ export class Infrastructure {
   private road(r: Road) {
     const s = this.resample(r.pts, 1.6);
     const hw = r.width / 2;
-    const main = r === ROADS[0];
+    const main = MAP_ID === 'kvitvika' && r === ROADS[0];
     // (inside the tunnel the main road is drawn full-width by tunnel())
     const skip = main ? (x: number, z: number) => (z > BRIDGE.z0 + 1 && z < BRIDGE.z1 - 1) || (z > TUNNEL.z0 - 3 && z < TUNNEL.z1 + 3) : undefined;
     const mat = r.kind === 'asphalt' ? 'asphalt' : r.kind === 'gravel' ? 'gravelRoad' : 'dirtRoad';
@@ -113,6 +126,7 @@ export class Infrastructure {
     if (r.kind === 'asphalt') {
       // snow poles (brøytestikker) & occasional guard rails outside the village
       for (let i = 0; i < s.length; i += 12) {
+        if (MAP_ID !== 'kvitvika') break; // (Brosund's streets are town streets: no snow poles)
         const p = s[i];
         const inVillage = Math.hypot(p.x, p.z) < 60 || p.z > 100;
         if (inVillage || (main && p.z > TUNNEL.z0 - 4 && p.z < TUNNEL.z1 + 4) || (main && p.z > BRIDGE.z0 - 2 && p.z < BRIDGE.z1 + 2)) continue;
@@ -557,7 +571,7 @@ export class Infrastructure {
   lampAnchors: THREE.Vector3[] = [];
   /** street lamp heads (the emissive panel) for shooting them out */
   lampHeads: { m: THREE.Matrix4; min: THREE.Vector3; max: THREE.Vector3 }[] = [];
-  private lamp(x: number, z: number, rot: number) {
+  lamp(x: number, z: number, rot: number) {
     const b = this.b;
     const y = this.h(x, z);
     b.cyl('steel', x, y, z, 0.09, 6.5, 8, 'metal', 0.06);
@@ -572,7 +586,7 @@ export class Infrastructure {
 
   /** Is (x,z) a sensible spot for static cover (dry land, off roads, outside buildings)? */
   private pendingFootprints: THREE.Box3[] = [];
-  private coverOk(x: number, z: number, margin = 1.5) {
+  coverOk(x: number, z: number, margin = 1.5) {
     if (this.h(x, z) < 1.0) return false;
     const r = nearestRoad(x, z);
     if (r.d < r.road.width / 2 + margin) return false;
@@ -580,7 +594,7 @@ export class Infrastructure {
   }
 
   /** Low dry-stone wall following the ground in short sections (gaps where it meets a road/building). */
-  private stoneWall(x0: number, z0: number, x1: number, z1: number) {
+  stoneWall(x0: number, z0: number, x1: number, z1: number) {
     const L = Math.hypot(x1 - x0, z1 - z0);
     const n = Math.max(1, Math.round(L / 1.6));
     const yaw = Math.atan2(x1 - x0, z1 - z0);
@@ -597,7 +611,7 @@ export class Infrastructure {
   }
 
   /** A cluster of glacial erratics: chest-high cover with a full-height block in the middle. */
-  private boulders(cx: number, cz: number, n: number) {
+  boulders(cx: number, cz: number, n: number) {
     // keep trees from growing through the rocks (vegetation skips building footprints)
     const y0 = this.h(cx, cz);
     this.pendingFootprints.push(new THREE.Box3(new THREE.Vector3(cx - 5, y0 - 5, cz - 5), new THREE.Vector3(cx + 5, y0 + 10, cz + 5)));
@@ -697,7 +711,7 @@ export class Infrastructure {
     void mats;
   }
 
-  private flag(top: THREE.Vector3) {
+  flag(top: THREE.Vector3) {
     const c = document.createElement('canvas');
     c.width = 220; c.height = 160;
     const x = c.getContext('2d')!;
@@ -728,7 +742,8 @@ export class Infrastructure {
     this.flags.push(mesh);
   }
 
-  update(t: number) {
+  update(t: number, cam?: THREE.Vector3) {
+    this.brosund?.update(t, cam);
     for (const f of this.flags) {
       const sh = (f.material as THREE.Material).userData.shader;
       if (sh) sh.uniforms.uTime.value = t;

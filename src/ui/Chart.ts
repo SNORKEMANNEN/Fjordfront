@@ -1,5 +1,5 @@
 import type { Terrain } from '../world/Terrain';
-import { ROADS, BUILDINGS, LANDMARKS, PLAY_HALF, TUNNEL, TUNNEL_EXIT, tunnelCapHeight, BuildingDef } from '../world/MapLayout';
+import { ROADS, BUILDINGS, LANDMARKS, PLAY_HALF, BuildingDef, MAP_ID, capHeightAt } from '../world/MapLayout';
 
 /**
  * Sjøkart: the map drawn the way a Norwegian nautical chart is — cream paper land with brown
@@ -42,7 +42,12 @@ export function footprint(b: BuildingDef): [number, number] {
 }
 
 /** sea names (placed only where it really is water) */
-export const WATER_NAMES: { name: string; x: number; z: number; size: number }[] = [
+export const WATER_NAMES: { name: string; x: number; z: number; size: number }[] = MAP_ID === 'brosund' ? [
+  { name: 'Atlanterhavet', x: -212, z: -110, size: 1 },
+  { name: 'Brosundet', x: -120, z: 4, size: 0.7 },
+  { name: 'Ellingsøysundet', x: 74, z: 30, size: 0.85 },
+  { name: 'Storfjorden', x: 150, z: 205, size: 1 },
+] : [
   { name: 'Kvitvikfjorden', x: -160, z: -20, size: 1 },
   { name: 'Hamnbukta', x: -60, z: 172, size: 0.8 },
   { name: 'Fyrsundet', x: -150, z: -160, size: 0.75 },
@@ -52,9 +57,7 @@ let shared: { canvas: HTMLCanvasElement; heights: Float32Array; S: number } | nu
 
 /** height for the chart: over the road tunnel the map shows the ridge, not the carved bore */
 function chartHeight(t: Terrain, x: number, z: number) {
-  const capW = TUNNEL.width / 2 + TUNNEL_EXIT.carve + 1;
-  const capped = Math.abs(x - TUNNEL.x) < capW && z > TUNNEL.z0 - 1 && z < TUNNEL.z1 + 1;
-  return capped ? tunnelCapHeight(x, z) : t.heightAt(x, z);
+  return capHeightAt(x, z) ?? t.heightAt(x, z);
 }
 
 /** the shared chart raster (built on first use, ~1024²) */

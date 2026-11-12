@@ -1,3 +1,4 @@
+import { MAPS, MAP_ID, MapId } from '../world/MapLayout';
 import { Settings, SettingsData, Quality } from '../game/Settings';
 import { ACTION_LABELS, keysFor, keyLabel, applyKeybinds, Action } from '../core/Input';
 import { loadIce, saveIce, testIce } from '../net/Net';
@@ -278,7 +279,7 @@ export class UI {
         <div class="ver">KART<br>NR. 29</div>
       </nav>
       <div class="menu-body">
-        <div class="brand"><div class="wordmark">FJORDFRONT</div><div class="tagline"><i></i>DOMINATION · KVITVIKA, NORDLAND</div></div>
+        <div class="brand"><div class="wordmark">FJORDFRONT</div><div class="tagline"><i></i>DOMINATION · ${MAP_ID === 'brosund' ? 'BROSUND, SUNNMØRE' : 'KVITVIKA, NORDLAND'}</div></div>
         <div class="pane"></div>
         <div class="side">
           <div class="news paper-card"><div class="nh"><b>MELDINGER</b><span class="eyebrow">NEWS · PATCH NOTES</span></div><div class="nl"><div class="ni"><div class="serif-note">Reading the logbook…</div></div></div></div>
@@ -286,7 +287,9 @@ export class UI {
             <div class="bh"><b>OPERASJONSORDRE</b><span class="eyebrow red">OPERATION BRIEF</span></div>
             <div class="chart"><div class="loadingc">Drawing the chart…</div></div>
             <div class="facts"><div><small>VIND</small><span class="f-wind">—</span></div><div><small>SJØ</small><span class="f-sea">—</span></div><div><small>KL.</small><span class="f-time">—</span></div><div><small>SESONG</small><span class="f-season">—</span></div></div>
-            <p>Hostile forces of <b class="red">NORDFRONT</b> hold the old coastal fort above Kvitvika. Push from the harbour with the <b class="blue">KYSTJEGERNE</b>, take three objectives and hold the fjord.</p>
+            <p>${MAP_ID === 'brosund'
+              ? 'Hostile forces of <b class="red">NORDFRONT</b> have crossed the sound into Ellingsøya and the undersea tunnel. Fight through the canal town with the <b class="blue">KYSTJEGERNE</b>, take five objectives and hold Brosund.'
+              : 'Hostile forces of <b class="red">NORDFRONT</b> hold the old coastal fort above Kvitvika. Push from the harbour with the <b class="blue">KYSTJEGERNE</b>, take three objectives and hold the fjord.'}</p>
             <div class="sides"><div class="sd k">${emblem(0)}KYSTJEGERNE</div><span class="vs">mot</span><div class="sd n">NORDFRONT${emblem(1)}</div></div>
           </div>
         </div>
@@ -328,15 +331,30 @@ export class UI {
     }
     pane.innerHTML = `<div class="ptitle">VELG OPPDRAG<small>CHOOSE A MISSION</small></div>
       <div class="modes">
-        <button class="mode paper-card hot" data-mode="dom"><span class="mi">${icon('domination')}</span><span><b>Domination</b><span>12 v 12 against AI squads. Take and hold three flags.</span></span><em>SOLO</em></button>
+        <button class="mode paper-card hot" data-mode="dom"><span class="mi">${icon('domination')}</span><span><b>Domination</b><span>12 v 12 against AI squads. Take and hold ${MAP_ID === 'brosund' ? 'five' : 'three'} flags.</span></span><em>SOLO</em></button>
         <button class="mode paper-card" data-mode="mp"><span class="mi">${icon('multiplayer')}</span><span><b>Multiplayer</b><span>Host a room, join with a code or browse public rooms. Bots fill the empty slots.</span></span><em>ONLINE</em></button>
         <button class="mode paper-card" data-mode="quick"><span class="mi">${icon('quick')}</span><span><b>Quick Play</b><span>Straight into the fullest public room — or open one if there is none.</span></span><em>ONLINE</em></button>
       </div>
+      <div class="maps">${MAPS.map((m) => `<button class="mapc paper-card ${m.id === MAP_ID ? 'on' : ''}" data-map="${m.id}"><b>${m.name}</b><span>${m.blurb}</span><em>${m.id === MAP_ID ? 'VALGT · SELECTED' : 'BYTT · SWITCH'}</em></button>`).join('')}</div>
       <div class="kit paper-card" data-a="kit"><span class="eyebrow red">KIT · <span class="kit-preset"></span></span><div class="kn"></div><div class="ks"></div></div>`;
     pane.querySelector('[data-mode=dom]')!.addEventListener('click', () => this.handlers.onPlay());
     pane.querySelector('[data-mode=mp]')!.addEventListener('click', () => this.handlers.onMultiplayer?.());
     pane.querySelector('[data-mode=quick]')!.addEventListener('click', () => this.handlers.onQuickPlay?.());
     pane.querySelector('.kit')!.addEventListener('click', () => this.showLoadout('menu'));
+    pane.querySelectorAll('.mapc').forEach((el) =>
+      el.addEventListener('click', () => {
+        const id = (el as HTMLElement).dataset.map as MapId;
+        if (id === MAP_ID) return;
+        // a different map is a different world: save the choice and reload into it
+        Settings.data.level = id;
+        Settings.save();
+        const q = new URLSearchParams(location.search);
+        q.delete('level');
+        if (q.has('test')) q.set('level', id);
+        const qs = q.toString();
+        location.href = location.pathname + (qs ? '?' + qs : '');
+      }),
+    );
     this.updateMenuWeapon();
   }
 
@@ -795,8 +813,8 @@ export class UI {
         ${toggle('dof', 'Aim depth of field')}
         ${slider('grassDensity', 'Grass density (next match)', 0.2, 1.5, 0.1)}
         ${select('mapVariant', 'Map variant', [['random', 'Random per match'], ['autumn', 'Autumn'], ['winter', 'Winter (snow-covered)']])}
-        ${select('weather', 'Weather', [['auto', 'Random'], ['clear', 'Clear (sunny, no clouds)'], ['fair', 'Broken clouds'], ['overcast', 'Overcast'], ['rain', 'Rain'], ['snow', 'Snow showers']])}
-        ${select('timeOfDay', 'Time of day', [['dynamic', 'Dynamic (time passes)'], ['dawn', 'Morning'], ['day', 'Midday'], ['golden', 'Golden hour'], ['blue', 'Blue hour'], ['night', 'Night — northern lights']])}
+        ${select('weather', 'Weather', [['auto', 'Random'], ['clear', 'Clear (sunny, no clouds)'], ['fair', 'Broken clouds'], ['overcast', 'Overcast'], ['rain', 'Rain'], ['snow', 'Snow showers'], ['storm', 'Atlantic storm (gale, heavy seas)']])}
+        ${select('timeOfDay', 'Time of day', [['dynamic', 'Dynamic (time passes)'], ['dawn', 'Morning'], ['day', 'Midday'], ['golden', 'Golden hour'], ['blue', 'Blue hour'], ['night', 'Night — northern lights'], ['midnight', 'Midnight sun']])}
         ${toggle('godRays', 'Sun shafts (god rays)')}
         ${toggle('showFps', 'Show FPS')}
       </div>

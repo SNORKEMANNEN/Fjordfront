@@ -85,15 +85,65 @@ export function makeWorldMaterials(L: MaterialLib): Record<string, THREE.Materia
     rope: L.std('planks', { tile: 0.2, color: 0xb09a70 }, 'rope'),
     lamp: new THREE.MeshBasicMaterial({ color: new THREE.Color(4, 3, 1.8), toneMapped: false }),
     sodium: new THREE.MeshBasicMaterial({ color: new THREE.Color(5, 2.6, 0.7), toneMapped: false }),
+    // ---- Brosund (Update 34): Jugendstil stucco palette, slate and green copper, granite, iron ----
+    j_ochre: L.std('concrete', { tile: 3, color: 0xe0a848, normalScale: 0.5 }, 'j_ochre'),
+    j_salmon: L.std('concrete', { tile: 3, color: 0xe08c6c, normalScale: 0.5 }, 'j_salmon'),
+    j_mint: L.std('concrete', { tile: 3, color: 0xa4dcc0, normalScale: 0.5 }, 'j_mint'),
+    j_jwhite: L.std('concrete', { tile: 3, color: 0xf2efe6, normalScale: 0.5 }, 'j_jwhite'),
+    j_deepred: L.std('concrete', { tile: 3, color: 0x9a2e26, normalScale: 0.5 }, 'j_deepred'),
+    j_yellow: L.std('concrete', { tile: 3, color: 0xf0cc4c, normalScale: 0.5 }, 'j_yellow'),
+    j_skyblue: L.std('concrete', { tile: 3, color: 0xa6c2dc, normalScale: 0.5 }, 'j_skyblue'),
+    j_cream: L.std('concrete', { tile: 3, color: 0xf0e2c0, normalScale: 0.5 }, 'j_cream'),
+    stucco: L.std('concrete', { tile: 2, color: 0xf6f1e4, normalScale: 0.35 }, 'stucco'),
+    granite: L.std('stoneWall', { tile: 2.5, color: 0xb4b2ae }, 'granite'),
+    slate: L.std('roofTiles', { tile: 1.4, color: 0x5a6068 }, 'slate'),
+    copper: L.std('paintedMetal', { tile: 2, color: 0x6aae96, metalness: 0.35, roughness: 0.6 }, 'copper'),
+    iron: L.std('paintedMetal', { tile: 1, color: 0x1e2224, metalness: 0.6 }, 'iron'),
+    jglass: new THREE.MeshStandardMaterial({ color: 0x1c2a34, roughness: 0.08, metalness: 0.6, envMapIntensity: 1.5 }),
+    jglassLit: new THREE.MeshStandardMaterial({ color: 0x1c2a34, roughness: 0.1, metalness: 0.5, envMapIntensity: 1.3, emissive: 0xffb466, emissiveIntensity: 0 }),
+    sod: L.std('grass', { tile: 1.5, color: 0x9cb070 }, 'sod'),
+    shotcrete: L.std('concrete', { tile: 3, color: 0x8e8c88, envMapIntensity: 0.15 }, 'shotcrete'),
+    tunnelRock: L.std('rock', { tile: 3, color: 0x6c6a66, envMapIntensity: 0.12 }, 'tunnelRock'),
+    hazard: hazardMat(),
+    blueLight: new THREE.MeshBasicMaterial({ color: new THREE.Color(0.6, 1.4, 5), toneMapped: false }),
+    redLamp: new THREE.MeshBasicMaterial({ color: new THREE.Color(5, 0.3, 0.2), toneMapped: false }),
+    stay: new THREE.MeshStandardMaterial({ color: 0xd8dcdc, roughness: 0.4, metalness: 0.7 }),
+    wetWall: L.std('concrete', { tile: 3, color: 0x4e4c4a, roughness: 0.25, envMapIntensity: 0.3 }, 'wetWall'),
+    puddle: new THREE.MeshStandardMaterial({ color: 0x0c0e10, roughness: 0.02, metalness: 0.4, envMapIntensity: 0.8, polygonOffset: true, polygonOffsetFactor: -3 }),
   };
   // weathering flags (Update 33, see Snow.ts): moss / grime / frost on metal
   const flag = (keys: string[], f: string[]) => {
     for (const k of keys) if (m[k]) m[k].userData.wx = [...((m[k].userData.wx as string[] | undefined) ?? []), ...f];
   };
-  flag(['stone', 'concrete', 'concreteWhite', 'chimney', 'boulder', 'roof'], ['moss', 'grime']);
+  flag(['stone', 'concrete', 'concreteWhite', 'chimney', 'boulder', 'roof', 'granite', 'slate', 'shotcrete'], ['moss', 'grime']);
+  flag(['j_ochre', 'j_salmon', 'j_mint', 'j_jwhite', 'j_deepred', 'j_yellow', 'j_skyblue', 'j_cream', 'stucco'], ['grime']);
+  flag(['copper', 'iron', 'stay'], ['metal']);
   flag(['red', 'white', 'ochre', 'dkgrey', 'trim', 'planks', 'woodRaw', 'door', 'corrBlue', 'corrWhite', 'tankWhite', 'sandbag', 'crate', 'pallet'], ['grime']);
   flag(['roofMetal', 'steel', 'steelGrate', 'yellowSteel', 'redSteel', 'rust', 'corrBlue', 'corrWhite', 'contRed', 'contBlue', 'contGreen', 'contOrange', 'contGrey', 'contWhite', 'tankWhite', 'carBurnt',
     'carRed', 'carBlue', 'carWhite', 'carGrey', 'carGreen', 'carBlack', 'signBlue'], ['metal']);
   m.default = m.concrete;
   return m;
+}
+
+/** Yellow / black hazard stripes (the bar over the tunnel portal, kerb ends). */
+function hazardMat() {
+  const c = document.createElement('canvas');
+  c.width = 128;
+  c.height = 32;
+  const x = c.getContext('2d')!;
+  x.fillStyle = '#e8b416';
+  x.fillRect(0, 0, 128, 32);
+  x.fillStyle = '#141414';
+  for (let i = -2; i < 10; i++) {
+    x.beginPath();
+    x.moveTo(i * 16, 32);
+    x.lineTo(i * 16 + 8, 32);
+    x.lineTo(i * 16 + 16, 0);
+    x.lineTo(i * 16 + 8, 0);
+    x.fill();
+  }
+  const t = new THREE.CanvasTexture(c);
+  t.colorSpace = THREE.SRGBColorSpace;
+  t.wrapS = t.wrapT = THREE.RepeatWrapping;
+  return new THREE.MeshStandardMaterial({ map: t, roughness: 0.6 });
 }

@@ -130,6 +130,15 @@ button[disabled] { opacity: .45; pointer-events: none; }
 .mode:hover { background: var(--grain), var(--paper-hi); color: var(--ink); transform: translateX(4px); }
 .mode:hover .mi { background: var(--ink); } .mode:hover .mi .ico { color: var(--paper); }
 .mode.hot .mi { background: var(--red); border-color: var(--red); } .mode.hot .mi .ico { color: var(--paper-hi); }
+/* map choice (Update 34) */
+.maps { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.mapc { padding: 9px 12px; text-align: left; letter-spacing: 0; text-transform: none; display: flex; flex-direction: column; gap: 3px; opacity: .78; animation: unfold .35s var(--ease) both; }
+.mapc b { font-family: var(--f-display); font-weight: 800; font-size: 20px; letter-spacing: .06em; text-transform: uppercase; line-height: 1; }
+.mapc span { font-family: var(--f-sans); font-size: 11.5px; color: var(--ink-2); line-height: 1.3; font-weight: 400; }
+.mapc em { font-style: normal; font-family: var(--f-mono); font-size: 10px; letter-spacing: .12em; color: var(--ink-3); margin-top: 2px; }
+.mapc.on { opacity: 1; box-shadow: inset 4px 0 0 var(--red); }
+.mapc.on em { color: var(--red); }
+.mapc:hover { opacity: 1; background: var(--grain), var(--paper-hi); color: var(--ink); }
 /* loadout summary card on the play pane */
 .kit { padding: 14px 16px; display: grid; grid-template-columns: 1fr auto; gap: 4px 12px; align-items: center; cursor: pointer; pointer-events: auto; }
 .kit:hover { background: var(--grain), var(--paper-hi); }
@@ -760,3 +769,5 @@ button[disabled] { opacity: .45; pointer-events: none; }
   box-shadow: inset 0 0 0 3px rgba(214, 48, 32, .9), inset 0 0 140px 30px rgba(190, 20, 10, .55); transition: opacity .15s; }
 .stuckwarn.on { animation: stuckpulse .32s ease-in-out infinite alternate; }
 @keyframes stuckpulse { from { opacity: .35; } to { opacity: 1; } }
+
+@media (max-height: 820px) { .mapc span { display: none; } .menu .pane { gap: 9px; } .mode { padding: 10px 14px 10px 12px; } }

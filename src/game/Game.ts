@@ -15,7 +15,7 @@ import { World } from '../world/World';
 import { PlayerController } from '../player/PlayerController';
 import { CameraRig } from '../player/CameraRig';
 import { Settings } from './Settings';
-import { SPAWNS, PLAY_HALF, landmarkAt, coastX, LANDMARKS, TUNNEL, TUNNEL_EXIT, tunnelShafts, BUILDINGS } from '../world/MapLayout';
+import { SPAWNS, PLAY_HALF, landmarkAt, LANDMARKS, TUNNEL, TUNNEL_EXIT, tunnelShafts, BUILDINGS, MAP_ID, shoreDist, inTunnel, isWet } from '../world/MapLayout';
 import { Viewmodel, ActionType } from '../weapons/Viewmodel';
 import { WeaponSystem, ShotRequest } from '../weapons/WeaponSystem';
 import { makeWeaponMaterials, WeaponMats, WEAPON_BUILDERS, WeaponId } from '../weapons/WeaponModels';
@@ -277,6 +277,7 @@ export class Game {
    * it out on the way in and out.
    */
   private wxEvent = { kind: '' as '' | 'fog' | 'storm', at: 0, t: 0, fog: 0, called: false, cleared: false, prevWeather: '' };
+  private presetSea = 0;
   private scheduleWeatherEvent() {
     const forced = new URLSearchParams(location.search).get('wxevent');
     const roll = Math.random();
@@ -291,23 +292,37 @@ export class Game {
     const BUILD = 40, HOLD = 110, CLEAR = 45;
     const k = t < BUILD ? t / BUILD : t < BUILD + HOLD ? 1 : Math.max(0, 1 - (t - BUILD - HOLD) / CLEAR);
     const s = k * k * (3 - 2 * k);
+    // Brosund out of winter: the storm is an Atlantic gale — rain, wind and heavy seas, no snow
+    const gale = e.kind === 'storm' && MAP_ID === 'brosund' && !this.winter;
     if (!e.called) {
       e.called = true;
-      this.announcer(e.kind === 'fog' ? 'fogIn' : 'snowIn');
-      this.ui.notify(e.kind === 'fog' ? 'FOG ROLLING IN' : 'SNOWSTORM INBOUND', e.kind === 'fog' ? 'VISIBILITY DROPPING' : 'WHITEOUT CONDITIONS');
-      if (e.kind === 'storm') {
+      if (!gale) this.announcer(e.kind === 'fog' ? 'fogIn' : 'snowIn');
+      this.ui.notify(e.kind === 'fog' ? 'FOG ROLLING IN' : gale ? 'ATLANTIC STORM INBOUND' : 'SNOWSTORM INBOUND', e.kind === 'fog' ? 'VISIBILITY DROPPING' : gale ? 'GALE FORCE WINDS, HEAVY SEAS' : 'WHITEOUT CONDITIONS');
+      if (gale) {
+        e.prevWeather = this.env.weather;
+        this.env.setWeather('rain');
+      } else if (e.kind === 'storm') {
         e.prevWeather = this.env.weather;
         if (this.env.weather !== 'snow') this.env.setWeather('snow');
       }
     }
     if (e.kind === 'fog') e.fog = s;
-    else this.weather.storm = s;
+    else if (gale) {
+      this.weather.gale = Math.max(this.weather.gale, s);
+      this.env.seaState = Math.max(this.env.seaState, s);
+      e.fog = s * 0.25;
+    } else this.weather.storm = s;
     if (!e.cleared && t > BUILD + HOLD) {
       e.cleared = true;
       this.announcer('weatherClear');
     }
     if (t > BUILD + HOLD + CLEAR) {
       if (e.kind === 'storm' && e.prevWeather && e.prevWeather !== 'snow') this.env.setWeather(e.prevWeather as never);
+      if (gale) {
+        this.weather.gale = this.presetSea;
+        this.env.seaState = this.presetSea;
+        this.env.setWeather(this.env.weather);
+      }
       this.weather.storm = 0;
       e.fog = 0;
       e.kind = '';
@@ -553,6 +568,9 @@ export class Game {
     mark(`terrain heights (${terrainStats.source}, ${Math.round(terrainStats.ms)} ms)`);
     this.world = new World(this.mats, this.physics, this.scene, () => {}, heights);
     this.terrain = this.world.terrain;
+    // water colour by depth over the play area
+    this.env.brosund = MAP_ID === 'brosund';
+    this.env.setSeabed((x, z) => this.terrain.heightAt(x, z), PLAY_HALF + 18, MAP_ID === 'brosund' ? 1 : 0.7);
     mark('world built');
     this.vmScene.environment = this.scene.environment;
     (this.vmScene as any).environmentIntensity = 0.75;
@@ -1359,12 +1377,29 @@ export class Game {
     this.firstBlood = true;
     this.lastKiller = null;
     this.deathStreak = 0;
-    const w = Settings.data.weather;
-    const mv = Settings.data.mapVariant ?? 'random';
-    this.env.setTime(Settings.data.timeOfDay ?? 'dynamic');
+    let w = Settings.data.weather;
+    let mv = Settings.data.mapVariant ?? 'random';
+    let tod = Settings.data.timeOfDay ?? 'dynamic';
+    // Brosund's lighting presets: clear summer, midnight sun, blue hour with lit windows on the
+    // canal, an Atlantic storm, or winter with snow on the roofs (picked per match when random)
+    if (MAP_ID === 'brosund' && tod === 'dynamic' && w === 'auto') {
+      const r = this.rng.next();
+      const pre = mv === 'winter' ? 'winter' : r < 0.32 ? 'summer' : r < 0.5 ? 'midnight' : r < 0.68 ? 'blue' : r < 0.84 ? 'storm' : mv === 'autumn' ? 'summer' : 'winter';
+      if (pre === 'summer') { tod = 'day'; w = 'clear'; mv = 'autumn'; }
+      else if (pre === 'midnight') { tod = 'midnight'; w = this.rng.next() < 0.6 ? 'clear' : 'fair'; mv = 'autumn'; }
+      else if (pre === 'blue') { tod = 'blue'; w = 'fair'; mv = 'autumn'; }
+      else if (pre === 'storm') { tod = this.rng.next() < 0.7 ? 'day' : 'golden'; w = 'storm'; mv = 'autumn'; }
+      else { tod = this.rng.next() < 0.5 ? 'day' : 'blue'; w = this.rng.next() < 0.5 ? 'clear' : 'snow'; mv = 'winter'; }
+    }
+    const storm = w === 'storm';
+    if (storm) w = 'rain';
+    this.env.seaState = storm ? 1 : 0;
+    this.weather.gale = storm ? 1 : 0;
+    this.presetSea = storm ? 1 : 0;
+    this.env.setTime(tod);
     const blue = this.env.blueHour > 0;
     // the blue hour is a winter thing: deep blue snow, warm windows (random map: mostly winter)
-    const winter = mv === 'winter' || (mv === 'random' && this.rng.next() < (blue ? 0.85 : 0.4));
+    const winter = mv === 'winter' || (mv === 'random' && this.rng.next() < (blue ? (MAP_ID === 'brosund' ? 0.4 : 0.85) : 0.4));
     this.winter = winter;
     this.env.winter = winter;
     this.terrain.winter = winter;
@@ -1374,8 +1409,9 @@ export class Game {
     let wx: 'clear' | 'fair' | 'overcast' | 'rain' | 'snow' = w === 'auto'
       ? blue ? (r < 0.6 ? 'fair' : r < 0.85 ? 'snow' : 'overcast')
       : winter ? (r < 0.5 ? 'snow' : r < 0.75 ? 'overcast' : 'clear') : r < 0.22 ? 'rain' : r < 0.32 ? 'snow' : r < 0.55 ? 'overcast' : r < 0.78 ? 'fair' : 'clear'
-      : w;
+      : (w as 'clear' | 'fair' | 'overcast' | 'rain' | 'snow');
     if (winter && wx === 'rain') wx = 'snow';
+    if (this.env.midnightSun && (wx === 'rain' || wx === 'snow')) wx = 'fair';
     this.env.setWeather(wx);
     this.weather.reset(winter, wx);
     this.weather.storm = 0;
@@ -1600,7 +1636,7 @@ export class Game {
       } else if (d) this.useDoor(d);
       else this.trySpot();
     }
-    this.ui.interactHint(a.alive && this.state === 'playing' ? (this.world.zips.ride ? '[SPACE] LET GO' : zipHere ? '[F] ZIPLINE' : this.doorFocus() ? (Math.abs(this.doorFocus()!.target) > 0.5 ? '[F] CLOSE DOOR' : '[F] OPEN DOOR') : '') : '');
+    this.ui.interactHint(a.alive && this.state === 'playing' ? (this.world.zips.ride ? '[SPACE] LET GO' : zipHere ? (zipHere.line.cabin ? '[F] RIDE THE CABLE CAR' : '[F] ZIPLINE') : this.doorFocus() ? (Math.abs(this.doorFocus()!.target) > 0.5 ? '[F] CLOSE DOOR' : '[F] OPEN DOOR') : '') : '');
     if (a.alive && this.weapons.enabled) this.playerActions(dt);
     if (inp.wasPressed('ping') && a.alive) this.ping();
     if (inp.wasPressed('scoreboard')) {
@@ -1620,7 +1656,7 @@ export class Game {
     if (a.alive) {
       if (a.lastHitT > 4 && a.health < 100) a.health = Math.min(100, a.health + dt * 30);
       const p = this.player.pos;
-      const out = Math.abs(p.x) > PLAY_HALF || Math.abs(p.z) > PLAY_HALF || (p.y < 0.4 && p.x < coastX(p.z) - 8);
+      const out = Math.abs(p.x) > PLAY_HALF || Math.abs(p.z) > PLAY_HALF || (p.y < 0.4 && shoreDist(p.x, p.z) < -8 && !inTunnel(p.x, p.y, p.z));
       if (out) {
         this.oobT = this.oobT > 0 ? this.oobT - dt : 5;
         if (this.oobT <= 0.02) this.hurtPlayer(200, 'Out of bounds');
@@ -1739,7 +1775,7 @@ export class Game {
     this.audio.indoor = this.indoor;
     this.audio.setListener(this.camera);
     const p = this.player.pos;
-    this.audio.ambience(dt, this.camera.position, Math.max(0, p.x - coastX(p.z)), this.env.weather, p.y);
+    this.audio.ambience(dt, this.camera.position, Math.max(0, shoreDist(p.x, p.z)), this.env.weather, inTunnel(p.x, p.y, p.z) ? 30 : p.y);
     this.worldAmbience(dt);
     this.audio.loop('slide', Math.max(this.slideAudio * 0.55, this.world.zips.ride ? 0.35 + 0.25 * this.zipAudio : this.zipAudio * 0.5));
     this.damageFeedback(dt);
@@ -2028,7 +2064,7 @@ export class Game {
       damage: playing && !this.killcam ? this.damageFx : 0,
       flash: this.killcam ? 0 : this.flashFx,
       suppression: this.killcam ? 0 : this.suppression,
-      underwater: this.camera.position.y < -0.1 ? 1 : 0,
+      underwater: this.camera.position.y < -0.1 && isWet(this.camera.position.x, this.camera.position.y, this.camera.position.z, -1e9) ? 1 : 0,
       exposure: this.env.exposure,
       rays: this.env.rays,
       sunDir: this.env.sunDir,
@@ -2656,7 +2692,7 @@ export class Game {
         this.onKill(att, v, def.name, false, false);
       },
       blast: (p, n, scale, surface) => {
-        const wet = !!this.explosives.lastGrenade?.wet || (p.y < 0.3 && this.terrain.heightAt(p.x, p.z) < p.y - 0.3);
+        const wet = !!this.explosives.lastGrenade?.wet || (p.y < 0.3 && this.terrain.heightAt(p.x, p.z) < p.y - 0.3 && !inTunnel(p.x, p.y, p.z));
         // underwater: a dull thump and a white plume instead of a fireball
         this.fx.explosion(p, n, wet ? scale * 0.3 : scale, surface);
         this.blastFx.blast(p, n, scale, surface, { water: wet });
@@ -2682,7 +2718,7 @@ export class Game {
       },
       tick: (g, dt) => this.grenadeTick(g, dt),
       gone: (g) => this.audio.stopEmitter('fuse' + g.id),
-      isWater: (p) => p.y < 0 && this.terrain.heightAt(p.x, p.z) < p.y,
+      isWater: (p) => isWet(p.x, p.y, p.z, this.terrain.heightAt(p.x, p.z)),
       surface: (hit) => (hit.info.tag === 'terrain' ? this.terrain.surfaceAt(hit.point.x, hit.point.z) as Surface : hit.info.surface),
       stickObj: (hit, from, dir, len) => {
         if (hit && hit.info.tag === 'door') {
@@ -3207,8 +3243,7 @@ export class Game {
     return !!this.physics.raycast(p.clone().setY(p.y + 0.4), new THREE.Vector3(0, 1, 0), 10);
   }
   private inTunnelAt(p: THREE.Vector3) {
-    const W = TUNNEL.width / 2;
-    return Math.abs(p.x - TUNNEL.x) < W + TUNNEL_EXIT.gx1 + 1 && p.z > TUNNEL.z0 - 4 && p.z < TUNNEL.z1 + 4 && p.y < TUNNEL_EXIT.floor + TUNNEL.height + 2;
+    return inTunnel(p.x, p.y, p.z);
   }
   /** a grenade hits something: the sound of that surface (a can on concrete clanks, a frag thuds into snow) */
   private grenadeBounce(p: THREE.Vector3, speed: number, surface?: Surface, g?: Grenade) {
@@ -3728,7 +3763,7 @@ export class Game {
       const avg = hits ? sum / hits : 40;
       const r = { outdoor: 0, small: 0, hall: 0, tunnel: 0 };
       if (!up || enclosure < 0.45) r.outdoor = 1;
-      else if (minAxis < 20 && maxAxis > 28 && ceil < 11) r.tunnel = 1;
+      else if ((minAxis < 20 && maxAxis > 28 && ceil < 11) || inTunnel(eye.x, eye.y, eye.z)) r.tunnel = 1;
       else if (ceil > 4.5 || avg > 7) r.hall = 1;
       else r.small = 1;
       this.roomTarget = r;
@@ -4579,6 +4614,11 @@ export class Game {
       }
     }
     // ---- tunnel draughts
+    if (MAP_ID === 'brosund') {
+      this.brosundTunnelAmbience(cam);
+      this.waterfallAmbience(cam);
+      return;
+    }
     const shafts = tunnelShafts();
     const W = TUNNEL.width / 2;
     const inTunnel = Math.abs(cam.x - TUNNEL.x) < W + TUNNEL_EXIT.gx1 + 1 && cam.z > TUNNEL.z0 - 4 && cam.z < TUNNEL.z1 + 4 && cam.y < TUNNEL_EXIT.floor + TUNNEL.height + 2;
@@ -4593,6 +4633,57 @@ export class Game {
       const t = this.ambT * 0.17 + i * 5;
       const gust = 0.6 + 0.4 * Math.sin(t) * Math.sin(t * 1.9 + 0.7);
       this.audio.emitter(`portal${i}`, 'loop_wind', near ? (inTunnel ? 0.9 : 0.35) * gust : 0, new THREE.Vector3(TUNNEL.x, TUNNEL_EXIT.floor + 3, z), { ref: 6, lowpass: 320 + 500 * gust, rate: 0.62 + 0.08 * gust });
+    }
+  }
+
+  /**
+   * Sundtunnelen (Brosund): wind at both portals, the jet fans' drone in the crown, the pump room's
+   * hum at the low point, and water dripping from the roof — single plinks near the listener, more
+   * of them the deeper under the sound you are.
+   */
+  /** the three nearest waterfalls roar (white-noise rush, deeper for the big ones), others are silent */
+  private waterfallAmbience(cam: THREE.Vector3) {
+    const wf = this.world.falls;
+    if (!wf) return;
+    const list = wf.falls.map((f, i) => ({ f, i, d: f.far ? 1e9 : f.base.distanceTo(cam) })).sort((a, b) => a.d - b.d);
+    const inside = inTunnel(cam.x, cam.y, cam.z);
+    list.forEach((e, k) => {
+      const on = k < 3 && e.d < 160 && !inside;
+      const mid = e.f.pts[Math.floor(e.f.pts.length * 0.7)] ?? e.f.base;
+      const big = this.audio.has('wf_big'), small = this.audio.has('wf_stream');
+      this.audio.emitter(`fall${e.i}`, e.f.big ? (big ? 'wf_big' : 'loop_rain') : small ? 'wf_stream' : 'loop_waves', on ? (e.f.big ? 1.2 : 0.6) : 0, mid, { ref: e.f.big ? 14 : 5, lowpass: e.f.big ? 5200 : 6500, rate: 0.94 + (e.i % 5) * 0.03 });
+    });
+  }
+  private dripT = 0;
+  private brosundTunnelAmbience(cam: THREE.Vector3) {
+    const bb = this.world.infra.brosund;
+    if (!bb) return;
+    const inside = inTunnel(cam.x, cam.y, cam.z);
+    const pts = bb.tunnelAudio;
+    if (!pts.length) return;
+    let near = 1e9;
+    for (const p of pts) near = Math.min(near, p.distanceTo(cam));
+    const close = near < 90;
+    for (const [i, p] of [pts[0], pts[pts.length - 1]].entries()) {
+      const t = this.ambT * 0.19 + i * 4;
+      const gust = 0.6 + 0.4 * Math.sin(t) * Math.sin(t * 1.7 + 0.4);
+      this.audio.emitter(`brPortal${i}`, 'loop_wind', close ? (inside ? 0.8 : 0.35) * gust : 0, p, { ref: 7, lowpass: 300 + 450 * gust, rate: 0.6 + 0.08 * gust });
+    }
+    // jet-fan drone and the pumps: low, steady, only inside
+    const mid = pts[Math.floor(pts.length / 2)];
+    const fan = this.audio.has('tfan');
+    this.audio.emitter('brFans', fan ? 'tfan' : 'loop_wind', inside ? (fan ? 0.5 : 0.55) : 0, mid, { ref: 30, lowpass: fan ? 1200 : 180, rate: fan ? 1 : 0.35 });
+    this.audio.emitter('brPumps', this.audio.has('pump') ? 'pump' : 'loop_heli', inside ? 0.5 : 0, bb.pumpPos ?? mid, { ref: 5, lowpass: 2400, rate: 1 });
+    // drips
+    if (inside) {
+      this.dripT -= 1 / 60;
+      if (this.dripT <= 0) {
+        this.dripT = 0.25 + Math.random() * 0.9;
+        const d = bb.drips[Math.floor(Math.random() * bb.drips.length)];
+        const p = d && d.distanceTo(cam) < 30 ? d.clone().setY(d.y - (d.y - cam.y) - 1.4) : cam.clone().add(new THREE.Vector3((Math.random() - 0.5) * 14, -1.5, (Math.random() - 0.5) * 14));
+        if (this.audio.has('drip')) this.audio.play('drip', { pos: p, gain: 0.35 + Math.random() * 0.3, ref: 2.5, reverb: 0.9, vary: 0.2, prio: 0 });
+        else this.audio.play('splash', { pos: p, gain: 0.05, ref: 2, reverb: 0.9, rate: 2.6 + Math.random(), prio: 0 });
+      }
     }
   }
 

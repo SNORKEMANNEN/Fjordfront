@@ -3,7 +3,7 @@ import { Combatant } from './Combatant';
 import { Physics } from '../core/Physics';
 import { Terrain } from '../world/Terrain';
 import { NavGraph } from '../ai/NavGraph';
-import { SPAWNS, PLAY_HALF } from '../world/MapLayout';
+import { SPAWNS, PLAY_HALF, MAP_ID } from '../world/MapLayout';
 
 interface Candidate {
   p: THREE.Vector3;
@@ -95,6 +95,18 @@ export class SpawnSystem {
     return this.layout?.home ?? DEFAULT_HOME;
   }
   private makeLayout() {
+    if (MAP_ID === 'brosund') {
+      // Brosund: the sound splits the map — one team starts on the town islands (west), the other
+      // on Ellingsøya (east); which side and which corner of it varies per match
+      const west = [new THREE.Vector3(-165, 0, 75), new THREE.Vector3(-150, 0, -70), new THREE.Vector3(-110, 0, 140)];
+      const east = [new THREE.Vector3(186, 0, 66), new THREE.Vector3(200, 0, -20), new THREE.Vector3(160, 0, 30)];
+      const w = west[Math.floor(Math.random() * west.length)], e = east[Math.floor(Math.random() * east.length)];
+      // snap to the nearest real candidate so the squad has ground to stand on
+      const snap = (p: THREE.Vector3) => this.candidates.reduce((bst, c) => (flat(c.p, p) < flat(bst.p, p) ? c : bst), this.candidates[0]).p.clone();
+      const pw = snap(w), pe = snap(e);
+      this.layout = { home: Math.random() < 0.5 ? [pw, pe] : [pe, pw], taken: [] };
+      return;
+    }
     const pool = this.candidates.filter((c) => !c.curated || Math.random() < 0.6);
     for (let attempt = 0; attempt < 60; attempt++) {
       const ang = Math.random() * Math.PI * 2;

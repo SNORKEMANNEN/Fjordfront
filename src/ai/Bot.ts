@@ -1,3 +1,4 @@
+import { inTunnel } from '../world/MapLayout';
 import * as THREE from 'three';
 import { NETF } from '../net/NetFlags';
 import { bakeFlat, bakeProxy } from '../render/Batch';
@@ -1120,7 +1121,7 @@ export class Bot implements Combatant {
       this.moveSpeed = damp(this.moveSpeed, Math.hypot(moved.x, moved.z) / Math.max(step, 1e-4), 10, step);
     }
     // out of the map: respawn guard
-    if (this.body.pos.y < -3) this.health = 0;
+    if (this.body.pos.y < -3 && !inTunnel(this.body.pos.x, this.body.pos.y, this.body.pos.z)) this.health = 0;
 
     // ---------------- aim ----------------
     let wantYaw = this.vel.lengthSq() > 0.5 ? Math.atan2(-this.vel.x, -this.vel.z) : this.aimYaw;

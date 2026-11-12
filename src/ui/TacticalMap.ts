@@ -1,5 +1,6 @@
 import { Terrain } from '../world/Terrain';
-import { PLAY_HALF, TUNNEL, TUNNEL_EXIT, tunnelShafts, LADDERS, landmarkAt } from '../world/MapLayout';
+import { PLAY_HALF, TUNNEL, TUNNEL_EXIT, tunnelShafts, LADDERS, landmarkAt, MAP_ID, MAP_NAME } from '../world/MapLayout';
+import { tunnelPath, TUN } from '../world/maps/Brosund';
 import type { Input } from '../core/Input';
 import { chartRaster, B, INK, FONT, View, drawRoads, drawBuildings, drawSoundings, drawLandmarkLabels, compassRose, scaleBar, inkObjective, inkDiamond, inkFlag, inkArrow, inkLine, inkCircle } from './Chart';
 
@@ -271,6 +272,20 @@ export class TacticalMap {
   /** the road tunnel runs under the ridge: its bore dashed over the road */
   private drawTunnel() {
     const c = this.c;
+    if (MAP_ID === 'brosund') {
+      // Sundtunnelen: the curved bore under the sound, dashed
+      const P = tunnelPath();
+      for (const [lw, col, dash] of [[TUN.hw * 2, 'rgba(237,230,214,0.75)', [] as number[]], [1.4, INK.ink, [5, 4]]] as const) {
+        c.strokeStyle = col;
+        c.lineWidth = typeof lw === 'number' && lw > 2 ? Math.max(2, (this.sx(TUN.hw * 2) - this.sx(0))) : 1.4;
+        c.setLineDash(dash as number[]);
+        c.beginPath();
+        P.forEach((p, i) => (i ? c.lineTo(this.sx(p.x), this.sy(p.z)) : c.moveTo(this.sx(p.x), this.sy(p.z))));
+        c.stroke();
+      }
+      c.setLineDash([]);
+      return;
+    }
     const W = TUNNEL.width / 2;
     const tx0 = this.sx(TUNNEL.x - W), tx1 = this.sx(TUNNEL.x + W), tz0 = this.sy(TUNNEL.z0), tz1 = this.sy(TUNNEL.z1);
     c.fillStyle = 'rgba(237,230,214,0.75)';
@@ -333,7 +348,7 @@ export class TacticalMap {
         this.halo(label, x + 9, y, '#2E6B44');
       }
     };
-    if (z > 1.3) {
+    if (z > 1.3 && MAP_ID === 'kvitvika') {
       for (const sx of [-1, 1]) for (const dz of TUNNEL_EXIT.doors) ex(this.sx(TUNNEL.x + sx * (TUNNEL.width / 2 + 0.6)), this.sy(dz), 'EXIT');
       for (const sh of tunnelShafts()) ex(this.sx((sh.x0 + sh.x1) / 2), this.sy(TUNNEL_EXIT.shaftZ), 'HATCH');
     }
@@ -482,7 +497,7 @@ export class TacticalMap {
     c.fillStyle = INK.ink;
     c.font = `800 26px ${FONT.display}`;
     (c as any).letterSpacing = '3px';
-    c.fillText('KVITVIKA', 32, 50);
+    c.fillText(MAP_NAME.toUpperCase(), 32, 50);
     c.font = `600 10px ${FONT.cond}`;
     (c as any).letterSpacing = '2.5px';
     c.fillStyle = INK.ink2;

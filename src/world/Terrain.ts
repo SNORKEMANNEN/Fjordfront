@@ -2,7 +2,8 @@ import * as THREE from 'three';
 import { Settings } from '../game/Settings';
 import { MaterialLib } from '../render/Materials';
 import { Physics } from '../core/Physics';
-import { terrainHeight, forestDensity, nearestRoad, PLAY_HALF, TERRAIN_EXTENT, padsNear, TUNNEL, TUNNEL_EXIT, tunnelCapHeight, tunnelShafts } from './MapLayout';
+import { terrainHeight, forestDensity, nearestRoad, PLAY_HALF, TERRAIN_EXTENT, padsNear, TUNNEL, TUNNEL_EXIT, tunnelCapHeight, tunnelShafts, MAP_ID, capHeightAt } from './MapLayout';
+import { tunnelPath, TUN, TUN_FEATURES, GLACIER, glacierMask, canalZ, CANAL_HW, LAKE, brPastPortal } from './maps/Brosund';
 import { clamp, smoothstep } from '../core/math';
 
 import { INNER, STEP, axisCoords } from './TerrainData';
@@ -157,7 +158,7 @@ export class Terrain {
     physics.addTrimesh(verts, idx, { surface: 'grass', tag: 'terrain' });
 
     // Ridge cap over the tunnel
-    this.cap = this.buildTunnelCap(physics);
+    this.cap = MAP_ID === 'brosund' ? this.buildBrosundCap(physics) : this.buildTunnelCap(physics);
     console.log(`[terrain] ${n}x${n} verts in ${(performance.now() - t0).toFixed(0)}ms`);
   }
 
@@ -225,6 +226,50 @@ export class Terrain {
     return m;
   }
 
+  /**
+   * Brosund: the ground over Sundtunnelen's curved bore (the hillsides at both ends and the seabed
+   * under the sound). A regular 1 m grid over the bore's bounding box; only cells over the bore are kept.
+   */
+  private buildBrosundCap(physics: Physics) {
+    const P = tunnelPath();
+    let x0 = 1e9, x1 = -1e9, z0 = 1e9, z1 = -1e9;
+    const R = TUN.hw + TUN.carve + TUN_FEATURES.layby.width + 3;
+    for (const p of P) {
+      x0 = Math.min(x0, p.x - R); x1 = Math.max(x1, p.x + R);
+      z0 = Math.min(z0, p.z - R); z1 = Math.max(z1, p.z + R);
+    }
+    const st = 1.0;
+    const nx = Math.ceil((x1 - x0) / st) + 1, nz = Math.ceil((z1 - z0) / st) + 1;
+    const pos = new Float32Array(nx * nz * 3);
+    const cov = new Uint8Array(nx * nz);
+    for (let j = 0; j < nz; j++) for (let i = 0; i < nx; i++) {
+      const x = x0 + i * st, z = z0 + j * st, k = j * nx + i;
+      const c = capHeightAt(x, z);
+      cov[k] = c === null ? (brPastPortal(x, z) ? 2 : 0) : 1;
+      pos[k * 3] = x;
+      pos[k * 3 + 1] = c ?? terrainHeight(x, z);
+      pos[k * 3 + 2] = z;
+    }
+    const idx: number[] = [];
+    for (let j = 0; j < nz - 1; j++) for (let i = 0; i < nx - 1; i++) {
+      const a = j * nx + i, b = a + 1, c = a + nx, d = c + 1;
+      if (!((cov[a] & 1) || (cov[b] & 1) || (cov[c] & 1) || (cov[d] & 1))) continue;
+      // (cells reaching past a portal end are left out: the headwall closes that edge)
+      if ((cov[a] | cov[b] | cov[c] | cov[d]) & 2) continue;
+      idx.push(a, c, b, b, c, d);
+    }
+    const g = new THREE.BufferGeometry();
+    g.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+    g.setIndex(idx);
+    g.computeVertexNormals();
+    const m = new THREE.Mesh(g, this.material);
+    m.receiveShadow = true;
+    m.castShadow = true;
+    m.name = 'tunnelCap';
+    physics.addMeshCollider(g, null, { surface: 'rock' });
+    return m;
+  }
+
   private buildSplat(): Uint8Array {
     const S = 512;
     const data = new Uint8Array(S * S * 4);
@@ -249,16 +294,32 @@ export class Terrain {
           const lz = Math.abs(dx * s + dz * c) - p.hd + 1.0;
           const d = Math.max(lx, lz);
           if (d < 3) {
-            const harbour = z > 96 && x < 90;
+            const harbour = MAP_ID === 'brosund' ? true : z > 96 && x < 90;
             if (harbour) gravel = Math.max(gravel, 1 - smoothstep(-1, 3, d));
             else dirt = Math.max(dirt, (1 - smoothstep(-1, 2.5, d)) * 0.7);
           }
         }
-        // Harbour: concrete/gravel yard
-        if (z > 100 && x < 90 && z < 184) gravel = Math.max(gravel, 0.85);
-        // Fort plateau: worn dirt
-        const fd = Math.hypot(x - 30, z + 142);
-        dirt = Math.max(dirt, (1 - smoothstep(10, 40, fd)) * 0.55 * (0.5 + 0.5 * Math.sin(x * 0.3) * Math.sin(z * 0.27)));
+        if (MAP_ID === 'brosund') {
+          // paved quays along the canal and the two harbours; the portal plaza; the summit plateau path
+          const dc = Math.abs(z - canalZ(x));
+          if (x > -186 && x < 40 && dc < CANAL_HW + 7.5) gravel = Math.max(gravel, 0.95);
+          if (x > 96 && x < 140 && z > -66 && z < 84 && h < 3.2) gravel = Math.max(gravel, 0.9);
+          if (x > 10 && x < 46 && z > -60 && z < 80 && h < 3.2) gravel = Math.max(gravel, 0.9);
+          if (Math.hypot(x - 146, z + 52) < 16) gravel = Math.max(gravel, 0.8);
+          if (Math.hypot(x + 96, z + 104) < 16) dirt = Math.max(dirt, 0.5);
+          // glacier forefield: bare moraine gravel below the snowfield
+          const gm = Math.hypot((x - GLACIER.x) / (GLACIER.rx * 1.45), (z - GLACIER.z) / (GLACIER.rz * 1.45));
+          if (gm < 1) gravel = Math.max(gravel, (1 - smoothstep(0.75, 1, gm)) * 0.7);
+          // the lake shore
+          const lk = Math.hypot((x - LAKE.x) / LAKE.rx, (z - LAKE.z) / LAKE.rz);
+          if (lk < 1.35) gravel = Math.max(gravel, 1 - smoothstep(1.1, 1.35, lk));
+        } else {
+          // Harbour: concrete/gravel yard
+          if (z > 100 && x < 90 && z < 184) gravel = Math.max(gravel, 0.85);
+          // Fort plateau: worn dirt
+          const fd = Math.hypot(x - 30, z + 142);
+          dirt = Math.max(dirt, (1 - smoothstep(10, 40, fd)) * 0.55 * (0.5 + 0.5 * Math.sin(x * 0.3) * Math.sin(z * 0.27)));
+        }
         const k = (j * S + i) * 4;
         data[k] = clamp(f * 255, 0, 255);
         data[k + 1] = clamp(gravel * 255, 0, 255);
@@ -280,8 +341,7 @@ export class Terrain {
 
   /** The topmost ground: like heightAt, but over the tunnel it is the ridge cap, not the carved floor. */
   topAt(x: number, z: number): number {
-    if (Math.abs(x - TUNNEL.x) < TUNNEL.width / 2 + TUNNEL_EXIT.carve + 1 && z > TUNNEL.z0 - 1 && z < TUNNEL.z1 + 1) return tunnelCapHeight(x, z);
-    return this.heightAt(x, z);
+    return capHeightAt(x, z) ?? this.heightAt(x, z);
   }
 
   heightAt(x: number, z: number): number {
@@ -312,6 +372,7 @@ export class Terrain {
     const n = this.normalAt(x, z);
     if (n.y < 0.72) return 'rock';
     if (this.winter && h > 0.6) return 'snow';
+    if (MAP_ID === 'brosund' && glacierMask(x, z, h) > 0.5) return 'snow';
     const [f, g, d] = this.splatAt(x, z);
     if (g > 0.5) return 'gravel';
     if (h < 1.3) return 'sand';
@@ -333,6 +394,9 @@ export class Terrain {
       uInner: { value: INNER },
       uCloudT: { value: 0 },
       uCloudAmt: { value: 0.5 },
+      // snow line (lo, hi), heather / wildflower tint amount, glacier on (Brosund: summits white all summer)
+      uMapK: { value: MAP_ID === 'brosund' ? new THREE.Vector4(300, 420, 1, 1) : new THREE.Vector4(480, 620, 0, 0) },
+      uGlacier: { value: new THREE.Vector4(GLACIER.x, GLACIER.z, GLACIER.rx, GLACIER.rz) },
     };
     this.cloudUniforms = uniforms;
     m.onBeforeCompile = (shader) => {
@@ -346,7 +410,7 @@ export class Terrain {
           `#include <common>
           varying vec3 vTW; varying vec3 vTN;
           uniform sampler2D tGrassA, tGrassN, tRockA, tRockN, tForestA, tForestN, tGravelA, tGravelN, tSplat;
-          uniform float uInner; uniform float uCloudT; uniform float uCloudAmt;
+          uniform float uInner; uniform float uCloudT; uniform float uCloudAmt; uniform vec4 uMapK; uniform vec4 uGlacier;
           vec3 tNrm; float tRough;
           float hash2(vec2 p){ return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
           float vnoise(vec2 p){ vec2 i = floor(p), f = fract(p); f = f*f*(3.0-2.0*f);
@@ -385,16 +449,24 @@ export class Terrain {
             // weights
             float slope = 1.0 - N.y;
             float h = wp.y;
-            float rockW = smoothstep(0.24, 0.42, slope + (macro - 0.5) * 0.12);
+            // (Brosund: birch and grass cling to steeper fjord slopes before the rock shows)
+            float rockW = uMapK.z > 0.0 ? smoothstep(0.34, 0.55, slope + (macro - 0.5) * 0.16) : smoothstep(0.24, 0.42, slope + (macro - 0.5) * 0.12);
             rockW = max(rockW, smoothstep(140.0, 260.0, h + macro * 80.0));
             // triplanar rock: only where there is rock (a coherent branch: most flat ground skips 6 reads)
             vec3 bw = pow(abs(N), vec3(4.0)); bw /= (bw.x + bw.y + bw.z);
-            float rt = mix(6.0, 40.0, far);
+            float rt = uMapK.z > 0.0 ? mix(9.0, 70.0, far) : mix(6.0, 40.0, far);
             vec4 rA = vec4(0.0); float rH = 0.0;
             vec4 rNx = vec4(0.5, 0.5, 1.0, 0.0), rNy = rNx, rNz = rNx;
             if (rockW > 0.001) {
               vec4 rAx = texture2D(tRockA, wp.zy / rt), rAy = texture2D(tRockA, wp.xz / rt), rAz = texture2D(tRockA, wp.xy / rt);
               rA = rAx * bw.x + rAy * bw.y + rAz * bw.z;
+              if (uMapK.z > 0.0) {
+                // gneiss: banded light / dark rock, water-stained streaks down the faces, lichen
+                float band = vnoise(vec2((wp.x + wp.z) * 0.013, wp.y * 0.05));
+                float streak = vnoise(vec2((wp.x - wp.z) * 0.11, wp.y * 0.0045));
+                rA.rgb *= mix(0.6, 1.22, band) * mix(1.0, 0.62, smoothstep(0.62, 0.86, streak));
+                rA.rgb = mix(rA.rgb, rA.rgb * vec3(0.78, 0.96, 0.72), smoothstep(0.55, 0.8, vnoise(wp.xz * 0.03 + wp.y * 0.012)) * 0.55);
+              }
             #ifndef TERRAIN_LOW
               rNx = texture2D(tRockN, wp.zy / rt); rNy = texture2D(tRockN, wp.xz / rt); rNz = texture2D(tRockN, wp.xy / rt);
               rH = rNx.a * bw.x + rNy.a * bw.y + rNz.a * bw.z;
@@ -420,8 +492,22 @@ export class Terrain {
             // macro colour variation
             alb *= mix(0.82, 1.12, macro);
             alb = mix(alb, alb * vec3(1.08, 1.02, 0.85), smoothstep(0.55, 0.8, macro) * wg * 0.6);
-            // snow on high peaks
-            float snow = smoothstep(480.0, 620.0, h + macro * 140.0) * smoothstep(0.55, 0.85, N.y + 0.2);
+            // heather and wildflower meadows (Brosund): purple heather on the open slopes, blue / violet speckle
+            if (uMapK.z > 0.0) {
+              float hz = smoothstep(14.0, 40.0, h) * (1.0 - smoothstep(160.0, 260.0, h)) * smoothstep(0.55, 0.75, vnoise(wp.xz * 0.045 + 3.0));
+              alb = mix(alb, alb * vec3(1.05, 0.62, 1.0) + vec3(0.06, 0.0, 0.05), hz * wg * 0.75);
+              float fl = step(0.93, hash2(floor(wp.xz * 3.0))) * smoothstep(0.45, 0.6, vnoise(wp.xz * 0.09 - 5.0)) * wg * (1.0 - far);
+              alb = mix(alb, mix(vec3(0.32, 0.38, 0.85), vec3(0.6, 0.3, 0.75), hash2(floor(wp.xz * 3.0) + 7.0)), fl * 0.7);
+            }
+            // snow on high peaks (the snow line is per map) and the valley-head snowfield
+            float snow = smoothstep(uMapK.x, uMapK.y, h + macro * 140.0) * smoothstep(0.55, 0.85, N.y + 0.2);
+            if (uMapK.w > 0.0) {
+              float gr = length((wp.xz - uGlacier.xy) / uGlacier.zw) + (vnoise(wp.xz * 0.05) - 0.5) * 0.5;
+              float gl = (1.0 - smoothstep(0.75, 1.0, gr)) * smoothstep(24.0, 34.0, h);
+              snow = max(snow, gl * smoothstep(0.3, 0.6, N.y));
+              // blue glacier ice where it steepens
+              alb = mix(alb, vec3(0.55, 0.72, 0.82), gl * smoothstep(0.75, 0.55, N.y) * 0.8);
+            }
             alb = mix(alb, vec3(0.86, 0.88, 0.92), snow);
             // wet shoreline
             float wet = 1.0 - smoothstep(0.1, 0.9, h);

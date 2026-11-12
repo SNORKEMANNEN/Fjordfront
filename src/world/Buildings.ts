@@ -3,6 +3,7 @@ import { GeoBuilder } from './GeoBuilder';
 import { BuildingDef, BUILDINGS, SEA_LEVEL, LADDERS } from './MapLayout';
 import { Physics } from '../core/Physics';
 import { RNG } from '../core/math';
+import { jugend, stoneChurch, cafe, molja } from './Jugend';
 
 export interface NavHint { a: THREE.Vector3; b: THREE.Vector3 } // explicit links (doorways)
 export interface CoverPoint { p: THREE.Vector3; n: THREE.Vector3 }
@@ -25,7 +26,7 @@ export class Buildings {
   glass: GlassPanes;
   /** Footprints (world space AABB of each building) for vegetation/placement exclusion. */
   footprints: THREE.Box3[] = [];
-  private b: GeoBuilder;
+  b: GeoBuilder;
   get doors() {
     return this.b.doors;
   }
@@ -33,7 +34,7 @@ export class Buildings {
     return this.b.mats;
   }
 
-  constructor(private physics: Physics, mats: Record<string, THREE.Material>, private heightAt: (x: number, z: number) => number, parent: THREE.Object3D) {
+  constructor(public physics: Physics, mats: Record<string, THREE.Material>, public heightAt: (x: number, z: number) => number, parent: THREE.Object3D) {
     this.b = new GeoBuilder(physics, mats);
     this.glass = new GlassPanes(mats.glass);
     this.glass.initFrames(mats.trim ?? mats.glass);
@@ -42,6 +43,7 @@ export class Buildings {
       const y = def.padY ?? heightAt(def.x, def.z);
       this.b.push([def.x, y, def.z], def.rot);
       const before = this.navPoints.length;
+      this.turf = !!def.turf;
       switch (def.kind) {
         case 'house': this.house(def); break;
         case 'rorbu': this.rorbu(def); break;
@@ -62,10 +64,15 @@ export class Buildings {
         case 'lighthouse': this.lighthouse(); break;
         case 'tower': this.tower(); break;
         case 'radome': this.radome(); break;
+        case 'jugend': jugend(this, def); break;
+        case 'stonechurch': stoneChurch(this, def); break;
+        case 'cafe': cafe(this, def); break;
+        case 'molja': molja(this); break;
       }
+      this.turf = false;
       void before;
       this.b.pop();
-      const KIND_R: Record<string, number> = { containers: 17, crane: 13, tanks: 20, church: 14, warehouse: 0, mast: 5, gunpit: 7, hjell: 8, lighthouse: 5, tower: 3, radome: 7 };
+      const KIND_R: Record<string, number> = { containers: 17, crane: 13, tanks: 20, church: 14, warehouse: 0, mast: 5, gunpit: 7, hjell: 8, lighthouse: 5, tower: 3, radome: 7, stonechurch: 16, molja: 4 };
       const r = KIND_R[def.kind] || Math.max(def.w ?? 8, def.d ?? 8) * 0.75 + 2;
       this.footprints.push(new THREE.Box3(new THREE.Vector3(def.x - r, y - 5, def.z - r), new THREE.Vector3(def.x + r, y + 30, def.z + r)));
     }
@@ -76,18 +83,18 @@ export class Buildings {
   }
 
   /** Record a nav link between two local points (converted to world). */
-  private link(ax: number, ay: number, az: number, bx: number, by: number, bz: number) {
+  link(ax: number, ay: number, az: number, bx: number, by: number, bz: number) {
     const m = this.b.m;
     const a = new THREE.Vector3(ax, ay, az).applyMatrix4(m);
     const c = new THREE.Vector3(bx, by, bz).applyMatrix4(m);
     this.nav.push({ a, b: c });
   }
-  private point(x: number, y: number, z: number) {
+  point(x: number, y: number, z: number) {
     this.navPoints.push(new THREE.Vector3(x, y, z).applyMatrix4(this.b.m));
   }
 
   // ---------------------------------------------------------------- helpers
-  private windowFrame(x: number, y0: number, y1: number, w: number, z: number, outward: number, glass: boolean, mullion = true) {
+  windowFrame(x: number, y0: number, y1: number, w: number, z: number, outward: number, glass: boolean, mullion = true) {
     const b = this.b;
     const tw = 0.075, td = 0.05;
     const zo = z + outward * 0.02;
@@ -129,7 +136,7 @@ export class Buildings {
   }
 
   /** Ceiling lamp: cord, shade and an emissive bulb; registers a light anchor. */
-  private fixture(x: number, ceil: number, z: number, kind: 'pendant' | 'strip' | 'bay' | 'bare' = 'pendant') {
+  fixture(x: number, ceil: number, z: number, kind: 'pendant' | 'strip' | 'bay' | 'bare' = 'pendant') {
     const b = this.b;
     const n0 = this.fixtures.length;
     this.fixtureInner(x, ceil, z, kind);
@@ -167,8 +174,14 @@ export class Buildings {
     }
   }
 
-  private gableRoof(w: number, d: number, top: number, pitch: number, oh: number, mat: string, fascia = true) {
+  /** turf roofs (Brosund's farm and cabins): every roof built while set is sod */
+  turf = false;
+  gableRoof(w: number, d: number, top: number, pitch: number, oh: number, mat: string, fascia = true) {
     const b = this.b;
+    if (this.turf) {
+      mat = 'sod';
+      pitch = Math.min(pitch, 0.5);
+    }
     const half = d / 2 + oh;
     const rise = (d / 2) * Math.tan(pitch);
     const len = half / Math.cos(pitch);
@@ -285,7 +298,7 @@ export class Buildings {
    * (cx,cz) is the top edge at the threshold, (dx,dz) the outward direction. Steps keep
    * going until they meet the ground, so sloping sites and road cuts never leave a ledge.
    */
-  private steps(cx: number, cz: number, dx: number, dz: number, width: number, F: number, _n = 3) {
+  steps(cx: number, cz: number, dx: number, dz: number, width: number, F: number, _n = 3) {
     void _n;
     const b = this.b;
     const depth = 0.32, riser = 0.18;

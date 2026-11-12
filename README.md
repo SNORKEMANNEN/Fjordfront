@@ -290,6 +290,88 @@ URL options: `?quality=low|medium|high|ultra`, `?weather=clear|overcast|rain|sno
 - **Rifle:** support hand moved so it no longer shows through the optic window.
 - **Pistol:** hold reworked.
 
+## Update 34: Brosund, a second map
+
+A whole new map inspired by Ålesund and the Sunnmøre Alps: a Jugendstil canal town spread over three islands, joined by bridges and an undersea tunnel. On one side is the open Atlantic; on the other, a deep fjord walled by peaks with snow on the summits. Pick the map on the main menu (**Kvitvika / Brosund** cards, the page reloads into it) or with `?level=brosund`. In multiplayer, clients load the host's map automatically. Everything is built procedurally in code; no new third-party models.
+
+### Layout
+- **Nørvøya (north-west):** the north half of the town; **Aksla**, the viewpoint hill, with the **Fjellstua** café and terrace on the summit, granite stairs up the steep east face and a gravel road looping up the west side; and Sundkyrkja, a granite church with a 30 m tower.
+- **Aspøya (south-west):** the south half of the town, villas on a hill with a lookout tower, a beach with turquoise shallows, and **Molja**, the little red lighthouse at the end of the breakwater at the canal's Atlantic mouth.
+- **Brosundet:** the canal between them, with granite quay walls, bollards, ladders, moored sailboats and fishing boats, a stone arch bridge, an iron bridge and a steel footbridge.
+- **Ellingsøya (east):** wooden sea houses, a fish hall and a crane on the harbour. An **alpine valley** climbs past a turquoise glacial lake with cabins to a **snowfield** at its head, and a mountain-shelf farm with turf roofs sits on the ridge. Cliffs drop into the fjord.
+- **The view from Aksla takes in everything:** the coloured towers, the canal, the islands, the ocean and the peaks. It is also the main-menu backdrop on Brosund.
+
+### The town
+- About 100 **Jugendstil blocks** of 3–5 storeys, laid out in rows along the canal and the streets behind it:
+  - stucco in ochre, salmon, mint, white, deep red, yellow and pale blue;
+  - slate or green-copper mansard roofs with dormers;
+  - curved or stepped front gables, and round corner turrets with spires or bell domes;
+  - arched top-floor windows with keystones, string courses and a heavy cornice;
+  - stucco ornaments and wrought-iron balconies.
+- About half of the quay-front shops are **open**: you can run through them from the canal to the street behind. Iron street lamps line the promenades.
+
+### Sundtunnelen (undersea tunnel)
+- Built after your photos: a long, curving tunnel that drops at about 13% to 11 m below sea level and runs under the sound. Inside:
+  - rough shotcrete walls, a two-lane road with a yellow centre line, and raised walkways;
+  - fluorescent strips in the roof;
+  - a **turnaround lay-by** with yellow chevrons, the "Snu og køyr ut / Turn and exit" board under a red lamp, and **blue light**;
+  - SOS and extinguisher niches;
+  - a **pump room** at the low point behind a steel door;
+  - water **dripping** from the roof, with puddles and wet streaks.
+- **Portals:** a concrete arch collar standing out from a dry-stone wall cut into the rock, a yellow/black height bar, a blue name board and a red emergency cabinet.
+- **Acoustics:** long tunnel reverb, fan drone, pump hum and drip plinks.
+- It is a claustrophobic chokepoint, and flag C sits in the lay-by.
+
+### Sundbrua and traversal
+- **Sundbrua:** a cable-stayed bridge across the sound, with one H pylon, a fan of stays and abandoned cars on the deck for cover. It is the other crossing.
+- **Linbanen:** a cable car across the sound from Aksla's summit to the valley on Ellingsøya, about a 30 s ride. Press [F] at either station.
+- **Five ziplines:** from Aksla down into the town, from the shelf farm to the harbour, and more.
+
+### Nature
+- **Sunnmøre Alps:** sharp peaks up to ~900 m rise steeply from the sea, broken by buttresses and gullies. The rock is banded gneiss with water stains and lichen, and snow lies on the summits all summer.
+- **Water:** emerald-green fjord water over turquoise shallows, coloured by depth from a seabed map (Kvitvika gets a subtler version of the same). Long **Atlantic swells** roll in on the west side.
+- **Waterfalls everywhere:**
+  - big landmark falls, plus streams down the cliffs and white threads on the far fjord walls;
+  - each fall follows the terrain downhill, with scrolling water, mist where it lands, and a sound source.
+- **Vegetation:**
+  - birch woods with white trunks, pine and juniper;
+  - purple heather on the open slopes and blue/violet wildflower meadows;
+  - mossy boulders.
+
+### Gameplay
+- **Domination with five fixed flags:**
+
+  | Flag | Name | Side |
+  |---|---|---|
+  | A | Fjellstua | west |
+  | B | Brosundet | west |
+  | C | Sundtunnelen | middle, under the sound |
+  | D | Kaia | east |
+  | E | Dalen | east |
+
+- **Teams:** each match one team starts on the town islands and the other on Ellingsøya.
+- **Choke points:** the bridge and the tunnel are the ways across. Bots plan routes through both (the nav graph now understands tunnel floors and the ground on top of a tunnel), and they also use the stairs, the breakwater and the farm road.
+
+### Lighting presets
+Random per match on Brosund, or pick them in Settings:
+- **Clear summer**
+- **Midnight sun:** new time of day; the sun skims the northern horizon.
+- **Blue hour:** the windows light up and reflect in the canal.
+- **Atlantic storm:** new weather; gale, rain, dark heavy seas with foam on the swells. A storm can also roll in mid-match.
+- **Winter:** snow on the roofs and peaks.
+
+### Sound
+Waterfall roar, cliff streams, tunnel drips, pump hum and fan drone are cut from real CC0 recordings by `tools/env_sfx_build.py`. The sources are rubberduck's "40 CC0 water / splash / slime SFX" and "100 CC0 SFX #2" on OpenGameArt.
+
+### Performance
+- Heavy town materials are merged per 110 m cell, so the camera and the shadow cascades can cull them.
+- Waterfalls are merged into one mesh, mist is a single point cloud, and the cable-car cabins are merged.
+- In the busiest town view this saves about a quarter of the triangles. Brosund still costs somewhat more than Kvitvika.
+
+### Tests
+- `tools/brcheck.cjs`: nav routes from both bases to all five flags, plus a bot match.
+- `tools/brshots.cjs` / `tools/brmenu.cjs`: views and the menu.
+
 ## Update 33: clear skies, weathered world, better goggles
 
 A batch of graphics work aimed at looking better without costing much frame time. Most of it lives in shaders that were already running, or is baked once.

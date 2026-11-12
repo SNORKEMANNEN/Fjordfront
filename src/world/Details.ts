@@ -2,7 +2,8 @@ import * as THREE from 'three';
 import { GeoBuilder } from './GeoBuilder';
 import { Buildings } from './Buildings';
 import { Terrain } from './Terrain';
-import { ROADS, LANDMARKS, LADDERS, TUNNEL, nearestRoad, coastX, PLAY_HALF } from './MapLayout';
+import { ROADS, LANDMARKS, LADDERS, TUNNEL, nearestRoad, coastX, PLAY_HALF, MAP_ID, shoreDist, isWater } from './MapLayout';
+import { tunnelFloorAt, canalZ, CANAL_HW } from './maps/Brosund';
 import { RNG } from '../core/math';
 
 /**
@@ -28,11 +29,14 @@ export class Details {
     this.doors = bld.doors.map((d) => d.hinge.clone().addScaledVector(d.along, d.width / 2));
     this.yards();
     this.roadsides();
-    this.harbour();
-    this.farmland();
-    this.poiProps();
-    this.heroProps();
-    this.combatZones();
+    if (MAP_ID === 'brosund') this.brosund();
+    else {
+      this.harbour();
+      this.farmland();
+      this.poiProps();
+      this.heroProps();
+      this.combatZones();
+    }
     // keep trees from growing through the props
     for (const p of this.placed) {
       if (p.y < 0.9) continue;
@@ -49,9 +53,10 @@ export class Details {
   private ok(x: number, z: number, r = 1, roadMargin = 1.2, bldMargin = 1.0) {
     if (Math.abs(x) > PLAY_HALF - 6 || Math.abs(z) > PLAY_HALF - 6) return false;
     const y = this.h(x, z);
-    if (y < 1.1 || x < coastX(z) + 2) return false;
+    if (y < 1.1 || shoreDist(x, z) < 2 || isWater(x, z, y)) return false;
     // the tunnel is dressed by Infrastructure (and the terrain under the ridge cap is carved)
-    if (Math.abs(x - TUNNEL.x) < TUNNEL.width / 2 + 8 && z > TUNNEL.z0 - 6 && z < TUNNEL.z1 + 6) return false;
+    if (MAP_ID === 'kvitvika' && Math.abs(x - TUNNEL.x) < TUNNEL.width / 2 + 8 && z > TUNNEL.z0 - 6 && z < TUNNEL.z1 + 6) return false;
+    if (MAP_ID === 'brosund' && tunnelFloorAt(x, z, 12) !== null) return false;
     const n = this.terrain.normalAt(x, z);
     if (n.y < 0.9) return false;
     const rd = nearestRoad(x, z);
@@ -342,6 +347,71 @@ export class Details {
         }
       }
     }
+  }
+
+  /** Brosund: life on the quays — fish crates, ropes, buoys and nets, benches and planters, café tables. */
+  private brosund() {
+    const zones: { x0: number; x1: number; z: (x: number) => number; spread: number; n: number; kind: 'quay' | 'town' }[] = [
+      { x0: -180, x1: 36, z: (x) => canalZ(x) - CANAL_HW - 3.2, spread: 1.4, n: 40, kind: 'quay' },
+      { x0: -180, x1: 32, z: (x) => canalZ(x) + CANAL_HW + 3.2, spread: 1.4, n: 40, kind: 'quay' },
+    ];
+    for (const zn of zones) {
+      for (let i = 0; i < zn.n; i++) {
+        const x = this.rng.range(zn.x0, zn.x1);
+        const z = zn.z(x) + this.rng.range(-zn.spread, zn.spread);
+        const kind = this.rng.pick(['fish', 'rope', 'buoys', 'barrels', 'crates', 'bench', 'planter', 'bench', 'net'] as const);
+        const r = kind === 'bench' ? 1.2 : 1;
+        if (!this.ok(x, z, r, 0.8, 0.8)) continue;
+        // benches and planters face the water
+        const yaw = Math.atan2(0, canalZ(x) - z) + (kind === 'bench' ? 0 : this.rng.range(-0.5, 0.5));
+        this.at(x, z, yaw, () => {
+          if (kind === 'fish') this.fishCrates(this.rng.int(1, 3));
+          else if (kind === 'rope') this.ropeCoil();
+          else if (kind === 'buoys') this.buoys(this.rng.int(2, 4));
+          else if (kind === 'barrels') this.barrels(this.rng.int(2, 3));
+          else if (kind === 'crates') this.crates(this.rng.int(1, 3));
+          else if (kind === 'bench') this.bench();
+          else if (kind === 'planter') this.planter();
+          else this.netPile();
+        });
+        this.mark(x, z, r);
+      }
+    }
+    // Ellingsøya harbour yard
+    for (let i = 0; i < 60; i++) {
+      const x = this.rng.range(108, 150), z = this.rng.range(-60, 84);
+      const kind = this.rng.pick(['fish', 'fish', 'rope', 'buoys', 'barrels', 'drum', 'net', 'tarp', 'crates', 'pallets'] as const);
+      const r = kind === 'tarp' || kind === 'pallets' ? 1.6 : 1.1;
+      if (!this.ok(x, z, r, 1.0, 1.0)) continue;
+      this.at(x, z, this.rng.range(0, 6.28), () => {
+        if (kind === 'fish') this.fishCrates(this.rng.int(2, 4));
+        else if (kind === 'rope') this.ropeCoil();
+        else if (kind === 'buoys') this.buoys(this.rng.int(3, 6));
+        else if (kind === 'barrels') this.barrels(this.rng.int(2, 5));
+        else if (kind === 'drum') this.cableDrum();
+        else if (kind === 'net') this.netPile();
+        else if (kind === 'tarp') this.tarpPile();
+        else this.crates(this.rng.int(2, 4));
+      });
+      this.mark(x, z, r);
+    }
+    // gardens and the hillsides: benches, bins, firewood; the summit and the shelf farm
+    for (let i = 0; i < 120; i++) {
+      const x = this.rng.range(-200, 230), z = this.rng.range(-200, 190);
+      const kind = this.rng.pick(['bench', 'bin', 'firewood', 'crates', 'barrels', 'bale'] as const);
+      const r = kind === 'firewood' ? 1.7 : 1.1;
+      if (!this.ok(x, z, r, 1.2, 1.0)) continue;
+      this.at(x, z, this.rng.range(0, 6.28), () => {
+        if (kind === 'bench') this.bench();
+        else if (kind === 'bin') this.bin();
+        else if (kind === 'firewood') this.firewood();
+        else if (kind === 'crates') this.crates(this.rng.int(1, 3));
+        else if (kind === 'barrels') this.barrels(this.rng.int(1, 3));
+        else this.bale(this.rng.chance(0.5));
+      });
+      this.mark(x, z, r);
+    }
+    void LANDMARKS;
   }
 
   private harbour() {
