@@ -290,6 +290,42 @@ URL options: `?quality=low|medium|high|ultra`, `?weather=clear|overcast|rain|sno
 - **Rifle:** support hand moved so it no longer shows through the optic window.
 - **Pistol:** hold reworked.
 
+## Update 30: loadout screen reorganised
+
+The loadout screen is laid out like a modern console shooter's loadout editor. Only the layout changed: every colour, font, border, texture and effect is the Sjøkart style from Update 29.
+
+### Layout, top to bottom
+1. **Header bar:** back, title (*Rediger utrustning · edit loadouts*), a hint, and **CONFIRM** on the right.
+2. **The workbench** fills the upper area: the 3D gun on the blueprint grid, the calibre / rate / magazine / range callouts, and the drawing plate. A name tag sits in the corner.
+3. **Overview strip:** one horizontal card near the bottom, with sections separated by inked rules:
+   - Primary and secondary: silhouette, name, class, RPM, rounds.
+   - Tactical and lethal: icon, name, count.
+   - Perks.
+   - Field upgrade.
+   - Hovering a weapon section puts that gun on the bench. Clicking any section opens its picker.
+4. **Saved loadouts:** the five loadouts in a row underneath. The selected one is inked dark with a red rule, and its RENAME and EDIT actions sit beneath it (double-click any slot to rename it).
+
+### Picking
+Clicking a section turns the strip into that slot's picker, in the same place:
+- **Weapons:** category tabs and cards. The stats column (with the green / red comparison against your equipped gun) moves beside the bench. Click to inspect, click again or EQUIP to take it.
+- **Tactical, lethal, field upgrade:** the choices as cards, with the item's sheet beside it.
+- Back (or the header's back button) returns to the overview.
+
+### Perks
+The game has no perk slots, so the perks section is read-only. It shows the standard-issue abilities every soldier carries: tactical sprint, ping / spot and squad orders.
+
+### Functionality kept
+Every existing action still works:
+- Inspect, equip and compare.
+- Category tabs.
+- All tactical, lethal and field-upgrade options.
+- Five named loadouts: select, rename, saved to the browser.
+- Death-screen loadout keys.
+- Opening the screen from the pause menu (changes apply on the next spawn).
+
+### Tested
+`tools/shots` (overview, weapon picking, lethal picking) at 1280×720 and 1920×1080, plus a scripted run that equips a lethal, switches loadouts and checks the stored state.
+
 ## Update 29: "Sjøkart", a new interface across the whole game
 
 The interface is redrawn as a Norwegian nautical chart (*sjøkart*):

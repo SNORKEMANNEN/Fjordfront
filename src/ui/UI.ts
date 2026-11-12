@@ -446,8 +446,10 @@ export class UI {
     if (!this._preview && this.previewFactory) this._preview = this.previewFactory();
     return this._preview;
   }
-  private ldSlot: 'p' | 's' | 'e' = 'p';
+  private ldSlot: 'p' | 's' | 't' | 'l' | 'f' = 'p';
   private ldShown: WeaponId | null = null;
+  private ldHover: WeaponId | null = null;
+  private ldMode: 'overview' | 'pick' = 'overview';
   private ldCat = '';
 
   private loadPresets() {
@@ -504,14 +506,26 @@ export class UI {
     this.deathKey = '';
   }
 
+  /**
+   * Loadout screen. Layout: header bar (back · title · confirm), the workbench preview filling the
+   * upper area, a horizontal overview strip of the selected loadout (primary · secondary · tactical ·
+   * lethal · perks · field upgrade) near the bottom, and the five saved loadouts in a row beneath it.
+   * Clicking a section turns the strip into that slot's picker (categories + cards) and puts the
+   * stats / comparison column beside the bench; BACK returns to the overview.
+   */
   showLoadout(back: 'menu' | 'pause' = 'menu', note = '') {
     this.loadoutBack = back;
+    this.ldMode = 'overview';
+    this.ldShown = null;
+    this.ldHover = null;
     const e = this.loadoutEl;
     const CATS: { cls: WeaponDef['cls']; label: string }[] = [
       { cls: 'Assault Rifle', label: 'ASSAULT RIFLES' }, { cls: 'SMG', label: 'SMGS' }, { cls: 'LMG', label: 'LMGS' }, { cls: 'Shotgun', label: 'SHOTGUNS' },
       { cls: 'Marksman', label: 'MARKSMAN RIFLES' }, { cls: 'Sniper', label: 'SNIPER RIFLES' }, { cls: 'Pistol', label: 'HANDGUNS' },
     ];
     const CLS_NAME: Record<string, string> = { LMG: 'LIGHT MACHINE GUN', 'Assault Rifle': 'ASSAULT RIFLE', SMG: 'SUBMACHINE GUN', Shotgun: 'SHOTGUN', Marksman: 'MARKSMAN RIFLE', Sniper: 'SNIPER RIFLE', Pistol: 'HANDGUN' };
+    const SLOT_NAME: Record<string, string> = { p: 'PRIMARY WEAPON', s: 'SIDEARM', t: 'TACTICAL', l: 'LETHAL', f: 'FIELD UPGRADE' };
+    const TROPHY_DESC = 'Press H to deploy. Shoots down up to 3 enemy grenades, C4, sticky grenades and throwing knives within 7.5 m. Recharges over time.';
     const stats = (d: WeaponDef): [string, number][] => [
       ['Damage', (d.damage[0] * d.pellets) / 110],
       ['Fire Rate', d.rpm / 950],
@@ -521,128 +535,220 @@ export class UI {
       ['Mobility', Math.min(1, d.speedMul * 0.75 + d.adsSpeedMul * 0.25)],
       ['Handling', 1 - Math.min(1, d.adsTime / 0.45) * 0.85],
     ];
-    const render = () => {
-      const slot = this.ldSlot;
-      const pool = slot === 'p' ? PRIMARIES : SECONDARIES;
-      const cats = CATS.filter((c) => pool.some((id) => WEAPONS[id].cls === c.cls));
-      const selId: WeaponId = slot === 's' ? this.secondary : this.primary;
-      if (slot !== 'e' && !cats.some((c) => c.cls === this.ldCat)) this.ldCat = WEAPONS[selId].cls;
-      const list = pool.filter((id) => WEAPONS[id].cls === this.ldCat);
-      // inspected (clicked once) or the equipped one
-      const shown: WeaponId = this.ldShown && list.includes(this.ldShown) ? this.ldShown : list.includes(selId) ? selId : list[0] ?? selId;
-      const d = WEAPONS[shown];
-      const card = (id: WeaponId) => {
-        const w = WEAPONS[id];
-        const eq = id === selId;
-        const img = this.preview ? `<img alt="" src="${this.preview.thumbnail(id)}">` : '';
-        return `<div class="ldcard ${eq ? 'eq' : ''} ${id === shown ? 'on' : ''}" data-id="${id}">${eq ? `<i class="chk">${icon('check')}</i>` : ''}<div class="th">${img}</div><div class="cn">${w.short}</div><div class="cs">${CLS_NAME[w.cls]}</div>${eq ? '<div class="eqb">EQUIPPED</div>' : ''}</div>`;
+    const thumb = (id: WeaponId) => (this.preview ? `<img alt="" src="${this.preview.thumbnail(id)}">` : '');
+    const save = () => {
+      Object.assign(this.presets[this.activePreset], { p: this.primary, s: this.secondary, l: this.lethal, t: this.tactical });
+      this.savePresets();
+    };
+    /** the workbench: the gun, blueprint grid, technical-drawing callouts, drawing plate */
+    const bench = (d: WeaponDef) => `<div class="ldview">
+        <svg class="callouts" viewBox="0 0 1000 600" preserveAspectRatio="none">
+          <path d="M120 150H230L300 262"/><circle cx="300" cy="262" r="5"/>
+          <path d="M880 150H760L640 262"/><circle cx="640" cy="262" r="5"/>
+          <path d="M560 520H600L560 380"/><circle cx="560" cy="380" r="5"/>
+          <path class="dim" d="M160 470H840M160 455V485M840 455V485"/>
+        </svg>
+        <div class="co" style="left:4%;top:13%"><small>KALIBER · CALIBRE</small><b>${CALIBRE[d.id] ?? '—'}</b></div>
+        <div class="co" style="right:4%;top:13%;text-align:right"><small>KADENS · RATE</small><b>${d.rpm} RPM</b></div>
+        <div class="co" style="left:61%;top:82%"><small>MAGASIN · MAGAZINE</small><b>${d.mag} + ${d.reserve}</b></div>
+        <div class="co" style="left:16%;top:80%"><small>EFFEKTIV RANGE</small><b>${d.range[0]}–${d.range[1]} m</b></div>
+        <div class="plate"><b>${d.short}</b>TEGNING NR. ${String(PRIMARIES.concat(SECONDARIES).indexOf(d.id as WeaponId) + 1).padStart(2, '0')} · ${CLS_NAME[d.cls]}</div>
+      </div>`;
+    /** the stats column (pick mode): equipped value, green / red delta against it when inspecting another gun */
+    const info = (d: WeaponDef, eqd: WeaponDef) => {
+      const cmp = d.id !== eqd.id;
+      const statRow = ([k, v]: [string, number], i: number) => {
+        const nv = Math.max(0.04, Math.min(1, v)), ov = Math.max(0.04, Math.min(1, stats(eqd)[i][1]));
+        const dlt = Math.round((nv - ov) * 100);
+        const lo = Math.min(nv, ov), hi = Math.max(nv, ov);
+        return `<div class="ldst"><span>${k}</span><b><i style="width:${Math.round(lo * 100)}%"></i>${cmp && dlt ? `<s class="${dlt < 0 ? 'neg' : ''}" style="left:${Math.round(lo * 100)}%;width:${Math.round((hi - lo) * 100)}%"></s>` : ''}</b><em class="${cmp && dlt > 0 ? 'up' : cmp && dlt < 0 ? 'down' : ''}">${cmp && dlt ? (dlt > 0 ? '+' : '−') + Math.abs(dlt) : Math.round(nv * 100)}</em></div>`;
       };
-      const ecard = (id: string, name: string, desc: string, count: number, sel: boolean, group: string) =>
-        `<div class="ldcard eqp ${sel ? 'eq on' : ''}" data-g="${group}" data-id="${id}">${sel ? `<i class="chk">${icon('check')}</i>` : ''}<div class="th ic">${icon(id, 'big')}</div><div class="cn">${name}</div><div class="cs">${desc}</div><div class="cs">×${count} PER LIFE</div></div>`;
-      const bar = `<div class="ldpresets">${this.presets.map((p, i) => `<button data-preset="${i}" class="${i === this.activePreset ? 'on' : ''}" title="Double-click to rename"><small>${i + 1}</small>${p.name}</button>`).join('')}</div>`;
-      const top = `${bar}<div class="ldtop"><div class="ldtitle">${slot === 'p' ? 'PRIMARY WEAPON' : slot === 's' ? 'SIDEARM' : 'EQUIPMENT'} <small>${back === 'pause' ? 'changes apply on your next spawn' : 'choose your kit'}</small></div>
-        <div class="ldslots">
-          <button data-slot="p" class="${slot === 'p' ? 'on' : ''}"><small>PRIMARY</small>${WEAPONS[this.primary].short}</button>
-          <button data-slot="s" class="${slot === 's' ? 'on' : ''}"><small>SIDEARM</small>${WEAPONS[this.secondary].short}</button>
-          <button data-slot="e" class="${slot === 'e' ? 'on' : ''}"><small>EQUIPMENT</small>${LETHALS.find((l) => l.id === this.lethal)?.name.replace(' GRENADE', '') ?? ''} · ${TACTICALS.find((t) => t.id === this.tactical)?.name ?? ''}</button>
-        </div></div>`;
-      if (slot === 'e') {
-        e.innerHTML = `<div class="ld">${top}${note ? `<div class="lnote">${note}</div>` : ''}
-          <div class="ldeq"><div class="lsec">LETHAL</div><div class="ldrow">${LETHALS.map((l) => ecard(l.id, l.name, l.desc, l.count, this.lethal === l.id, 'l')).join('')}</div>
-          <div class="lsec">TACTICAL</div><div class="ldrow">${TACTICALS.map((t) => ecard(t.id, t.name, t.desc, t.count, t.id === this.tactical, 't')).join('')}</div>
-          <div class="lsec">FIELD UPGRADE</div><div class="ldrow">${ecard('trophy', 'TROPHY SYSTEM', 'Press H to deploy. Shoots down up to 3 enemy grenades, C4, sticky grenades and throwing knives within 7.5 m. Recharges over time.', 1, true, 'f')}</div></div>
-          <div class="ldbot"><button class="primary" data-a="done">CONFIRM</button></div></div>`;
-      } else {
-        // stat comparison against the gun equipped in this slot: green gains, red losses
-        const eqd = WEAPONS[selId];
-        const cmp = shown !== selId;
-        const statRow = ([k, v]: [string, number], i: number) => {
-          const nv = Math.max(0.04, Math.min(1, v)), ov = Math.max(0.04, Math.min(1, stats(eqd)[i][1]));
-          const dlt = Math.round((nv - ov) * 100);
-          const lo = Math.min(nv, ov), hi = Math.max(nv, ov);
-          return `<div class="ldst"><span>${k}</span><b><i style="width:${Math.round(lo * 100)}%"></i>${cmp && dlt ? `<s class="${dlt < 0 ? 'neg' : ''}" style="left:${Math.round(lo * 100)}%;width:${Math.round((hi - lo) * 100)}%"></s>` : ''}</b><em class="${cmp && dlt > 0 ? 'up' : cmp && dlt < 0 ? 'down' : ''}">${cmp && dlt ? (dlt > 0 ? '+' : '−') + Math.abs(dlt) : Math.round(nv * 100)}</em></div>`;
+      return `<div class="ldinfo"><div class="ldcls">${CLS_NAME[d.cls]}</div><div class="ldname">${d.name.toUpperCase()}</div><p>${d.desc}</p>
+        <div class="ldstats">${stats(d).map(statRow).join('')}</div>
+        ${cmp ? `<div class="hint">Compared with your equipped ${eqd.short}: <span style="color:var(--green)">green</span> is better, <span style="color:var(--red)">red</span> worse.</div>` : ''}
+        <div class="ldnums"><div><small>ROUNDS</small>${d.mag}</div><div><small>RESERVE</small>${d.reserve}</div><div><small>RPM</small>${d.rpm}</div><div><small>DAMAGE</small>${d.damage[0]}${d.pellets > 1 ? `×${d.pellets}` : ''}</div></div>
+      </div>`;
+    };
+    /** equipment details beside the bench (pick mode for tactical / lethal / field upgrade) */
+    const eqInfo = (id: string, kind: string, name: string, desc: string, count: number) => `<div class="ldinfo"><div class="ldcls">${kind}</div><div class="ldname">${name}</div><p>${desc}</p>
+        <div class="ldnums"><div><small>PER LIFE</small>×${count}</div><div><small>KEY</small>${kind === 'TACTICAL' ? 'T' : kind === 'LETHAL' ? 'G' : 'H'}</div></div></div>`;
+
+    const render = () => {
+      const mode = this.ldMode;
+      const slot = this.ldSlot;
+      const lethal = LETHALS.find((l) => l.id === this.lethal)!, tac = TACTICALS.find((t) => t.id === this.tactical)!;
+      const preset = this.presets[this.activePreset];
+      // ---- header bar
+      const head = `<div class="ldhead">
+          <button class="back ldback" data-a="${mode === 'pick' ? 'overview' : 'done'}">${icon('chevron')}</button>
+          <div class="ldtitle">${mode === 'pick' ? SLOT_NAME[slot] : 'REDIGER UTRUSTNING'} <small>${mode === 'pick' ? `${esc(preset.name)} · ${back === 'pause' ? 'applies on your next spawn' : 'choose and equip'}` : `edit loadouts · ${back === 'pause' ? 'changes apply on your next spawn' : 'choose your kit'}`}</small></div>
+          ${note ? `<div class="lnote">${note}</div>` : ''}
+          <div class="ldheadr"><span class="ldhint">${mode === 'pick' ? (slot === 'p' || slot === 's' ? 'Click to inspect on the bench · click again or EQUIP to take it' : 'Click to equip') : 'Click a section to change it · double-click a loadout to rename it'}</span>
+          ${mode === 'pick' && (slot === 'p' || slot === 's') && this.ldShown && this.ldShown !== (slot === 'p' ? this.primary : this.secondary) ? `<button data-a="equip">EQUIP ${WEAPONS[this.ldShown].short}</button>` : ''}
+          <button class="primary" data-a="done">CONFIRM</button></div>
+        </div>`;
+      // ---- the five loadouts, a horizontal row (selected: inked, red rule and its actions)
+      const slots = `<div class="ldslotrow">${this.presets.map((p, i) => `<div class="ldslotwrap ${i === this.activePreset ? 'on' : ''}">
+          <button class="ldpreset ${i === this.activePreset ? 'on' : ''}" data-preset="${i}" title="Double-click to rename"><small>${i + 1}</small><span>${esc(p.name)}</span><em>${WEAPONS[p.p]?.short ?? ''} · ${WEAPONS[p.s]?.short ?? ''}</em></button>
+          ${i === this.activePreset ? `<div class="ldslotacts"><button data-a="rename">${icon('manual')}RENAME</button><button data-a="editp">${icon('loadout')}EDIT</button></div>` : ''}
+        </div>`).join('')}</div>`;
+      let stage = '', bottom = '';
+      if (mode === 'overview') {
+        // ---- bench shows the hovered (or the primary) weapon full width
+        const benchId: WeaponId = this.ldHover ?? this.primary;
+        const d = WEAPONS[benchId];
+        stage = `<div class="ldstage"><div class="ldbenchtag"><span class="eyebrow red">${benchId === this.secondary && this.ldHover ? 'SIDEARM' : 'PRIMARY'}</span><b>${d.name.toUpperCase()}</b><small>${CLS_NAME[d.cls]} · ${CALIBRE[d.id] ?? ''}</small></div>${bench(d)}</div>`;
+        const P = WEAPONS[this.primary], S = WEAPONS[this.secondary];
+        const sec = (k: string, cls: string, body: string) => `<button class="ldsec ${cls}" data-sec="${k}">${body}</button>`;
+        bottom = `<div class="ldoverview paper-card">
+            ${sec('p', 'wide', `<span class="ldsl">PRIMÆR · PRIMARY</span><span class="ldsimg">${thumb(this.primary)}</span><b>${P.short}</b><small>${CLS_NAME[P.cls]} · ${P.rpm} RPM · ${P.mag} RDS</small>`)}
+            ${sec('s', 'wide', `<span class="ldsl">SEKUNDÆR · SECONDARY</span><span class="ldsimg">${thumb(this.secondary)}</span><b>${S.short}</b><small>${CLS_NAME[S.cls]} · ${S.rpm} RPM · ${S.mag} RDS</small>`)}
+            ${sec('t', '', `<span class="ldsl">TAKTISK</span><span class="ldsic">${icon(this.tactical)}</span><b>${tac.name}</b><small>Tactical · ×${tac.count}</small>`)}
+            ${sec('l', '', `<span class="ldsl">DØDELIG</span><span class="ldsic">${icon(this.lethal)}</span><b>${lethal.name.replace(' GRENADE', '')}</b><small>Lethal · ×${lethal.count}</small>`)}
+            <div class="ldsec perks" title="Every soldier carries these: there are no perk slots in this mode"><span class="ldsl">FERDIGHETER · PERKS</span><span class="ldperks">${icon('quick')}<i>${icon('chevron')}</i>${icon('ping')}<i>${icon('chevron')}</i>${icon('squad')}</span><b>STANDARD ISSUE</b><small>Tac sprint · ping · squad orders</small></div>
+            ${sec('f', '', `<span class="ldsl">FELTUTSTYR</span><span class="ldsic">${icon('trophy')}</span><b>TROPHY</b><small>Field upgrade · [H]</small>`)}
+          </div>`;
+      } else if (slot === 'p' || slot === 's') {
+        const pool = slot === 'p' ? PRIMARIES : SECONDARIES;
+        const cats = CATS.filter((c) => pool.some((id) => WEAPONS[id].cls === c.cls));
+        const selId: WeaponId = slot === 's' ? this.secondary : this.primary;
+        if (!cats.some((c) => c.cls === this.ldCat)) this.ldCat = WEAPONS[selId].cls;
+        const list = pool.filter((id) => WEAPONS[id].cls === this.ldCat);
+        const shown: WeaponId = this.ldShown && list.includes(this.ldShown) ? this.ldShown : list.includes(selId) ? selId : list[0] ?? selId;
+        if (shown !== selId) this.ldShown = shown;
+        const d = WEAPONS[shown];
+        const card = (id: WeaponId) => {
+          const w = WEAPONS[id];
+          const eq = id === selId;
+          return `<div class="ldcard ${eq ? 'eq' : ''} ${id === shown ? 'on' : ''}" data-id="${id}">${eq ? `<i class="chk">${icon('check')}</i>` : ''}<div class="th">${thumb(id)}</div><div class="cn">${w.short}</div><div class="cs">${CLS_NAME[w.cls]}</div>${eq ? '<div class="eqb">EQUIPPED</div>' : ''}</div>`;
         };
-        e.innerHTML = `<div class="ld">${top}${note ? `<div class="lnote">${note}</div>` : ''}
-          <div class="ldmain">
-            <div class="ldinfo"><div class="ldcls">${CLS_NAME[d.cls]}</div><div class="ldname">${d.name.toUpperCase()}</div><p>${d.desc}</p>
-              <div class="ldstats">${stats(d).map(statRow).join('')}</div>
-              ${cmp ? `<div class="hint">Compared with your equipped ${eqd.short}: <span style="color:var(--green)">green</span> is better, <span style="color:var(--red)">red</span> worse.</div>` : ''}
-              <div class="ldnums"><div><small>ROUNDS</small>${d.mag}</div><div><small>RESERVE</small>${d.reserve}</div><div><small>RPM</small>${d.rpm}</div><div><small>DAMAGE</small>${d.damage[0]}${d.pellets > 1 ? `×${d.pellets}` : ''}</div></div>
-            </div>
-            <div class="ldview">
-              <svg class="callouts" viewBox="0 0 1000 600" preserveAspectRatio="none">
-                <path d="M120 150H230L300 262"/><circle cx="300" cy="262" r="5"/>
-                <path d="M880 150H760L640 262"/><circle cx="640" cy="262" r="5"/>
-                <path d="M560 520H600L560 380"/><circle cx="560" cy="380" r="5"/>
-                <path class="dim" d="M160 470H840M160 455V485M840 455V485"/>
-              </svg>
-              <div class="co" style="left:4%;top:13%"><small>KALIBER · CALIBRE</small><b>${CALIBRE[d.id] ?? '—'}</b></div>
-              <div class="co" style="right:4%;top:13%;text-align:right"><small>KADENS · RATE</small><b>${d.rpm} RPM</b></div>
-              <div class="co" style="left:61%;top:82%"><small>MAGASIN · MAGAZINE</small><b>${d.mag} + ${d.reserve}</b></div>
-              <div class="co" style="left:16%;top:80%"><small>EFFEKTIV RANGE</small><b>${d.range[0]}–${d.range[1]} m</b></div>
-              <div class="plate"><b>${d.short}</b>TEGNING NR. ${String(PRIMARIES.concat(SECONDARIES).indexOf(d.id as WeaponId) + 1).padStart(2, '0')} · ${CLS_NAME[d.cls]}</div>
-            </div>
-          </div>
-          <div class="ldtabs">${cats.map((c) => `<button data-cat="${c.cls}" class="${c.cls === this.ldCat ? 'on' : ''}">${c.label}</button>`).join('')}</div>
-          <div class="ldcar">${list.map(card).join('')}</div>
-          <div class="ldbot"><span class="ldhint">Click a weapon to inspect it on the bench · click again (or EQUIP) to take it</span>${shown !== selId ? `<button data-a="equip">EQUIP ${d.short}</button>` : ''}<button class="primary" data-a="done">CONFIRM</button></div></div>`;
-        if (this.preview) this.preview.show(e.querySelector('.ldview') as HTMLElement, shown);
-        const cv = e.querySelector('.ldview canvas');
-        if (cv) e.querySelector('.ldview')!.insertBefore(cv, e.querySelector('.ldview svg'));
+        stage = `<div class="ldstage pick">${info(d, WEAPONS[selId])}${bench(d)}</div>`;
+        bottom = `<div class="ldpick"><div class="ldtabs">${cats.map((c) => `<button data-cat="${c.cls}" class="${c.cls === this.ldCat ? 'on' : ''}">${c.label}</button>`).join('')}</div>
+          <div class="ldcar">${list.map(card).join('')}</div></div>`;
+      } else {
+        // tactical / lethal / field upgrade: the item's sheet beside the bench, the choices below
+        const items = slot === 't' ? TACTICALS.map((t) => ({ id: t.id as string, name: t.name, desc: t.desc, count: t.count, sel: t.id === this.tactical }))
+          : slot === 'l' ? LETHALS.map((l) => ({ id: l.id as string, name: l.name, desc: l.desc, count: l.count, sel: l.id === this.lethal }))
+          : [{ id: 'trophy', name: 'TROPHY SYSTEM', desc: TROPHY_DESC, count: 1, sel: true }];
+        const cur = items.find((i) => i.sel)!;
+        const g = slot === 't' ? 't' : slot === 'l' ? 'l' : 'f';
+        const ecard = (it: (typeof items)[0]) => `<div class="ldcard eqp ${it.sel ? 'eq on' : ''}" data-g="${g}" data-id="${it.id}">${it.sel ? `<i class="chk">${icon('check')}</i>` : ''}<div class="th ic">${icon(it.id, 'big')}</div><div class="cn">${it.name}</div><div class="cs">×${it.count} PER LIFE</div></div>`;
+        stage = `<div class="ldstage pick">${eqInfo(cur.id, slot === 't' ? 'TACTICAL' : slot === 'l' ? 'LETHAL' : 'FIELD UPGRADE', cur.name, cur.desc, cur.count)}<div class="ldview ldeqview"><div class="ldeqbig">${icon(cur.id)}</div><div class="plate"><b>${cur.name}</b>${slot === 't' ? 'TACTICAL' : slot === 'l' ? 'LETHAL' : 'FIELD UPGRADE'} · ×${cur.count} PER LIFE</div></div></div>`;
+        bottom = `<div class="ldpick"><div class="ldcar">${items.map(ecard).join('')}</div></div>`;
       }
-      e.querySelectorAll('[data-slot]').forEach((b) => b.addEventListener('click', () => { this.ldSlot = (b as HTMLElement).dataset.slot as 'p' | 's' | 'e'; this.ldCat = ''; this.ldShown = null; render(); }));
+      e.innerHTML = `<div class="ld">${head}${stage}${bottom}${slots}</div>`;
+      // the 3D gun on the bench
+      const view = e.querySelector('.ldview:not(.ldeqview)') as HTMLElement | null;
+      if (view && this.preview) {
+        const id = (mode === 'overview' ? this.ldHover ?? this.primary : this.ldShown ?? (slot === 's' ? this.secondary : this.primary)) as WeaponId;
+        this.preview.show(view, id);
+        const cv = view.querySelector('canvas');
+        if (cv) view.insertBefore(cv, view.querySelector('svg'));
+      } else this.preview?.stop();
+
+      // ---- interactions
+      e.querySelectorAll('[data-sec]').forEach((b) => {
+        const k = (b as HTMLElement).dataset.sec as 'p' | 's' | 't' | 'l' | 'f';
+        b.addEventListener('click', () => {
+          this.ldMode = 'pick';
+          this.ldSlot = k;
+          this.ldCat = '';
+          this.ldShown = null;
+          render();
+        });
+        // hovering a weapon section puts that weapon on the bench
+        if (k === 'p' || k === 's') {
+          b.addEventListener('mouseenter', () => {
+            const id = k === 'p' ? this.primary : this.secondary;
+            if (this.ldHover === id) return;
+            this.ldHover = id;
+            const v = e.querySelector('.ldview') as HTMLElement | null;
+            const tag = e.querySelector('.ldbenchtag');
+            if (v && this.preview) this.preview.show(v, id);
+            const d = WEAPONS[id];
+            if (tag) tag.innerHTML = `<span class="eyebrow red">${k === 'p' ? 'PRIMARY' : 'SIDEARM'}</span><b>${d.name.toUpperCase()}</b><small>${CLS_NAME[d.cls]} · ${CALIBRE[d.id] ?? ''}</small>`;
+            const cos = e.querySelectorAll('.ldview .co b');
+            if (cos.length === 4) {
+              cos[0].textContent = CALIBRE[d.id] ?? '—';
+              cos[1].textContent = `${d.rpm} RPM`;
+              cos[2].textContent = `${d.mag} + ${d.reserve}`;
+              cos[3].textContent = `${d.range[0]}–${d.range[1]} m`;
+            }
+            const pl = e.querySelector('.ldview .plate');
+            if (pl) pl.innerHTML = `<b>${d.short}</b>TEGNING NR. ${String(PRIMARIES.concat(SECONDARIES).indexOf(d.id as WeaponId) + 1).padStart(2, '0')} · ${CLS_NAME[d.cls]}`;
+          });
+        }
+      });
       e.querySelectorAll('[data-preset]').forEach((b) => {
         const i = +(b as HTMLElement).dataset.preset!;
         b.addEventListener('click', () => {
+          if (i === this.activePreset) return;
           this.selectPreset(i);
           this.ldCat = '';
+          this.ldShown = null;
+          this.ldHover = null;
           render();
         });
-        b.addEventListener('dblclick', () => {
-          const n = prompt('Loadout name', this.presets[i].name);
-          if (n && n.trim()) {
-            this.presets[i].name = n.trim().toUpperCase().slice(0, 16);
-            this.savePresets();
-            render();
-          }
-        });
+        b.addEventListener('dblclick', () => rename(i));
       });
-      e.querySelectorAll('[data-cat]').forEach((b) => b.addEventListener('click', () => { this.ldCat = (b as HTMLElement).dataset.cat!; render(); }));
+      const rename = (i: number) => {
+        const n = prompt('Loadout name', this.presets[i].name);
+        if (n && n.trim()) {
+          this.presets[i].name = n.trim().toUpperCase().slice(0, 16);
+          this.savePresets();
+          render();
+        }
+      };
+      e.querySelector('[data-a=rename]')?.addEventListener('click', () => rename(this.activePreset));
+      e.querySelector('[data-a=editp]')?.addEventListener('click', () => {
+        this.ldMode = 'pick';
+        this.ldSlot = 'p';
+        this.ldCat = '';
+        this.ldShown = null;
+        render();
+      });
+      e.querySelectorAll('[data-cat]').forEach((b) => b.addEventListener('click', () => { this.ldCat = (b as HTMLElement).dataset.cat!; this.ldShown = null; render(); }));
       e.querySelectorAll('.ldcard').forEach((c) =>
         c.addEventListener('click', () => {
           const el = c as HTMLElement;
           const id = el.dataset.id!;
           // weapons: first click puts it on the bench (with the comparison), the second equips it
-          if ((this.ldSlot === 'p' || this.ldSlot === 's') && this.ldShown !== id && id !== (this.ldSlot === 'p' ? this.primary : this.secondary)) {
+          if ((slot === 'p' || slot === 's') && this.ldShown !== id && id !== (slot === 'p' ? this.primary : this.secondary)) {
             this.ldShown = id as WeaponId;
             render();
             return;
           }
-          if (this.ldSlot === 'p') this.primary = id as WeaponId;
-          else if (this.ldSlot === 's') this.secondary = id as WeaponId;
+          if (slot === 'p') this.primary = id as WeaponId;
+          else if (slot === 's') this.secondary = id as WeaponId;
           else if (el.dataset.g === 't') this.tactical = id as TacticalId;
           else if (el.dataset.g === 'l') this.lethal = id as LethalId;
           else return;
-          Object.assign(this.presets[this.activePreset], { p: this.primary, s: this.secondary, l: this.lethal, t: this.tactical });
-          this.savePresets();
+          this.ldShown = null;
+          save();
           render();
         }),
       );
       e.querySelector('[data-a=equip]')?.addEventListener('click', () => {
         if (!this.ldShown) return;
-        if (this.ldSlot === 'p') this.primary = this.ldShown;
-        else if (this.ldSlot === 's') this.secondary = this.ldShown;
-        Object.assign(this.presets[this.activePreset], { p: this.primary, s: this.secondary, l: this.lethal, t: this.tactical });
-        this.savePresets();
+        if (slot === 'p') this.primary = this.ldShown;
+        else if (slot === 's') this.secondary = this.ldShown;
+        this.ldShown = null;
+        save();
         render();
       });
-      e.querySelector('[data-a=done]')!.addEventListener('click', () => {
+      e.querySelector('[data-a=overview]')?.addEventListener('click', () => {
+        this.ldMode = 'overview';
+        this.ldShown = null;
+        this.ldHover = null;
+        render();
+      });
+      e.querySelectorAll('[data-a=done]').forEach((b) => b.addEventListener('click', () => {
         e.classList.add('hidden');
         this.preview?.stop();
         this.updateMenuWeapon();
         this.handlers.onLoadout();
         if (this.loadoutBack === 'pause') this.pause.classList.remove('hidden');
-      });
+      }));
     };
     e.classList.remove('hidden');
     render();
