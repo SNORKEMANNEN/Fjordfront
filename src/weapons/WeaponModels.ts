@@ -783,6 +783,9 @@ export function buildSniper(mats: WeaponMats): WeaponModel {
 // ======================================================================
 // P80 service pistol (9mm, striker fired)
 // ======================================================================
+/** pistol grip cross-section for the finger wrap, in the gun's frame (see gripSDF) */
+const PISTOL_GRIP_BOX = { hw: 0.0148, hd: 0.0185, rr: 0.0075, gun: true, cy: -0.05, cz: 0.064, rake: 0.38 };
+
 export function buildPistol(mats: WeaponMats): WeaponModel {
   // Modern striker-fired 9 mm compact (Glock 19 / P320 class proportions: ~187 mm long,
   // ~128 mm tall, slide 25 mm wide). 3-dot sights: dovetailed notch rear with two dots,
@@ -876,7 +879,14 @@ export function buildPistol(mats: WeaponMats): WeaponModel {
   ]);
   // modern two-hand grip: firing hand high under the beavertail on the raked grip; support hand
   // fills the left side, fingers wrapping the front strap over the firing hand, thumb forward
-  const { rs, ls } = grips(root, [-0.068, -0.046, -0.38, 0.0146], { u: -0.058, v: -0.072, r: 0.027, fingers: [0.1, -0.85, -0.5], palm: [1, 0, 0.12] });
+  // one-handed shooting grip (Update 38): the hand sits high and back, web under the beavertail,
+  // knuckles on the front strap; the fingers wrap the real grip (a rounded box), not a thin rod
+  const { rs, ls } = grips(root, [-0.08, -0.035, -0.38, 0.0146], { u: -0.058, v: -0.072, r: 0.027, fingers: [0.1, -0.85, -0.5], palm: [1, 0, 0.12] });
+  // hand frame fitted to a real one-handed grip (index knuckle at the top of the front strap, the
+  // others stacked down it, web under the beavertail, thumb high on the left of the frame)
+  rs.position.set(-0.0112, -0.0483, 0.0792);
+  rs.quaternion.set(0.09117, -0.32677, -0.38287, 0.85925);
+  rs.userData.box = PISTOL_GRIP_BOX;
   ls.userData.fist = true;
   ls.userData.pose = 'pistolSupport';
   sockets.rightHand = rs;
@@ -2092,7 +2102,10 @@ export function buildMP18(mats: WeaponMats): WeaponModel {
     socket('sight', -0.0712, sightTop, 0),
     socket('magWell', -0.048, -0.004, 0),
   ]);
-  const { rs, ls } = grips(root, [-0.068, -0.048, -0.36, 0.0148], { u: -0.058, v: -0.074, r: 0.027, fingers: [0.1, -0.85, -0.5], palm: [1, 0, 0.12] });
+  const { rs, ls } = grips(root, [-0.08, -0.037, -0.36, 0.0148], { u: -0.058, v: -0.074, r: 0.027, fingers: [0.1, -0.85, -0.5], palm: [1, 0, 0.12] });
+  rs.position.set(-0.0112, -0.0503, 0.0792);
+  rs.quaternion.set(0.09117, -0.32677, -0.38287, 0.85925);
+  rs.userData.box = PISTOL_GRIP_BOX;
   ls.userData.fist = true;
   ls.userData.pose = 'pistolSupport';
   sockets.rightHand = rs;

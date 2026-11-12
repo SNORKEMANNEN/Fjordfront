@@ -116,6 +116,34 @@ const win = (t: number, a: number, b: number) => clamp((t - a) / (b - a), 0, 1);
 /** A grip socket: a cylinder along the hand frame's X axis through the socket, radius userData.r. */
 function gripSDF(sock: THREE.Object3D) {
   sock.updateMatrixWorld(true);
+  // a pistol grip: rounded box in the socket's cross-section (local y = across, local z = fore-aft,
+  // its centre cz forward of the socket), endless along the grip axis (local x)
+  const box = sock.userData.box as { hw: number; hd: number; rr: number; cz: number; rolled?: boolean; gun?: boolean; cy?: number; rake?: number } | undefined;
+  if (box?.gun) {
+    // the grip described in the gun's own frame (the hand socket is turned freely): a raked rounded box
+    const gunRoot = sock.parent!;
+    gunRoot.updateMatrixWorld(true);
+    const inv = gunRoot.matrixWorld.clone().invert();
+    const q = new THREE.Vector3();
+    const rk = Math.tan(box.rake ?? 0);
+    return (p: THREE.Vector3) => {
+      q.copy(p).applyMatrix4(inv);
+      // grip centre line rakes back as it goes down: z = cz + rk * (cy - y)
+      const zc = box.cz + rk * ((box.cy ?? 0) - q.y);
+      const dy = Math.abs(q.x) - (box.hw - box.rr), dz = Math.abs(q.z - zc) - (box.hd - box.rr);
+      return Math.hypot(Math.max(dy, 0), Math.max(dz, 0)) + Math.min(Math.max(dy, dz), 0) - box.rr;
+    };
+  }
+  if (box) {
+    const inv = sock.matrixWorld.clone().invert();
+    const q = new THREE.Vector3();
+    return (p: THREE.Vector3) => {
+      q.copy(p).applyMatrix4(inv);
+      // (rolled: the socket was turned a quarter about z, so "across" is its x and the grip axis its y)
+      const dy = Math.abs(box.rolled ? q.x : q.y) - (box.hw - box.rr), dz = Math.abs(q.z - box.cz) - (box.hd - box.rr);
+      return Math.hypot(Math.max(dy, 0), Math.max(dz, 0)) + Math.min(Math.max(dy, dz), 0) - box.rr;
+    };
+  }
   const c = sock.getWorldPosition(new THREE.Vector3());
   const ax = new THREE.Vector3(1, 0, 0).applyQuaternion(sock.getWorldQuaternion(new THREE.Quaternion())).normalize();
   const r = (sock.userData.r as number | undefined) ?? 0.016;

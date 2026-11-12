@@ -217,7 +217,7 @@ export const WEAPONS: Record<WeaponId, WeaponDef> = {
     mag: 17, reserve: 68, reload: 1.45, reloadEmpty: 1.75, adsTime: 0.14, adsZoom: 1.15, sprintToFire: 0.1,
     hipSpread: 1.6, adsSpread: 0.2, moveSpread: 1.0, bloomPerShot: 0.4, bloomMax: 2.5,
     recoil: { v: 1.2, h: 0.4, drift: 0.0, firstShotMul: 1, adsMul: 0.85, recover: 0.7, kickZ: 0.03, kickPitch: 0.09, roll: 0.03, shake: 0.004 },
-    speedMul: 1.06, adsSpeedMul: 0.8, penetration: 0.15, swaySpeed: 1.3, weight: 0.6, hip: [0.07, -0.06, 0.04], tracerEvery: 3,
+    speedMul: 1.06, adsSpeedMul: 0.8, penetration: 0.15, swaySpeed: 1.3, weight: 0.6, hip: [0.07, -0.052, 0.055], tracerEvery: 3,
     sound: { body: 0.8, crack: 0.9, low: 0.6, tail: 0.8, pitch: 1.15 },
   },
   mp18: {
@@ -227,7 +227,7 @@ export const WEAPONS: Record<WeaponId, WeaponDef> = {
     mag: 33, reserve: 132, reload: 1.7, reloadEmpty: 2.05, adsTime: 0.16, adsZoom: 1.15, sprintToFire: 0.1,
     hipSpread: 2.2, adsSpread: 0.22, moveSpread: 1.2, bloomPerShot: 0.3, bloomMax: 3.0,
     recoil: { v: 0.5, h: 0.42, drift: 0.08, firstShotMul: 1.2, adsMul: 0.55, recover: 0.6, kickZ: 0.022, kickPitch: 0.045, roll: 0.03, shake: 0.003 },
-    speedMul: 1.06, adsSpeedMul: 0.8, penetration: 0.15, swaySpeed: 1.3, weight: 0.62, hip: [0.07, -0.06, 0.04], tracerEvery: 4,
+    speedMul: 1.06, adsSpeedMul: 0.8, penetration: 0.15, swaySpeed: 1.3, weight: 0.62, hip: [0.07, -0.052, 0.055], tracerEvery: 4,
     sound: { body: 0.75, crack: 0.95, low: 0.55, tail: 0.75, pitch: 1.2 },
     reloadKind: 'pistol',
   },

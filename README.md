@@ -290,6 +290,18 @@ URL options: `?quality=low|medium|high|ultra`, `?weather=clear|overcast|rain|sno
 - **Rifle:** support hand moved so it no longer shows through the optic window.
 - **Pistol:** hold reworked.
 
+## Update 39: A proper one-handed pistol grip
+
+- **The shooting hand now really wraps the grip** on the pistol and the machine pistol.
+  - **Before:** the hand was rolled flat and too far forward. The knuckles sat past the front of the grip, so the fingers closed into a fist in mid-air below the gun.
+  - **Hand position:** the hand is now fitted to a real one-handed grip:
+    - the web of the hand sits high under the beavertail;
+    - the back of the hand is on the right side;
+    - the knuckles are stacked down the front strap with the index finger on top;
+    - the thumb runs high along the left of the frame.
+  - **Finger wrap:** the fingers wrap the grip's actual shape (a raked, rounded box matching the model), so they close around the front strap instead of a thin rod inside it.
+- The one-handed hip pose sits slightly higher and closer, so more of the grip and hand shows.
+
 ## Update 38: One-handed pistols, juicier kills, fairer bots
 
 ### Pistols
