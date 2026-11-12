@@ -144,8 +144,10 @@ BANK = {
     # match found: an orchestra hit with a bell under it
     'uiHorn': ([[L('kj_hit03.ogg', 0.0, 0.75, P(0.85)), L('ki_gondola_bell.ogg', 0.0, 1.6, P(0.75), -10, 0.02)]], {'peak': -2}),
     'medal': ([[L('UIAlert_Notification_OS_05.ogg', 0.0, 0.24)], [L('UIAlert_Notification_OS_04.ogg', 0.0, 0.2)]], {'peak': -4}),
-    'flagWon': ([[L('UIMisc_BelltreeUp_OS_01.ogg', 0.0, 1.3), L('UIClick_MetalConfirm_OS_01.ogg', 0.0, 0.3, '', -6)]], {'peak': -3}),
-    'flagLost': ([[L('UIMisc_BelltreeDown_OS_01.ogg', 0.0, 1.3), L('UIAlert_MetalError_OS_01.ogg', 0.0, 0.4, '', -6)]], {'peak': -3}),
+    # flag taken: a radio squelch and a rising two-tone (the HQ net confirming), no music
+    'flagWon': ([[L('67620__qubodup__radio_click_1.flac', 0.0, 0.3, '', -2), L('67619__qubodup__radio_beep_1.flac', 0.0, 0.12, '', 0, 0.07), L('67619__qubodup__radio_beep_1.flac', 0.0, 0.12, P(1.335), 0, 0.22), L('67620__qubodup__radio_click_1.flac', 0.12, 0.18, P(1.1), -6, 0.38)]], {'peak': -3}),
+    # flag lost: squelch, a low falling two-tone alert repeated once, the radio closing
+    'flagLost': ([[L('67620__qubodup__radio_click_1.flac', 0.0, 0.3, '', -2), L('67619__qubodup__radio_beep_1.flac', 0.0, 0.12, P(0.75), 0, 0.07), L('67619__qubodup__radio_beep_1.flac', 0.0, 0.12, P(0.56), 0, 0.21), L('67619__qubodup__radio_beep_1.flac', 0.0, 0.12, P(0.75), -3, 0.4), L('67619__qubodup__radio_beep_1.flac', 0.0, 0.12, P(0.56), -3, 0.54), L('67620__qubodup__radio_click_1.flac', 0.12, 0.18, P(0.9), -6, 0.72)]], {'peak': -3}),
     'capTick': ([[L('ki_if_tick-004.ogg', 0.0, 0.06, 'highpass=f=1500')]], {'peak': -6}),
     'streak': ([[L('UIMisc_Powerup_OS_02.ogg', 0.0, 1.2)]], {'peak': -3}),
     'radio': ([

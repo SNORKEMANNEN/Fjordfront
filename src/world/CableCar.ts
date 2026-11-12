@@ -6,8 +6,8 @@ import type { CharacterBody } from '../player/CharacterBody';
 
 /**
  * Linbanen (Update 35): an aerial tramway across the sound with two cabins on parallel tracks that
- * run in opposite directions on a fixed timetable — dwell at the station with the platform-side door
- * open, close the doors, ride across, open up at the far end. There is nothing to press: walk in
+ * run in opposite directions on a fixed timetable — dwell at the station, ride across, dwell at the far
+ * end; both ends are open doorways (no doors). There is nothing to press: walk in
  * and stand (or walk about, crouch, shoot out of the open upper windows); anyone inside is carried
  * with the cabin.
  *
@@ -273,15 +273,6 @@ export class CableCar {
       mesh.receiveShadow = true;
       g.add(mesh);
     }
-    // sliding doors (visual): one per end
-    const doors: THREE.Mesh[] = [];
-    for (const sz of [-1, 1]) {
-      const d = new THREE.Mesh(new THREE.BoxGeometry(1.3, 2.0, 0.05), red);
-      d.position.set(0, 1.0, sz * (hz + 0.06));
-      g.add(d);
-      doors.push(d);
-    }
-    g.userData.doors = doors;
     this.group.add(g);
     // colliders in the cabin frame (lp = local centre), door colliders flagged by end
     const cols: Cabin['colliders'] = [];
@@ -295,7 +286,6 @@ export class CableCar {
     for (const sz of [-1, 1]) {
       for (const sx of [-1, 1]) C(sx * (hx + 0.65) / 2, CH / 2, sz * hz, hx - 0.65, CH, 0.1);
       C(0, 2.0 + (CH - 2.0) / 2, sz * hz, 1.3, CH - 2.0, 0.1);
-      C(0, 1.0, sz * hz, 1.3, 2.0, 0.1, sz < 0 ? 0 : 1); // the door (end 0 = −z, 1 = +z)
     }
     return { group: g, side, colliders: cols, pos: new THREE.Vector3(), yaw: 0, s: 0, from, t: Math.random() * 3, moving: false };
   }
@@ -314,17 +304,10 @@ export class CableCar {
     c.group.position.copy(p);
     c.group.rotation.y = yaw;
     c.group.updateMatrixWorld(true);
-    // doors: the platform-side door is open while the cabin waits at a station
-    const atEnd: 0 | 1 | -1 = !c.moving ? (s < 1 ? 0 : s > this.length - 1 ? 1 : -1) : -1;
-    // the end facing station 0 is the cabin's −z end (cabin +z points along the track towards station 1)
-    const doors = c.group.userData.doors as THREE.Mesh[];
-    doors[0].position.x = atEnd === 0 ? -1.25 : 0;
-    doors[1].position.x = atEnd === 1 ? 1.25 : 0;
     const q = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), yaw);
     for (const col of c.colliders) {
       const w = col.lp.clone().applyQuaternion(q).add(p);
-      const open = col.door !== undefined && col.door === atEnd;
-      col.c.setTranslation(open ? { x: w.x, y: -600, z: w.z } : { x: w.x, y: w.y, z: w.z });
+      col.c.setTranslation({ x: w.x, y: w.y, z: w.z });
       col.c.setRotation({ x: q.x, y: q.y, z: q.z, w: q.w });
     }
     return { d, dyaw, center: p };

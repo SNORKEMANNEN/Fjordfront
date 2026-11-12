@@ -1,6 +1,6 @@
 import { WEAPONS, PRIMARIES, SECONDARIES, WeaponDef } from '../weapons/WeaponDefs';
 import type { WeaponId } from '../weapons/WeaponModels';
-import { ATT_SLOTS, AttSlot, SLOT_LABEL, Build, options, lockReason, cleanBuild, defaultAtt, applyBuild, attById, prosCons, buildCount, Attachment } from '../weapons/Attachments';
+import { Build, applyBuild } from '../weapons/Attachments';
 import { icon } from './Icons';
 import type { UI, LethalId, TacticalId } from './UI';
 import { LETHALS, TACTICALS, CALIBRE } from './UI';
@@ -11,17 +11,14 @@ import { LETHALS, TACTICALS, CALIBRE } from './UI';
  *   LOADOUT ── your five loadouts on the left, the selected one's kit on the right, the primary
  *     │        turning on the bench in the middle. Click a row to change it.
  *     ├─ WEAPON   pick a gun: categories on the left, the guns as cards, the focused gun's sheet on
- *     │           the right with every stat compared with what you carry. EQUIP / CUSTOMISE.
- *     │     └─ GUNSMITH  five attachment slots on the left, the gun with its parts in the middle,
- *     │                  the slot's choices on the right with their pros (green) and cons (red);
- *     │                  hover to preview the gun and the stat change, click to fit.
+ *     │           the right with every stat compared with what you carry. EQUIP.
  *     └─ TACTICAL / LETHAL  the items as cards, click to equip.
  *
  * One BACK button (and Esc, and right-click) always goes up exactly one level; DONE closes. The
  * breadcrumb says where you are. Nothing hides behind modes, double-clicks or prompts.
  */
 
-type Level = { k: 'home' } | { k: 'weapon'; slot: 'p' | 's' } | { k: 'smith'; slot: 'p' | 's'; att: AttSlot } | { k: 'equip'; slot: 't' | 'l' };
+type Level = { k: 'home' } | { k: 'weapon'; slot: 'p' | 's' } | { k: 'equip'; slot: 't' | 'l' };
 
 const CLS_ORDER: WeaponDef['cls'][] = ['Assault Rifle', 'SMG', 'LMG', 'Shotgun', 'Marksman', 'Sniper', 'Pistol'];
 const CLS_LABEL: Record<string, string> = { 'Assault Rifle': 'Assault rifles', SMG: 'SMGs', LMG: 'LMGs', Shotgun: 'Shotguns', Marksman: 'Marksman', Sniper: 'Snipers', Pistol: 'Handguns' };
@@ -72,21 +69,15 @@ export function openLoadout(ui: UI, back: 'menu' | 'pause', note: string) {
   const stack: Level[] = [{ k: 'home' }];
   let focusW: WeaponId | null = null; // the gun on the bench in the weapon picker
   let catSel: WeaponDef['cls'] | null = null;
-  let hoverAtt: string | null = null; // previewed attachment in the gunsmith
   let renaming = false;
   const top = () => stack[stack.length - 1];
   const gunOf = (slot: 'p' | 's') => (slot === 'p' ? ui.primary : ui.secondary);
-  const buildOf = (slot: 'p' | 's') => cleanBuild(gunOf(slot), WEAPONS[gunOf(slot)], slot === 'p' ? ui.primaryBuild : ui.secondaryBuild);
-  const setBuild = (slot: 'p' | 's', b: Build) => {
-    if (slot === 'p') ui.primaryBuild = b;
-    else ui.secondaryBuild = b;
-    ui.commitLoadout();
-  };
+  // (the gunsmith was removed in Update 38: every gun is its factory build)
+  const buildOf = (_slot: 'p' | 's'): Build => ({});
   const thumb = (id: WeaponId) => (ui.preview ? `<img alt="" src="${ui.preview.thumbnail(id)}">` : '');
 
   const go = (l: Level) => {
     stack.push(l);
-    hoverAtt = null;
     ui.sfx('uiConfirm', 0.5);
     render();
   };
@@ -98,7 +89,6 @@ export function openLoadout(ui: UI, back: 'menu' | 'pause', note: string) {
     }
     if (stack.length > 1) {
       stack.pop();
-      hoverAtt = null;
       ui.sfx('uiBack', 0.5);
       render();
     } else close();
@@ -132,7 +122,6 @@ export function openLoadout(ui: UI, back: 'menu' | 'pause', note: string) {
     const parts: string[] = ['Loadouts', esc(p.name)];
     const l = top();
     if (l.k === 'weapon') parts.push(l.slot === 'p' ? 'Primary' : 'Secondary');
-    if (l.k === 'smith') parts.push(l.slot === 'p' ? 'Primary' : 'Secondary', `Gunsmith · ${WEAPONS[gunOf(l.slot)].short}`);
     if (l.k === 'equip') parts.push(l.slot === 't' ? 'Tactical' : 'Lethal');
     return parts.map((t, i) => `<span class="${i === parts.length - 1 ? 'on' : ''}">${t}</span>`).join('<i>›</i>');
   };
@@ -153,15 +142,10 @@ export function openLoadout(ui: UI, back: 'menu' | 'pause', note: string) {
     const list = ui.presets.map((q, i) => i === ui.activePreset && renaming
       ? `<div class="lo-preset on"><small>${i + 1}</small><input class="lo-rename" maxlength="16" value="${esc(q.name)}"></div>`
       : `<button class="lo-preset ${i === ui.activePreset ? 'on' : ''}" data-preset="${i}"><small>${i + 1}</small><span><b>${esc(q.name)}</b><em>${WEAPONS[q.p]?.short ?? ''} · ${WEAPONS[q.s]?.short ?? ''}</em></span>${i === ui.activePreset ? `<i class="lo-ren" data-a="rename" title="Rename">${icon('manual')}</i>` : ''}</button>`).join('');
-    const pb = buildOf('p'), sb = buildOf('s');
-    const chips = (wid: WeaponId, b: Build) => {
-      const n = buildCount(wid, b);
-      return n ? `<span class="lo-chips">${ATT_SLOTS.filter((s) => b[s] !== defaultAtt(wid, s)).map((s) => `<i>${attById(s, b[s])?.name ?? ''}</i>`).join('')}</span>` : '<span class="lo-chips none">Factory build</span>';
-    };
-    const wrow = (slot: 'p' | 's', d: WeaponDef, b: Build) => `<div class="lo-row weapon" data-go="${slot}">
-        <div class="lo-rowmain"><small>${slot === 'p' ? 'Primary' : 'Secondary'}</small><b>${d.name}</b><span>${CLS_ONE[d.cls]} · ${CALIBRE[d.id] ?? ''}</span>${chips(d.id as WeaponId, b)}</div>
+    const wrow = (slot: 'p' | 's', d: WeaponDef) => `<div class="lo-row weapon" data-go="${slot}">
+        <div class="lo-rowmain"><small>${slot === 'p' ? 'Primary' : 'Secondary'}</small><b>${d.name}</b><span>${CLS_ONE[d.cls]} · ${CALIBRE[d.id] ?? ''}</span><span class="lo-chips none">${d.damage[0]}${d.pellets > 1 ? '×' + d.pellets : ''} dmg · ${d.rpm} rpm · ${d.mag} rounds</span></div>
         <div class="lo-rowimg">${thumb(d.id as WeaponId)}</div>
-        <div class="lo-rowacts"><button data-go="${slot}">Change</button>${options(d.id as WeaponId, d, 'optic').length + options(d.id as WeaponId, d, 'muzzle').length + options(d.id as WeaponId, d, 'mag').length ? `<button class="hi" data-smith="${slot}">${icon('loadout')}Gunsmith</button>` : ''}</div>
+        <div class="lo-rowacts"><button class="hi" data-go="${slot}">Change</button></div>
       </div>`;
     const erow = (slot: 't' | 'l', kind: string, it: { id: string; name: string; count: number; desc: string }) => `<button class="lo-row item" data-eq="${slot}">
         <span class="lo-ic">${icon(it.id)}</span><div class="lo-rowmain"><small>${kind}</small><b>${it.name.toLowerCase()}</b><span>×${it.count} per life</span></div><span class="lo-chev">${icon('chevron')}</span></button>`;
@@ -169,7 +153,7 @@ export function openLoadout(ui: UI, back: 'menu' | 'pause', note: string) {
       <aside class="lo-side"><div class="lo-h">Loadouts</div>${list}<p class="lo-tip">Your selected loadout is used on your next spawn.</p></aside>
       ${stage('Primary', P.name, `${CLS_ONE[P.cls]} · ${CALIBRE[P.id] ?? ''}`)}
       <section class="lo-panel"><div class="lo-h">${esc(p.name)}</div>
-        ${wrow('p', applyBuild(P, pb), pb)}${wrow('s', applyBuild(S, sb), sb)}
+        ${wrow('p', P)}${wrow('s', S)}
         <div class="lo-pair">${erow('t', 'Tactical', tac)}${erow('l', 'Lethal', leth)}</div>
         <div class="lo-row fixed"><span class="lo-ic">${icon('trophy')}</span><div class="lo-rowmain"><small>Field upgrade</small><b>Trophy system</b><span>Press H · standard issue</span></div></div>
       </section>
@@ -199,46 +183,9 @@ export function openLoadout(ui: UI, back: 'menu' | 'pause', note: string) {
         <p class="lo-desc">${d.desc}</p>
         <div class="lo-bars">${bars(same ? eqd : d, same ? null : eqd)}</div>
         ${numRow(same ? eqd : d, same ? null : eqd)}
-        <div class="lo-acts">${same ? '' : `<button class="lo-primary" data-a="equip">Equip ${d.short}</button>`}${options(f, d, 'optic').length + options(f, d, 'muzzle').length + options(f, d, 'mag').length ? `<button class="${same ? 'lo-primary' : ''}" data-a="equipsmith">${icon('loadout')}${same ? 'Gunsmith' : 'Equip & customise'}</button>` : ''}</div>
+        <div class="lo-acts">${same ? '' : `<button class="lo-primary" data-a="equip">Equip ${d.short}</button>`}</div>
         ${same ? '' : '<p class="lo-tip"><span class="g">Green</span> is better, <span class="r">red</span> worse than what you carry now.</p>'}
       </section>
-    </div>`;
-  };
-
-  const smith = (slot: 'p' | 's', att: AttSlot) => {
-    const wid = gunOf(slot);
-    const base = WEAPONS[wid];
-    const b = buildOf(slot);
-    const cur = applyBuild(base, b);
-    const opts = options(wid, base, att);
-    const prevB = hoverAtt ? { ...b, [att]: hoverAtt } : null;
-    const prev = prevB ? applyBuild(base, prevB) : null;
-    const slotBtn = (s: AttSlot) => {
-      const o = options(wid, base, s);
-      const a = attById(s, b[s]);
-      const changed = b[s] !== defaultAtt(wid, s);
-      return o.length
-        ? `<button class="lo-slot ${s === att ? 'on' : ''} ${changed ? 'mod' : ''}" data-att="${s}"><small>${SLOT_LABEL[s]}</small><b>${a?.name ?? '—'}</b></button>`
-        : `<div class="lo-slot locked" title="${esc(lockReason(wid, s))}"><small>${SLOT_LABEL[s]}</small><b>${esc(lockReason(wid, s))}</b></div>`;
-    };
-    const opt = (a: Attachment) => {
-      const on = b[att] === a.id;
-      const pc = prosCons(a);
-      const isDefault = a.id === defaultAtt(wid, att);
-      return `<button class="lo-opt ${on ? 'on' : ''}" data-opt="${a.id}">
-        <div class="lo-optt"><b>${a.name}</b>${on ? `<i class="lo-eq">${icon('check')}Fitted</i>` : isDefault ? '<i class="lo-def">Factory</i>' : ''}</div>
-        <p>${a.desc}</p>
-        ${pc.pro.length || pc.con.length ? `<ul>${pc.pro.map((t) => `<li class="g">${t}</li>`).join('')}${pc.con.map((t) => `<li class="r">${t}</li>`).join('')}</ul>` : ''}
-      </button>`;
-    };
-    const n = buildCount(wid, b);
-    return `<div class="lo-body smith">
-      <aside class="lo-side">${ATT_SLOTS.map(slotBtn).join('')}
-        <button class="lo-reset" data-a="reset" ${n ? '' : 'disabled'}>Reset to factory</button>
-        <p class="lo-tip">${n}/5 slots changed. Hover a part to preview it, click to fit it.</p></aside>
-      <div class="lo-mid">${stage(SLOT_LABEL[att], base.name, n ? `${n} attachment${n > 1 ? 's' : ''}` : 'Factory build')}
-        <div class="lo-statstrip"><div class="lo-bars">${bars(prev ?? cur, prev ? cur : null)}</div>${numRow(prev ?? cur, prev ? cur : null)}<div class="lo-zoom">Optic zoom <b>${zoomLabel((prev ?? cur).adsZoom)}</b>${(prev ?? cur).sound.suppressed ? ' · <b>Suppressed</b>' : ''}</div></div></div>
-      <section class="lo-panel opts"><div class="lo-h">${SLOT_LABEL[att]} · ${opts.length} options</div>${opts.map(opt).join('')}</section>
     </div>`;
   };
 
@@ -259,12 +206,11 @@ export function openLoadout(ui: UI, back: 'menu' | 'pause', note: string) {
 
   function render() {
     const l = top();
-    const body = l.k === 'home' ? home() : l.k === 'weapon' ? weapon(l.slot) : l.k === 'smith' ? smith(l.slot, l.att) : equip(l.slot);
+    const body = l.k === 'home' ? home() : l.k === 'weapon' ? weapon(l.slot) : equip(l.slot);
     el.innerHTML = `<div class="lo">${header()}${body}</div>`;
     // the gun on the bench
     if (l.k === 'home') mountPreview(ui.primary, buildOf('p'));
     else if (l.k === 'weapon') mountPreview(focusW!, focusW === gunOf(l.slot) ? buildOf(l.slot) : undefined);
-    else if (l.k === 'smith') mountPreview(gunOf(l.slot), hoverAtt ? { ...buildOf(l.slot), [l.att]: hoverAtt } : buildOf(l.slot));
     else ui.preview?.stop();
     wire();
   }
@@ -309,16 +255,10 @@ export function openLoadout(ui: UI, back: 'menu' | 'pause', note: string) {
       inp.addEventListener('blur', commit);
     }
     q('[data-go]').forEach((b) => b.addEventListener('click', (e) => {
-      if ((e.target as HTMLElement).closest('[data-smith]')) return;
       e.stopPropagation();
       focusW = null;
       catSel = null;
       go({ k: 'weapon', slot: b.dataset.go as 'p' | 's' });
-    }));
-    q('[data-smith]').forEach((b) => b.addEventListener('click', (e) => {
-      e.stopPropagation();
-      const slot = b.dataset.smith as 'p' | 's';
-      go({ k: 'smith', slot, att: firstSlot(slot) });
     }));
     q('[data-eq]').forEach((b) => b.addEventListener('click', () => go({ k: 'equip', slot: b.dataset.eq as 't' | 'l' })));
     // weapon picker
@@ -347,47 +287,6 @@ export function openLoadout(ui: UI, back: 'menu' | 'pause', note: string) {
       equipGun(l.slot, focusW);
       up();
     });
-    el.querySelector('[data-a=equipsmith]')?.addEventListener('click', () => {
-      if (l.k !== 'weapon' || !focusW) return;
-      equipGun(l.slot, focusW);
-      stack.pop();
-      go({ k: 'smith', slot: l.slot, att: firstSlot(l.slot) });
-    });
-    // gunsmith
-    q('[data-att]').forEach((b) => b.addEventListener('click', () => {
-      if (l.k !== 'smith') return;
-      stack[stack.length - 1] = { k: 'smith', slot: l.slot, att: b.dataset.att as AttSlot };
-      hoverAtt = null;
-      ui.sfx('uiHover', 0.6);
-      render();
-    }));
-    q('[data-opt]').forEach((b) => {
-      b.addEventListener('mouseenter', () => {
-        if (l.k !== 'smith') return;
-        const id = b.dataset.opt!;
-        if (hoverAtt === id || buildOf(l.slot)[l.att] === id) return;
-        hoverAtt = id;
-        refreshSmith(l.slot, l.att);
-      });
-      b.addEventListener('click', () => {
-        if (l.k !== 'smith') return;
-        setBuild(l.slot, { ...buildOf(l.slot), [l.att]: b.dataset.opt! });
-        hoverAtt = null;
-        ui.sfx('uiConfirm', 0.55);
-        render();
-      });
-    });
-    el.querySelector('.lo-panel.opts')?.addEventListener('mouseleave', () => {
-      if (l.k !== 'smith' || !hoverAtt) return;
-      hoverAtt = null;
-      refreshSmith(l.slot, l.att);
-    });
-    el.querySelector('[data-a=reset]')?.addEventListener('click', () => {
-      if (l.k !== 'smith') return;
-      setBuild(l.slot, {});
-      ui.sfx('uiBack', 0.55);
-      render();
-    });
     // tactical / lethal
     q('[data-item]').forEach((b) => b.addEventListener('click', () => {
       if (l.k !== 'equip') return;
@@ -399,29 +298,9 @@ export function openLoadout(ui: UI, back: 'menu' | 'pause', note: string) {
     }));
   }
 
-  /** gunsmith hover: refresh the bars, numbers and the gun without rebuilding the option list */
-  function refreshSmith(slot: 'p' | 's', att: AttSlot) {
-    const wid = gunOf(slot);
-    const base = WEAPONS[wid];
-    const b = buildOf(slot);
-    const cur = applyBuild(base, b);
-    const prev = hoverAtt ? applyBuild(base, { ...b, [att]: hoverAtt }) : null;
-    const strip = el.querySelector('.lo-statstrip');
-    if (strip) strip.innerHTML = `<div class="lo-bars">${bars(prev ?? cur, prev ? cur : null)}</div>${numRow(prev ?? cur, prev ? cur : null)}<div class="lo-zoom">Optic zoom <b>${zoomLabel((prev ?? cur).adsZoom)}</b>${(prev ?? cur).sound.suppressed ? ' · <b>Suppressed</b>' : ''}</div>`;
-    mountPreview(wid, hoverAtt ? { ...b, [att]: hoverAtt } : b);
-  }
-  function firstSlot(slot: 'p' | 's'): AttSlot {
-    const wid = gunOf(slot);
-    return ATT_SLOTS.find((s) => options(wid, WEAPONS[wid], s).length) ?? 'optic';
-  }
   function equipGun(slot: 'p' | 's', id: WeaponId) {
-    if (slot === 'p') {
-      if (ui.primary !== id) ui.primaryBuild = {};
-      ui.primary = id;
-    } else {
-      if (ui.secondary !== id) ui.secondaryBuild = {};
-      ui.secondary = id;
-    }
+    if (slot === 'p') ui.primary = id;
+    else ui.secondary = id;
     ui.commitLoadout();
     ui.sfx('uiConfirm', 0.6);
   }

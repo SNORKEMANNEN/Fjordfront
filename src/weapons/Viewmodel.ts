@@ -258,6 +258,8 @@ export class Viewmodel {
   private lastKickT = -1;
   private settled = true;
   private tacArm = 0;
+  /** one-handed pistol: how far the support hand is off the gun (1 = resting at the side) */
+  private oneHand = 0;
   /** finger pose table (exposed for tuning tools) */
   poses = POSES;
   private cantBlend = 0;
@@ -931,7 +933,7 @@ export class Viewmodel {
       let kind = this.def.reloadKind ?? ({ 'Assault Rifle': 'rifle', SMG: 'pdw', Pistol: 'pistol', Marksman: 'dmr' } as Record<string, ReloadKind>)[this.def.cls];
       if (kind === 'scar') kind = 'rifle'; // the mag check is one magazine only
       if (kind) {
-        this.clip = this.buildClip(kind, false);
+        this.clip = this.buildClip(kind, false, true);
         const want = this.def.cls === 'Pistol' ? 0.03 : 0.05;
         this.magCheckT = 0.3;
         for (let ct = 0.02; ct < 0.7; ct += 0.005) {
@@ -973,7 +975,7 @@ export class Viewmodel {
     return { p: sp, q: sq };
   }
 
-  private buildClip(kind: ReloadKind, empty: boolean) {
+  private buildClip(kind: ReloadKind, empty: boolean, check = false) {
     const m = this.model!;
     const sock = m.sockets.leftHand;
     m.root.updateMatrixWorld(true);
@@ -983,7 +985,7 @@ export class Viewmodel {
     this.anchorWrist('L', sock, sp, sq);
     const ms = m.parts.mag?.userData.magStyle as { type: 'ext' | 'fast' | 'drum'; len: number; base: number[]; drum?: { c: number[]; r: number } } | undefined;
     return buildReloadClip({
-      kind, empty,
+      kind, empty, check,
       mag: ms ? { type: ms.type, len: ms.len, base: new THREE.Vector3(...ms.base), drum: ms.drum ? { c: new THREE.Vector3(...ms.drum.c), r: ms.drum.r } : undefined } : undefined,
       magHome: { p: this.magHome.clone(), q: this.magHomeQ.clone() },
       support: { p: sp, q: sq },
@@ -1575,6 +1577,32 @@ export class Viewmodel {
       const Zh = f.clone().negate(), Yh = n.clone().negate();
       const fq = new THREE.Quaternion().setFromRotationMatrix(new THREE.Matrix4().makeBasis(new THREE.Vector3().crossVectors(Yh, Zh), Yh, Zh));
       const k = easeInOutCubic(this.tacArm);
+      lp.lerp(fp, k);
+      lq.slerp(fq, k);
+      if (k > leftBlend) {
+        leftBlend = k;
+        leftPose = POSES.hold;
+      }
+    }
+    // one-handed pistols (Update 38): the support hand rests low at the side, out of the way, and
+    // only comes up to the gun for the reload (it leaves the rest pose as the clip starts and
+    // returns to it as it ends); revolver plans and held items keep the hand
+    if (def.cls === 'Pistol') {
+      let want = 0;
+      const ar = this.action;
+      if (!ar) want = this.freeL.b > 0.01 ? 0 : 1;
+      else if (!this.isRevolver && (ar.type === 'reload' || ar.type === 'reloadEmpty') && this.clip) {
+        const tt = clamp(ar.t, 0, 1);
+        want = tt < 0.12 ? 1 - easeInOutCubic(tt / 0.12) : tt > 0.84 ? easeInOutCubic((tt - 0.84) / 0.16) : 0;
+        this.oneHand = want;
+      }
+      if (!(ar && !this.isRevolver && (ar.type === 'reload' || ar.type === 'reloadEmpty') && this.clip)) this.oneHand = damp(this.oneHand, want, want > this.oneHand ? 7 : 14, dt);
+    } else this.oneHand = 0;
+    if (this.oneHand > 0.002) {
+      const k = easeInOutCubic(this.oneHand) * (1 - easeInOutCubic(this.tacArm));
+      const br = Math.sin(this.t * 1.4) * 0.003;
+      const fp = new THREE.Vector3(-0.2, -0.43 + br, -0.13);
+      const fq = handQ(new THREE.Vector3(0.15, -0.55, -0.8), new THREE.Vector3(1, 0.1, 0.1));
       lp.lerp(fp, k);
       lq.slerp(fq, k);
       if (k > leftBlend) {

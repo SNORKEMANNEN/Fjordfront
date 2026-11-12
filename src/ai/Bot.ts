@@ -80,9 +80,9 @@ export interface BotWorld {
 }
 
 const DIFF = [
-  { reaction: 0.7, spread: 1.9, aimSpeed: 3.5, burst: [2, 4] },
-  { reaction: 0.45, spread: 1.15, aimSpeed: 5.5, burst: [3, 6] },
-  { reaction: 0.28, spread: 0.65, aimSpeed: 8.0, burst: [4, 8] },
+  { reaction: 0.85, spread: 2.5, aimSpeed: 3.5, burst: [2, 4] },
+  { reaction: 0.52, spread: 1.4, aimSpeed: 5.5, burst: [3, 5] },
+  { reaction: 0.36, spread: 0.95, aimSpeed: 8.0, burst: [3, 7] },
 ];
 
 type State = 'roam' | 'engage' | 'search' | 'cover' | 'dead';
@@ -1152,7 +1152,11 @@ export class Bot implements Combatant {
       const cur = this.aimCur;
       cur.yaw = this.aimYaw;
       cur.pitch = this.aimPitch;
-      aimErr = this.aimCtl.step(cur, wantYaw, wantPitch, sk, dt, this.stunT > 0 || this.suppression > 0.6);
+      const tgt = this.target;
+      const tv = tgt ? velocityOf(tgt) : null;
+      const tdist = tgt ? tgt.position().distanceTo(this.body.pos) : 25;
+      const motion = Math.min(2.5, (tv ? Math.hypot(tv.x, tv.z) / 5 : 0) + this.moveSpeed / 6);
+      aimErr = this.aimCtl.step(cur, wantYaw, wantPitch, sk, dt, this.stunT > 0 || this.suppression > 0.6, tdist, motion);
       this.aimYaw = cur.yaw;
       this.aimPitch = cur.pitch;
     } else {

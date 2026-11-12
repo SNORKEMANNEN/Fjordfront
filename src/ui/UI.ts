@@ -6,7 +6,7 @@ import { WEAPONS, PRIMARIES, SECONDARIES, WeaponDef } from '../weapons/WeaponDef
 import type { WeaponPreview } from './WeaponPreview';
 import { icon, emblem } from './Icons';
 import { openLoadout } from './LoadoutScreen';
-import { Build, cleanBuild } from '../weapons/Attachments';
+import { Build } from '../weapons/Attachments';
 import { WeaponId } from '../weapons/WeaponModels';
 import { KillEvent } from '../game/Match';
 import { CombatantState } from '../game/Combatant';
@@ -158,7 +158,7 @@ export class UI {
   })();
   /** five saved loadouts (named); the active one tracks every change made in the loadout screen */
   presets: { name: string; p: WeaponId; s: WeaponId; l: LethalId; t: TacticalId; pb?: Build; sb?: Build }[] = [];
-  /** gunsmith builds of the equipped primary / secondary (Update 36) */
+  /** (gunsmith removed in Update 38: always the factory build) */
   primaryBuild: Build = {};
   secondaryBuild: Build = {};
   activePreset = 0;
@@ -489,7 +489,7 @@ export class UI {
       const v = saved[i];
       if (v) {
         const pw = okW(v.p, PRIMARIES, 'k416'), sw = okW(v.s, SECONDARIES, 'p80');
-        return { name: String(v.name || d[0]).slice(0, 16), p: pw, s: sw, l: okL(v.l), t: okT(v.t), pb: cleanBuild(pw, WEAPONS[pw], v.pb), sb: cleanBuild(sw, WEAPONS[sw], v.sb) };
+        return { name: String(v.name || d[0]).slice(0, 16), p: pw, s: sw, l: okL(v.l), t: okT(v.t) };
       }
       return { name: d[0], p: okW(d[1], PRIMARIES, 'k416'), s: okW(d[2], SECONDARIES, 'p80'), l: okL(d[3]), t: okT(d[4]) };
     });
@@ -500,8 +500,8 @@ export class UI {
     this.secondary = a.s;
     this.lethal = a.l;
     this.tactical = a.t;
-    this.primaryBuild = a.pb ?? {};
-    this.secondaryBuild = a.sb ?? {};
+    this.primaryBuild = {};
+    this.secondaryBuild = {};
   }
   private savePresets() {
     try {
@@ -524,8 +524,8 @@ export class UI {
     this.secondary = p.s;
     this.lethal = p.l;
     this.tactical = p.t;
-    this.primaryBuild = p.pb ?? {};
-    this.secondaryBuild = p.sb ?? {};
+    this.primaryBuild = {};
+    this.secondaryBuild = {};
     this.savePresets();
     this.updateMenuWeapon();
     this.deathKey = '';
@@ -533,7 +533,7 @@ export class UI {
 
   /** store the current kit into the active loadout and persist it */
   commitLoadout() {
-    Object.assign(this.presets[this.activePreset], { p: this.primary, s: this.secondary, l: this.lethal, t: this.tactical, pb: this.primaryBuild, sb: this.secondaryBuild });
+    Object.assign(this.presets[this.activePreset], { p: this.primary, s: this.secondary, l: this.lethal, t: this.tactical });
     this.savePresets();
   }
   /** leave the loadout screen (back to the menu or the pause screen) */
@@ -1140,12 +1140,56 @@ export class UI {
   // ---------------------------------------------------------------- score popups
   /** one line in the stack right of the crosshair: "+100 CAPTURE", "+50 ASSIST", "SPOTTED" */
   popup(label: string, pts = 0, cls = '') {
-    const el = h('div', `pp ${cls}`, `<b>${pts ? `+${pts}` : ''}</b><span>${esc(label)}</span>`);
+    const now = performance.now();
+    const kill = cls.includes('kill');
+    // kills chained within 1.6 s count up a ×N streak tag and pulse the earlier lines
+    if (kill) {
+      this.popCombo = now - this.popLastKill < 1600 ? this.popCombo + 1 : 1;
+      this.popLastKill = now;
+      if (this.popCombo > 1) {
+        this.popEl.querySelectorAll('.pp.kill:not(.out)').forEach((o) => {
+          o.classList.remove('bump');
+          void (o as HTMLElement).offsetWidth;
+          o.classList.add('bump');
+        });
+      }
+    }
+    // reasons that arrive with a kill (headshot, longshot …) stagger in just after it
+    const delay = !kill && now - this.popLastKill < 60 ? (this.popStagger = this.popStagger + 70) : (this.popStagger = 0);
+    const tag = kill && this.popCombo > 1 ? `<em>×${this.popCombo}</em>` : '';
+    const el = h('div', `pp ${cls}`, `<b>${pts ? (kill ? '+0' : `+${pts}`) : ''}</b><span>${esc(label)}${tag}</span>${kill ? '<i class="slash"></i>' : ''}`);
+    if (delay) el.style.animationDelay = `${delay}ms`;
     this.popEl.appendChild(el);
     while (this.popEl.children.length > 6) this.popEl.firstChild!.remove();
-    setTimeout(() => el.classList.add('out'), 2600);
-    setTimeout(() => el.remove(), 3150);
+    if (kill) {
+      // sparks off the number
+      const b = el.querySelector('b') as HTMLElement;
+      for (let i = 0; i < 7; i++) {
+        const sp = document.createElement('s');
+        sp.className = 'sp';
+        const a = -Math.PI * 0.95 + (i / 6) * Math.PI * 1.9 + (Math.random() - 0.5) * 0.4;
+        const r = 14 + Math.random() * 12;
+        sp.style.setProperty('--dx', `${(Math.cos(a) * r).toFixed(1)}px`);
+        sp.style.setProperty('--dy', `${(Math.sin(a) * r * 0.7).toFixed(1)}px`);
+        sp.style.animationDelay = `${40 + Math.random() * 40}ms`;
+        b.appendChild(sp);
+      }
+      // the points count up fast, easing out
+      const t0 = now + 40;
+      const tick = (t: number) => {
+        const k = Math.min(1, Math.max(0, (t - t0) / 230));
+        const e = 1 - Math.pow(1 - k, 3);
+        if (b.firstChild) b.firstChild.nodeValue = `+${Math.round(pts * e)}`;
+        if (k < 1 && el.isConnected) requestAnimationFrame(tick);
+      };
+      requestAnimationFrame(tick);
+    }
+    setTimeout(() => el.classList.add('out'), 2600 + delay);
+    setTimeout(() => el.remove(), 3150 + delay);
   }
+  private popCombo = 0;
+  private popLastKill = -1e9;
+  private popStagger = 0;
   /** legacy entry: total points + reasons (each reason becomes its own line) */
   killText(points: number, reasons: string[]) {
     if (!reasons.length) return this.popup('ELIMINATION', points, 'kill');

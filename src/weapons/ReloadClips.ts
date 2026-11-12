@@ -154,6 +154,16 @@ export class ReloadClip {
     } else if (m.mode === 'hand') {
       out.visible = true;
       out.pose = mul(hand, m.k);
+    } else if (m.mode === 'drop') {
+      // let go: it falls free out of the well, tumbling a little, then it's gone
+      const u = t - m.t;
+      if (u < 0.13) {
+        out.visible = true;
+        out.pose = mul(this.magHome, { p: V(0, -14 * u * u - 0.25 * u, 0.12 * u), q: E(u * 2.5, 0, u * 1.2) });
+      } else {
+        out.visible = false;
+        out.pose = null;
+      }
     } else {
       out.visible = false;
       out.pose = null;
@@ -191,6 +201,8 @@ export interface ClipContext {
   empty: boolean;
   /** non-standard magazine: the clip adapts its grips, travel, beats and handling */
   mag?: MagStyle;
+  /** build the retention version (mag check: the mag is held, not dropped) */
+  check?: boolean;
   /** magazine pose in the gun (weapon space) */
   magHome: Pose;
   /** support-hand wrist pose on the weapon (weapon space) */
@@ -542,6 +554,52 @@ export function buildReloadClip(c: ClipContext): ReloadClip {
     key(1, S);
     clip.oldMag = [{ t: 0, mode: 'gun' }, { t: 0.07, mode: 'hidden' }];
     clip.newMag = [{ t: 0, mode: 'hidden' }, { t: 0.25, mode: 'hand', k: K }, { t: 0.5, mode: 'gun' }];
+  } else if (c.kind === 'pistol' && !c.check) {
+    // ---------------- one-handed pistol, the classic shooter reload (Update 38): the gun cants to
+    // show its well, the thumb drops the mag and it falls free; the support hand comes up from the
+    // side already holding the fresh one, drives it in and smacks the base plate; on an empty gun
+    // the shooting thumb hits the slide stop and the slide slams home. The hand then drops away.
+    const e = c.empty;
+    gkey(0, g(0));
+    gkey(0.1, g(1));
+    gkey(0.15, g(1.06, V(0, 0.009, 0.002), V(0.07, 0, -0.05))); // pops up as the mag falls
+    gkey(0.22, g(1, V(0, 0.002, 0), V(0.01, 0, 0.01)));
+    gkey(0.36, g(1));
+    gkey(0.43, g(1.05, V(0, 0.005, 0), V(0.04, 0, -0.03))); // leans into the insert
+    gkey(0.47, g(1.02, V(0, -0.008, 0.002), V(-0.07, 0, 0.03))); // seat
+    gkey(0.53, g(1.03, V(0, 0.01, 0), V(0.06, 0, -0.02))); // base-plate smack drives it up
+    gkey(0.58, g(0.98));
+    if (e) {
+      gkey(0.62, g(0.92, V(0.004, 0.004, 0.004), V(0.05, 0.08, 0.05)));
+      gkey(0.66, g(0.85, V(0, 0.014, 0.012), V(0.16, 0.04, -0.04))); // slide slams home: a flick
+      gkey(0.72, g(0.7, V(0, -0.002, 0), V(-0.02, 0, 0.02)));
+      ev(0.655, 'slideRelease');
+      ev(0.655, 'camTap');
+    }
+    gkey(0.86, g(0.12, V(0, -0.002, 0), V(-0.01, 0, 0.005)));
+    gkey(1, g(0));
+    // the hand: below the gun with the fresh mag (it comes up from the side), in, smack, away
+    key(0, pouch(0.02, -0.06, 0.02));
+    key(0.16, pouch(0.04, 0.02, -0.02));
+    ev(0.15, 'release');
+    ev(0.155, 'drop');
+    ev(0.16, 'camDrop');
+    key(0.3, handFor(magOut(0.13, T(-0.035, 0, 0.012))));
+    key(0.39, handFor(magOut(0.03)));
+    key(0.46, handFor(home), true);
+    ev(0.42, 'touch');
+    ev(0.46, 'seat');
+    ev(0.46, 'camSeat');
+    key(0.495, handFor(magOut(0.022)));
+    key(0.53, handFor(magOut(-0.004)), true);
+    ev(0.53, 'tap');
+    ev(0.53, 'camTap');
+    key(0.66, below(-0.05, -0.1, 0.05));
+    key(0.84, below(-0.1, -0.2, 0.08));
+    key(1, below(-0.12, -0.24, 0.08));
+    clip.oldMag = [{ t: 0, mode: 'gun' }, { t: 0.155, mode: 'drop' }];
+    clip.newMag = [{ t: 0, mode: 'hand', k: K }, { t: 0.46, mode: 'gun' }];
+    fk = [[0, 'hold'], [0.46, 'hold'], [0.48, 'open'], [0.53, 'open'], [0.7, 'support'], [1, 'support']];
   } else if (c.kind === 'pistol') {
     const slideQ = handFrame(V(0.95, -0.05, -0.3), V(0, -1, 0));
     const slideAt = (back: number) => c.wristFor(V(0, 0.034, 0.055 + back), slideQ, 0.017, false);

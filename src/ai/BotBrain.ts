@@ -147,11 +147,16 @@ export interface AimSkill {
   control: number;
   /** extra random sway (radians) */
   sway: number;
+  /** tracking wobble that never settles: metres of error at the target (a drifting random walk) */
+  wobble: number;
+  /** how fast the acquisition error wears off (1/s) */
+  settle: number;
 }
+// (Update 38: less aimbot — slower reactions and settling, a tracking error that never goes away)
 export const SKILL: AimSkill[] = [
-  { reaction: 0.62, stiff: 26, damp: 0.5, acquire: 0.14, lag: 0.85, control: 0.35, sway: 0.012 },
-  { reaction: 0.4, stiff: 42, damp: 0.58, acquire: 0.1, lag: 0.55, control: 0.6, sway: 0.008 },
-  { reaction: 0.25, stiff: 64, damp: 0.66, acquire: 0.07, lag: 0.25, control: 0.82, sway: 0.005 },
+  { reaction: 0.78, stiff: 22, damp: 0.48, acquire: 0.17, lag: 0.9, control: 0.3, sway: 0.014, wobble: 0.5, settle: 1.0 },
+  { reaction: 0.5, stiff: 36, damp: 0.56, acquire: 0.12, lag: 0.62, control: 0.52, sway: 0.009, wobble: 0.26, settle: 1.5 },
+  { reaction: 0.34, stiff: 50, damp: 0.62, acquire: 0.095, lag: 0.4, control: 0.7, sway: 0.007, wobble: 0.19, settle: 1.9 },
 ];
 
 /** Sprung aim: overshoots and settles on a new target, lags a moving one, climbs with recoil. */
@@ -162,6 +167,9 @@ export class AimController {
   errYaw = 0;
   errPitch = 0;
   recoil = 0;
+  /** the drifting tracking error (radians) */
+  private nYaw = 0;
+  private nPitch = 0;
   private swayT = Math.random() * 100;
   /** called when a new target is acquired */
   acquire(skill: AimSkill, dist: number, rnd: () => number) {
@@ -173,13 +181,20 @@ export class AimController {
     this.recoil += amount * (1 - skill.control);
   }
   /** integrate towards (wantYaw, wantPitch); returns the current aim error to the ideal */
-  step(cur: { yaw: number; pitch: number }, wantYaw: number, wantPitch: number, skill: AimSkill, dt: number, stunned: boolean) {
+  step(cur: { yaw: number; pitch: number }, wantYaw: number, wantPitch: number, skill: AimSkill, dt: number, stunned: boolean, dist = 20, motion = 0) {
     this.swayT += dt;
     const sway = skill.sway * (stunned ? 4 : 1);
-    const ty = wantYaw + this.errYaw + Math.sin(this.swayT * 1.3) * sway;
-    const tp = wantPitch + this.errPitch + this.recoil + Math.sin(this.swayT * 1.7 + 1) * sway * 0.7;
+    // tracking wobble: an Ornstein-Uhlenbeck random walk (correlated ~0.45 s) whose size is metres at
+    // the target — it grows when either side moves, so strafing and sliding genuinely beat bots
+    const std = (skill.wobble * (1 + motion) * (stunned ? 2 : 1)) / Math.max(5, dist);
+    const th = 2.2, sig = std * Math.sqrt(2 * th);
+    const g = () => (Math.random() + Math.random() + Math.random() - 1.5) * 2;
+    this.nYaw += -this.nYaw * th * dt + sig * Math.sqrt(dt) * g();
+    this.nPitch += -this.nPitch * th * dt + sig * 0.6 * Math.sqrt(dt) * g();
+    const ty = wantYaw + this.errYaw + this.nYaw + Math.sin(this.swayT * 1.3) * sway;
+    const tp = wantPitch + this.errPitch + this.nPitch + this.recoil + Math.sin(this.swayT * 1.7 + 1) * sway * 0.7;
     // the acquisition error and recoil wear off as the soldier settles
-    const k = Math.exp(-dt * 2.4);
+    const k = Math.exp(-dt * skill.settle);
     this.errYaw *= k;
     this.errPitch *= k;
     this.recoil *= Math.exp(-dt * 5);

@@ -290,6 +290,39 @@ URL options: `?quality=low|medium|high|ultra`, `?weather=clear|overcast|rain|sno
 - **Rifle:** support hand moved so it no longer shows through the optic window.
 - **Pistol:** hold reworked.
 
+## Update 38: One-handed pistols, juicier kills, fairer bots
+
+### Pistols
+- **Held with one hand.** The pistol, the machine pistol and the revolver are held in the shooting hand only. The support hand rests low at your side, out of view, and comes up only to reload.
+- **A new pistol reload** in the classic shooter style:
+  1. The gun cants to show the magazine well and the thumb drops the mag. It falls free out of the gun, tumbling.
+  2. The support hand comes up from the side already holding the fresh magazine, drives it in and smacks the base plate.
+  3. On an empty gun, the shooting thumb then hits the slide stop and the slide slams home with a flick.
+  4. The hand drops away again.
+- **The mag check** still holds the magazine instead of dropping it.
+
+### Kill feedback
+- The **+100 popup** stays small next to the crosshair, but now it hits:
+  - it pops in with a white-hot flash and a slight skew, then settles with a little overshoot;
+  - the points count up and cool from white to gold;
+  - a gold slash streaks through the line and a few sparks fly off the number;
+  - the label tightens into place;
+  - chained kills add a **×2 / ×3** tag and pulse the earlier lines;
+  - headshot, longshot and the other bonus lines stagger in right after.
+
+### Bots: less aimbot
+- Bots no longer lock on perfectly once they've seen you:
+  - their aim keeps a drifting tracking error that never fully settles, larger at range, against a moving target and while they move themselves (strafing and sliding genuinely help);
+  - the first error after spotting you wears off more slowly;
+  - they react a little later and their bullet spread is wider;
+  - they pull down less recoil.
+- All three difficulties are tuned. Veteran is still sharp.
+
+### Other changes
+- **The gunsmith is removed.** Guns use their factory setup again. The K416's round red dot, the removable iron sights and the further-out iron-sight ADS from Update 37 stay.
+- **Cable cars have no doors.** Both ends are open doorways.
+- **Flag sounds make sense now.** Capturing a flag plays a radio squelch and a rising two-tone. When the enemy takes one, you hear a squelch and a low, falling two-tone alert, twice. Both are built from real military radio recordings and replace the old "magic" bell sweeps.
+
 ## Update 37: Real optics, magazine-specific reloads, further iron sights
 
 ### Optics replace the iron sights
