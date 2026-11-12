@@ -146,7 +146,7 @@ function pistolGrip(du = 0, dv = 0): P2[] {
  * thin rounded-top hood, big clear window with a faint coating tint, crisp glowing dot inside a
  * thin ring. Returns the optical axis height; the ADS socket goes at the rear of the window.
  */
-function reflexSight(b: PartBuilder, u0: number, railTop: number, mats: WeaponMats, root: THREE.Group) {
+export function reflexSight(b: PartBuilder, u0: number, railTop: number, mats: WeaponMats, root: THREE.Group) {
   const L = 0.044; // housing length
   const winW = 0.0135, winB = railTop + 0.018, winT = railTop + 0.039; // window half-width, bottom, top
   const axis = (winB + winT) / 2;
@@ -212,7 +212,7 @@ function reflexSight(b: PartBuilder, u0: number, railTop: number, mats: WeaponMa
  * painted on it), with an anti-reflection coating that only shows as a faint amber/violet sheen
  * toward the rim and at grazing angles, plus a soft sky reflection.
  */
-function coatedGlass(strength = 1) {
+export function coatedGlass(strength = 1) {
   return new THREE.ShaderMaterial({
     transparent: true,
     depthWrite: false,
@@ -238,7 +238,7 @@ function coatedGlass(strength = 1) {
  * sight axis (it sits "at infinity"), so it stays on target however the head moves, appears only
  * when you look through the sight, and stays a crisp 2 MOA-ish dot with a small glow (it blooms).
  */
-function collimatedDot() {
+export function collimatedDot() {
   return new THREE.ShaderMaterial({
     transparent: true,
     depthWrite: false,
@@ -268,7 +268,7 @@ function collimatedDot() {
   });
 }
 
-function redDot(b: PartBuilder, u0: number, railTop: number, mats: WeaponMats, root: THREE.Group) {
+export function redDot(b: PartBuilder, u0: number, railTop: number, mats: WeaponMats, root: THREE.Group) {
   const axis = railTop + 0.038;
   b.add('metal', rbox(u0 + 0.002, u0 + 0.05, railTop, railTop + 0.012, -0.012, 0.012, 0.002));
   b.add('metal', rbox(u0 + 0.012, u0 + 0.042, railTop + 0.008, axis - 0.0146, -0.009, 0.009, 0.003));
@@ -395,11 +395,16 @@ export function buildCarbine(mats: WeaponMats): WeaponModel {
   const mag = stanagMag(mats);
   mag.position.set(0, -0.035, -0.066);
   // optic: compact tube red dot (the earlier sight), with clear glass and a collimated dot
-  const sightAxis = redDot(b, 0.045, 0.0715, mats, root);
+  // (built as its own part so the gunsmith can swap it)
+  const optic = new THREE.Group();
+  optic.name = 'optic';
+  const ob = new PartBuilder();
+  const sightAxis = redDot(ob, 0.045, 0.0715, mats, optic);
+  optic.add(ob.build(mats, 'optic'));
   // back-up iron front sight (folded) on rail
   b.add('metal', rbox(0.44, 0.465, bore + 0.0234, bore + 0.029, -0.009, 0.009, 0.002));
 
-  root.add(b.build(mats, 'body'), bolt, charge, trigger, mag);
+  root.add(b.build(mats, 'body'), bolt, charge, trigger, mag, optic);
   const sockets = addSockets(root, [
     socket('muzzle', 0.594, bore, 0),
     socket('eject', 0.02, 0.046, 0.02),
@@ -411,7 +416,7 @@ export function buildCarbine(mats: WeaponMats): WeaponModel {
   sockets.leftHand = ls;
   // IR aiming laser at 3 o'clock on the handguard (night-vision canted aim)
   addLaser(root, sockets, mats, 0.335, bore, 0.0262);
-  return { root, parts: { bolt, charge, trigger, mag }, sockets, adsDist: 0.15 };
+  return { root, parts: { bolt, charge, trigger, mag, optic }, sockets, adsDist: 0.15 };
 }
 
 // ======================================================================
@@ -1559,7 +1564,7 @@ function collimatedReticle(tex: THREE.Texture, color: THREE.Color, half: number)
  * cylinder on the right. Reticle: a 2-MOA dot inside a broken 50-MOA circle with four inner ticks,
  * collimated. Returns the optical axis height and the rear edge (for the ADS socket).
  */
-function boxReflex(b: PartBuilder, u0: number, railTop: number, mats: WeaponMats, root: THREE.Group) {
+export function boxReflex(b: PartBuilder, u0: number, railTop: number, mats: WeaponMats, root: THREE.Group) {
   const L = 0.058, W = 0.0155, B = railTop + 0.016, Tp = railTop + 0.044;
   const axis = (B + Tp) / 2 + 0.001;
   // quick-detach mount with a throw lever
@@ -1665,7 +1670,11 @@ export function buildUMS45(mats: WeaponMats): WeaponModel {
   ] }));
   b.add('rubber', rbox(-0.442, -0.426, -0.108, 0.062, -0.017, 0.017, 0.004));
   // ---- Kestrel box reflex on the rail ----
-  const sight = boxReflex(b, -0.06, railTop - 0.006, mats, root);
+  const optic = new THREE.Group();
+  optic.name = 'optic';
+  const ob = new PartBuilder();
+  const sight = boxReflex(ob, -0.06, railTop - 0.006, mats, optic);
+  optic.add(ob.build(mats, 'optic'));
   // ---- moving parts ----
   const cb = new PartBuilder();
   cb.add('steel', rbox(0.17, 0.184, 0.05, 0.056, -0.028, -0.02, 0.0012));
@@ -1686,7 +1695,7 @@ export function buildUMS45(mats: WeaponMats): WeaponModel {
   mb.add('brass', cyl(0.0058, -0.018, 0.012, 0.006, 0, 10));
   const mag = mb.build(mats, 'mag');
   mag.position.set(0, -0.012, -0.071);
-  root.add(b.build(mats, 'body'), charge, trigger, mag);
+  root.add(b.build(mats, 'body'), charge, trigger, mag, optic);
   const sockets = addSockets(root, [
     socket('muzzle', 0.278, bore, 0),
     socket('eject', 0.01, 0.042, 0.022),
@@ -1697,7 +1706,7 @@ export function buildUMS45(mats: WeaponMats): WeaponModel {
   sockets.rightHand = rs;
   sockets.leftHand = ls;
   addLaser(root, sockets, mats, 0.135, 0.021, 0.0262);
-  return { root, parts: { charge, trigger, mag }, sockets, adsDist: 0.2 };
+  return { root, parts: { charge, trigger, mag, optic }, sockets, adsDist: 0.2 };
 }
 
 

@@ -1,3 +1,4 @@
+import { applyBuild } from '../weapons/Attachments';
 import { MAP_ID, MAP_NAME } from '../world/MapLayout';
 import * as THREE from 'three';
 import { Net, NetMsg, cleanCode, LobbyRegistry, RoomInfo, probeRooms, myRegion } from './Net';
@@ -897,7 +898,7 @@ export class NetGame {
     g.ballistics.fire = (shooter: Combatant, origin: THREE.Vector3, dir: THREE.Vector3, def: WeaponDef, muzzle: THREE.Vector3, tracer: boolean, ghost = false) => {
       fire0(shooter, origin, dir, def, muzzle, tracer, ghost);
       if (!this.active || ghost || !this.owns(shooter)) return;
-      this.outShots.push({ s: shooter.id, o: [r2(origin.x), r2(origin.y), r2(origin.z)], d: [dir.x, dir.y, dir.z].map((x) => Math.round(x * 1e4) / 1e4), m: [r2(muzzle.x), r2(muzzle.y), r2(muzzle.z)], w: def.id, tr: tracer ? 1 : 0 });
+      this.outShots.push({ s: shooter.id, o: [r2(origin.x), r2(origin.y), r2(origin.z)], d: [dir.x, dir.y, dir.z].map((x) => Math.round(x * 1e4) / 1e4), m: [r2(muzzle.x), r2(muzzle.y), r2(muzzle.z)], w: def.id, tr: tracer ? 1 : 0, ...(def.sound.suppressed && !WEAPONS[def.id as keyof typeof WEAPONS]?.sound.suppressed ? { sp: 1 } : {}) });
     };
     const throw0 = g.explosives.throw.bind(g.explosives);
     g.explosives.throw = (owner: Combatant, from: THREE.Vector3, vel: THREE.Vector3, fuse?: number, kind?: string) => {
@@ -939,8 +940,10 @@ export class NetGame {
   private replayShot(slot: number, sh: any) {
     const g = this.g;
     const c = this.bySlot(slot);
-    const def = WEAPONS[sh.w as keyof typeof WEAPONS];
-    if (!c || !def || c === g.avatar) return;
+    const base = WEAPONS[sh.w as keyof typeof WEAPONS];
+    if (!c || !base || c === g.avatar) return;
+    // a suppressor from the shooter's gunsmith build
+    const def = sh.sp && !base.sound.suppressed ? applyBuild(base, { muzzle: 'suppressor' }) : base;
     const o = new THREE.Vector3(...(sh.o as [number, number, number]));
     const d = new THREE.Vector3(...(sh.d as [number, number, number])).normalize();
     const m = new THREE.Vector3(...(sh.m as [number, number, number]));
@@ -1050,7 +1053,8 @@ export class NetGame {
         this.strike(peer, 0.1, `fire rate ${def.name}`);
         continue;
       }
-      if (b.mag > (def.mag + 1) * pel * 1.5 + 2) {
+      // (gunsmith drum / extended mags hold up to twice the factory magazine)
+      if (b.mag > (def.mag * 2 + 1) * pel * 1.5 + 2) {
         this.strike(peer, 0.1, `magazine ${def.name}`);
         continue;
       }

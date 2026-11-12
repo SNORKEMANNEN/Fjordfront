@@ -290,6 +290,36 @@ URL options: `?quality=low|medium|high|ultra`, `?weather=clear|overcast|rain|sno
 - **Rifle:** support hand moved so it no longer shows through the optic window.
 - **Pistol:** hold reworked.
 
+## Update 36: Gunsmith and a new loadout screen
+
+### Gunsmith
+Every gun now has up to **five attachment slots**: optic, muzzle, underbarrel, magazine and stock. Each attachment has a clear upside and a clear cost, listed in plain numbers in green and red (for example "−18% vertical recoil" and "+12% horizontal recoil"). Every part is modelled from scratch and mounted on the gun you see in first person and on the bench.
+
+| Slot | Choices | Trade-off |
+|---|---|---|
+| **Optic** | Iron sights, Vind Mini Reflex, Fjord Tube Red Dot, Kestrel Box Reflex, Nordlys Holographic, Fjell 3× Prism | Clearer or more magnified sight picture against slower aiming. The 3× prism zooms in properly but is slow and heavy. |
+| **Muzzle** | Stille Suppressor, Kompensator, Muzzle Brake, Flash Hider, Full Choke (shotguns) | The suppressor keeps you off the enemy radar and quietens shots, but is longer and slower. The compensator fights climb but adds sideways kick. The brake tames sideways kick but is loud and bright. The hider removes the flash but costs a little range. The choke tightens the spread but is worse from the hip. |
+| **Underbarrel** | Vertical Foregrip, Angled Grip, Handstop | Less recoil against slower aiming, or faster handling against more kick. Your support hand moves onto the grip. |
+| **Magazine** | Extended, Fast Mag, Drum, Extended Tube (pump shotgun) | More rounds against slower aiming and reloading, or quicker reloads with fewer rounds. |
+| **Stock** | Lightweight, Tactical | Move and aim faster but kick harder, or steadier shots with slower handling. |
+
+- **Optics move the aim point onto the optic.** Each optic has a real collimated reticle that stays on target as you move:
+  - the reflex and red dot show a dot;
+  - the holographic shows a ring and dot;
+  - the 3× shows a chevron with a stadia line.
+- **Guns without a rail get a riser mount** (HVAL-47, Stille-9, pump shotgun).
+- **Locked slots say why:** integrated scopes on the sniper and DMR, the cover optic on the LMG, iron sights only on the KR-98k, the integral suppressor on the Stille-9.
+- **Builds are saved per loadout** for both the primary and the secondary.
+- **In multiplayer,** other players hear your suppressor and you stay off their radar. Extended and drum magazines are allowed by the host's anti-cheat.
+
+### The loadout screen, rebuilt from scratch
+The old screen mixed everything into one view with hidden modes and double-click tricks. The new one has three plain levels and always shows where you are.
+1. **Loadouts.** Your five loadouts are on the left; click one to select it, and use the pencil to rename it in place. The selected loadout's kit is on the right: primary and secondary (with their fitted attachments as tags), tactical, lethal and field upgrade. The primary turns on the bench in the middle.
+2. **Choose a weapon.** Categories are on the left and the guns are cards under the bench. The sheet on the right compares every stat with what you carry now (green better, red worse) and shows magazine, rate, aim time and reload. Use **Equip** or **Equip & customise**.
+3. **Gunsmith.** The five slots are on the left; locked ones are greyed out with the reason. The gun with its parts is in the middle, with its stat bars and numbers below. The slot's choices are on the right with their pros and cons. **Hover a part to preview it** on the gun and in the stats, and click to fit it. **Reset to factory** undoes everything.
+- **Tactical and lethal** items are large cards; click one to equip it.
+- **Navigation:** one **Back** button, Esc or right-click always goes up exactly one level. **Done** (or Enter on the first level) closes the screen. A breadcrumb at the top shows the path, e.g. LOADOUTS › ASSAULT › PRIMARY › GUNSMITH · HVAL-47.
+
 ## Update 35: Brosund polish, a walk-in cable car and real sounds
 
 ### The undersea tunnel

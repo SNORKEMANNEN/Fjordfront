@@ -19,7 +19,7 @@ export class WeaponPreview {
   private t = 0;
   private white = new THREE.MeshBasicMaterial({ color: 0xffffff });
 
-  constructor(private build: (id: string) => THREE.Object3D) {
+  constructor(private build: (id: string, b?: Record<string, string>) => THREE.Object3D) {
     this.renderer = new THREE.WebGLRenderer({ canvas: this.canvas, antialias: true, alpha: true, powerPreference: 'low-power' });
     this.renderer.outputColorSpace = THREE.SRGBColorSpace;
     this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
@@ -39,10 +39,21 @@ export class WeaponPreview {
     this.camera.lookAt(0, 0, 0);
   }
 
-  private model(id: string) {
-    let m = this.models.get(id);
+  private model(id: string, b?: Record<string, string>) {
+    const key = b && Object.keys(b).length ? `${id}|${JSON.stringify(b)}` : id;
+    let m = this.models.get(key);
     if (!m) {
-      const root = this.build(id);
+      // keep the cache small: gunsmith previews make a model per build
+      if (this.models.size > 40) {
+        for (const [k, o] of this.models) {
+          if (k.includes('|') && !this.holder.children.includes(o)) {
+            o.traverse((x) => { if ((x as THREE.Mesh).isMesh && x.parent?.name === 'attach') (x as THREE.Mesh).geometry.dispose(); });
+            this.models.delete(k);
+          }
+          if (this.models.size <= 24) break;
+        }
+      }
+      const root = this.build(id, b);
       // side view, muzzle to the left, centred and scaled to a common length
       root.rotation.y = Math.PI / 2;
       root.updateMatrixWorld(true);
@@ -54,19 +65,22 @@ export class WeaponPreview {
       g.add(root);
       g.scale.setScalar(1.15 / Math.max(size.x, 0.3));
       m = g;
-      this.models.set(id, m);
+      this.models.set(key, m);
     }
     return m;
   }
 
   /** Mount into a container and start turning the weapon `id`. */
-  show(container: HTMLElement, id: string) {
+  show(container: HTMLElement, id: string, b?: Record<string, string>) {
     if (this.canvas.parentElement !== container) container.appendChild(this.canvas);
-    if (this.current !== id) {
+    const key = b && Object.keys(b).length ? `${id}|${JSON.stringify(b)}` : id;
+    if (this.current !== key) {
+      // a new gun starts its turn again; another build of the same gun keeps turning
+      const sameGun = this.current?.split('|')[0] === id;
       this.holder.clear();
-      this.holder.add(this.model(id));
-      this.current = id;
-      this.t = 0;
+      this.holder.add(this.model(id, b));
+      this.current = key;
+      if (!sameGun) this.t = 0;
     }
     if (!this.raf) {
       let last = performance.now();
@@ -93,6 +107,11 @@ export class WeaponPreview {
     if (this.canvas.width !== Math.round(w * this.renderer.getPixelRatio()) || this.canvas.height !== Math.round(h * this.renderer.getPixelRatio())) {
       this.renderer.setSize(w, h, false);
       this.camera.aspect = w / h;
+      // back off far enough that the whole gun (and its turn) fits a tall bench too
+      const half = Math.tan(THREE.MathUtils.degToRad(this.camera.fov / 2));
+      const dist = Math.max(2.3, 0.78 / (half * this.camera.aspect));
+      this.camera.position.set(0, 0.06 * (dist / 2.3), dist);
+      this.camera.lookAt(0, 0, 0);
       this.camera.updateProjectionMatrix();
     }
     // a slow showroom turn: settles from a three-quarter view into the side profile and back
@@ -112,6 +131,9 @@ export class WeaponPreview {
     const prev = new THREE.Vector2();
     this.renderer.getSize(prev);
     const prevAspect = this.camera.aspect;
+    const prevPos = this.camera.position.clone();
+    this.camera.position.set(0, 0.06, 2.3);
+    this.camera.lookAt(0, 0, 0);
     this.renderer.setSize(W, H, false);
     this.camera.aspect = W / H;
     this.camera.updateProjectionMatrix();
@@ -130,6 +152,8 @@ export class WeaponPreview {
     for (const k of keep) this.holder.add(k);
     this.renderer.setSize(Math.max(1, prev.x), Math.max(1, prev.y), false);
     this.camera.aspect = prevAspect;
+    this.camera.position.copy(prevPos);
+    this.camera.lookAt(0, 0, 0);
     this.camera.updateProjectionMatrix();
     this.thumbs.set(id, url);
     return url;

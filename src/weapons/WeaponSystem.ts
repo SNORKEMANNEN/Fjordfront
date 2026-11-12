@@ -1,3 +1,4 @@
+import { applyBuild, attachVisuals, Build } from './Attachments';
 import * as THREE from 'three';
 import { planBreak } from './BreakAction';
 import { DB_W } from './WeaponModels';
@@ -121,16 +122,20 @@ export class WeaponSystem {
     this.switchTo(2);
   }
 
-  setLoadout(ids: WeaponId[]) {
-    if (this.slots.length === ids.length && ids.every((id, i) => this.slots[i].def.id === id)) {
+  private buildKey = '';
+  setLoadout(ids: WeaponId[], builds: (Build | undefined)[] = []) {
+    const key = ids.map((id, i) => `${id}:${JSON.stringify(builds[i] ?? {})}`).join('|');
+    if (this.slots.length === ids.length && key === this.buildKey) {
       this.refill();
       this.equip(0, true);
       return;
     }
+    this.buildKey = key;
     for (const s of this.slots) s.model.root.removeFromParent();
-    this.slots = ids.map((id) => {
-      const def = WEAPONS[id];
+    this.slots = ids.map((id, i) => {
+      const def = applyBuild(WEAPONS[id], builds[i]);
       const model = WEAPON_BUILDERS[id](this.mats);
+      attachVisuals(model, id, WEAPONS[id], builds[i], this.mats);
       return { def, model, mag: def.mag, reserve: def.reserve, mode: def.modes[0], chambered: true };
     });
     this.current = 0;
@@ -595,7 +600,7 @@ export class WeaponSystem {
     }
     this.rig.shotKick(vk);
     this.vm.kick(d, this.ads);
-    this.flash.fire(d.sound.suppressed ? 0.25 : d.cls === 'Shotgun' ? 1.5 : d.cls === 'Sniper' ? 1.7 : d.cls === 'Marksman' ? 1.35 : d.cls === 'Pistol' ? 0.7 : 1);
+    this.flash.fire((d.sound.suppressed ? 0.25 : d.cls === 'Shotgun' ? 1.5 : d.cls === 'Sniper' ? 1.7 : d.cls === 'Marksman' ? 1.35 : d.cls === 'Pistol' ? 0.7 : 1) * (d.sound.suppressed ? 1 : ((d as any).flashMul ?? 1)));
     if (s.mag === 0 && d.modes[0] !== 'bolt' && (d.cls === 'Pistol' || d.cls === 'Assault Rifle' || d.cls === 'SMG' || d.cls === 'Marksman')) this.vm.boltLocked = true;
 
     // side-by-side: right barrel first, then left (flash + smoke come out of the one that fired)

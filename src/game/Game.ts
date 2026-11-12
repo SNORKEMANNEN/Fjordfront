@@ -1,3 +1,4 @@
+import { attachVisuals } from '../weapons/Attachments';
 import * as THREE from 'three';
 import { Vegetation } from '../world/Vegetation';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
@@ -701,7 +702,11 @@ export class Game {
     };
     this.wmats = makeWeaponMaterials(this.mats);
     // loadout screen: studio preview + silhouette thumbnails of every gun
-    this.ui.previewFactory = () => new WeaponPreview((id) => WEAPON_BUILDERS[id as WeaponId](this.wmats).root);
+    this.ui.previewFactory = () => new WeaponPreview((id, b) => {
+      const m = WEAPON_BUILDERS[id as WeaponId](this.wmats);
+      if (b) attachVisuals(m, id as WeaponId, WEAPONS[id as WeaponId], b, this.wmats);
+      return m.root;
+    });
     // weapon silhouettes from the game's own models (kill feed, death card, kit card)
     this.silhouettes = new Silhouettes(r, (id) => WEAPON_BUILDERS[id as WeaponId](this.wmats).root);
     this.ui.weaponIcon = (n) => this.silhouettes.get(n);
@@ -2227,7 +2232,7 @@ export class Game {
   private applyLoadout() {
     const u = this.ui;
     this.loadout = { primary: u.primary, secondary: u.secondary, tactical: u.tactical, lethal: u.lethal };
-    this.weapons.setLoadout([u.primary, u.secondary]);
+    this.weapons.setLoadout([u.primary, u.secondary], [u.primaryBuild, u.secondaryBuild]);
     this.tacCount = TACTICAL_COUNT[u.tactical];
     this.frags = LETHAL_COUNT[u.lethal] ?? 2;
   }
