@@ -340,26 +340,12 @@ export class UI {
         <button class="mode paper-card" data-mode="mp"><span class="mi">${icon('multiplayer')}</span><span><b>Multiplayer</b><span>Host a room, join with a code or browse public rooms. Bots fill the empty slots.</span></span><em>ONLINE</em></button>
         <button class="mode paper-card" data-mode="quick"><span class="mi">${icon('quick')}</span><span><b>Quick Play</b><span>Straight into the fullest public room — or open one if there is none.</span></span><em>ONLINE</em></button>
       </div>
-      <div class="maps">${MAPS.map((m) => `<button class="mapc paper-card ${m.id === MAP_ID ? 'on' : ''}" data-map="${m.id}"><b>${m.name}</b><span>${m.blurb}</span><em>${m.id === MAP_ID ? 'VALGT · SELECTED' : 'BYTT · SWITCH'}</em></button>`).join('')}</div>
+      <div class="mapnote"><b>KARTVALG · MAP VOTE</b><span>Deploy and the squads vote between ${MAPS.map((m) => m.name).join(' and ')}.</span></div>
       <div class="kit paper-card" data-a="kit"><span class="eyebrow red">KIT · <span class="kit-preset"></span></span><div class="kn"></div><div class="ks"></div></div>`;
     pane.querySelector('[data-mode=dom]')!.addEventListener('click', () => this.handlers.onPlay());
     pane.querySelector('[data-mode=mp]')!.addEventListener('click', () => this.handlers.onMultiplayer?.());
     pane.querySelector('[data-mode=quick]')!.addEventListener('click', () => this.handlers.onQuickPlay?.());
     pane.querySelector('.kit')!.addEventListener('click', () => this.showLoadout('menu'));
-    pane.querySelectorAll('.mapc').forEach((el) =>
-      el.addEventListener('click', () => {
-        const id = (el as HTMLElement).dataset.map as MapId;
-        if (id === MAP_ID) return;
-        // a different map is a different world: save the choice and reload into it
-        Settings.data.level = id;
-        Settings.save();
-        const q = new URLSearchParams(location.search);
-        q.delete('level');
-        if (q.has('test')) q.set('level', id);
-        const qs = q.toString();
-        location.href = location.pathname + (qs ? '?' + qs : '');
-      }),
-    );
     this.updateMenuWeapon();
   }
 
@@ -1136,6 +1122,44 @@ export class UI {
     });
   }
   private liveHits: HTMLElement[] = [];
+
+  // ---------------------------------------------------------------- map vote (Update 40)
+  private voteEl: HTMLElement | null = null;
+  /** the pre-match map vote panel (null hides it) */
+  showVote(v: { maps: { id: MapId; name: string; blurb: string; votes: number; loaded: boolean }[]; mine: MapId | null; left: number; result: MapId | null; total: number } | null, onVote?: (m: MapId) => void) {
+    if (!v) {
+      this.voteEl?.remove();
+      this.voteEl = null;
+      return;
+    }
+    if (!this.voteEl) {
+      this.voteEl = h('div', 'mapvote');
+      this.hud.appendChild(this.voteEl);
+      this.voteEl.addEventListener('click', (e) => {
+        const c = (e.target as HTMLElement).closest('[data-vote]') as HTMLElement | null;
+        if (c && this.voteCb) this.voteCb(c.dataset.vote as MapId);
+      });
+    }
+    this.voteCb = onVote ?? null;
+    const counted = v.maps.reduce((a, m) => a + m.votes, 0);
+    const key = JSON.stringify([v.maps.map((m) => m.votes), v.mine, v.result, Math.ceil(v.left)]);
+    if (this.voteEl.dataset.k === key) return;
+    this.voteEl.dataset.k = key;
+    const card = (m: (typeof v.maps)[0], i: number) => {
+      const share = counted ? m.votes / counted : 0;
+      const win = v.result === m.id, lose = v.result && !win;
+      return `<button class="mv-card ${v.mine === m.id ? 'mine' : ''} ${win ? 'win' : ''} ${lose ? 'lose' : ''}" data-vote="${m.id}">
+        <small>${i === 0 ? '← ' : ''}${m.loaded ? 'LOADED' : 'MAP'}${i === 1 ? ' →' : ''}</small>
+        <b>${esc(m.name)}</b><span>${esc(m.blurb)}</span>
+        <i class="mv-bar"><s style="width:${(share * 100).toFixed(0)}%"></s></i>
+        <em>${m.votes} vote${m.votes === 1 ? '' : 's'}${v.mine === m.id ? ' · yours' : ''}</em>
+        ${win ? '<strong>WINS</strong>' : ''}
+      </button>`;
+    };
+    this.voteEl.innerHTML = `<div class="mv-head"><b>${v.result ? 'VOTE CLOSED' : 'MAP VOTE'}</b><span>${v.result ? (v.maps.find((m) => m.id === v.result)!.loaded ? 'Deploying now' : 'Deploying to the new map') : `${counted}/${v.total} voted · ${Math.ceil(v.left)} s · <kbd>←</kbd> <kbd>→</kbd> or click`}</span></div>
+      <div class="mv-cards">${v.maps.map(card).join('<div class="mv-vs">VS</div>')}</div>`;
+  }
+  private voteCb: ((m: MapId) => void) | null = null;
 
   // ---------------------------------------------------------------- score popups
   /** one line in the stack right of the crosshair: "+100 CAPTURE", "+50 ASSIST", "SPOTTED" */

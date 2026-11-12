@@ -290,6 +290,21 @@ URL options: `?quality=low|medium|high|ultra`, `?weather=clear|overcast|rain|sno
 - **Rifle:** support hand moved so it no longer shows through the optic window.
 - **Pistol:** hold reworked.
 
+## Update 40: Map vote
+
+- **No more map switching in the menu.** The map cards are gone; press Domination and you're straight into the game.
+- **Then the map vote starts.** You spawn on the currently loaded map in a short warm-up:
+  - you stand at your spawn and can look around;
+  - nobody else is deployed yet;
+  - a vote panel shows **Kvitvika vs Brosund**.
+- **Voting.** Vote with **← / →** or by clicking a card. You can change your vote until it closes. The 23 bots cast their votes over the first seconds; the bars and counts fill as they come in.
+- **Closing.** The vote closes after 14 s, or about 2 s after everyone has voted. A **tie keeps the loaded map**.
+- **Same map wins:** the match goes live immediately, with no loading.
+- **The other map wins:** "Deploying" plays, the winning map builds, and the match **starts on its own** with no menu in between.
+- **Every new match** (Play again after a match ends) runs a new vote.
+- **Multiplayer** plays the host's current map, as before. Joining players still load the host's map automatically.
+- **Tests:** add `?vote` to run the vote in automated test mode.
+
 ## Update 39: A proper one-handed pistol grip
 
 - **The shooting hand now really wraps the grip** on the pistol and the machine pistol.

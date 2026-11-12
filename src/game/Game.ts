@@ -16,7 +16,7 @@ import { World } from '../world/World';
 import { PlayerController } from '../player/PlayerController';
 import { CameraRig } from '../player/CameraRig';
 import { Settings } from './Settings';
-import { SPAWNS, PLAY_HALF, landmarkAt, LANDMARKS, TUNNEL, TUNNEL_EXIT, tunnelShafts, BUILDINGS, MAP_ID, shoreDist, inTunnel, isWet, capHeightAt } from '../world/MapLayout';
+import { SPAWNS, PLAY_HALF, landmarkAt, LANDMARKS, TUNNEL, TUNNEL_EXIT, tunnelShafts, BUILDINGS, MAP_ID, MAPS, MapId, shoreDist, inTunnel, isWet, capHeightAt } from '../world/MapLayout';
 import { tunnelFloorAt } from '../world/maps/Brosund';
 import { Viewmodel, ActionType } from '../weapons/Viewmodel';
 import { WeaponSystem, ShotRequest } from '../weapons/WeaponSystem';
@@ -934,6 +934,18 @@ export class Game {
     // automated tests start matches instantly: let them hear everything (players get the menu
     // first and the sounds finish loading behind it)
     if (this.testMode) await this.audioLoad;
+    // a map vote sent us here: straight into the match, no menu
+    let auto = null as string | null;
+    try {
+      auto = sessionStorage.getItem('ff.autostart');
+      sessionStorage.removeItem('ff.autostart');
+    } catch {
+      /* none */
+    }
+    if (auto === 'dom' && !joinCode) {
+      this.ui.hideLoading?.();
+      this.startMatch(true);
+    }
     (window as any).__ready = true;
   }
 
@@ -1275,6 +1287,7 @@ export class Game {
 
   // ================================================================ states
   toMenu() {
+    this.endVote(false);
     this.state = 'menu';
     this.sbCursor = false;
     this.menuScene?.setKit(this.avatar.team, this.ui.primary);
@@ -1347,7 +1360,106 @@ export class Game {
     return true;
   }
 
-  startMatch() {
+  // ================================================================ map vote (Update 40)
+  /** the pre-match map vote: you're deployed on the loaded map, frozen at your spawn while the
+   *  squads vote; the loaded map keeps a tie. Same map: straight to live. Other map: deploy there
+   *  (it builds, then the match starts on its own — no menu in between). */
+  private voting: { t: number; dur: number; votes: Record<MapId, number>; mine: MapId | null; bots: { at: number; map: MapId; done: boolean }[]; result: MapId | null; resT: number; key: (e: KeyboardEvent) => void } | null = null;
+  private beginVote() {
+    const maps = MAPS.map((m) => m.id) as MapId[];
+    const bots = this.bots.filter((b) => !b.netDisabled).map(() => ({ at: 1.2 + this.rng.next() * 8.5, map: maps[this.rng.next() < 0.5 ? 0 : 1], done: false }));
+    const key = (e: KeyboardEvent) => {
+      if (!this.voting || this.voting.result) return;
+      if (e.code === 'ArrowLeft' || e.code === 'ArrowRight') {
+        e.preventDefault();
+        this.castVote(maps[e.code === 'ArrowLeft' ? 0 : 1]);
+      }
+    };
+    window.addEventListener('keydown', key);
+    this.voting = { t: 0, dur: 14, votes: Object.fromEntries(maps.map((m) => [m, 0])) as Record<MapId, number>, mine: null, bots, result: null, resT: 0, key };
+    this.match.phase = 'warmup';
+    this.player.frozen = true;
+    this.ui.showVote(this.voteView(), (m) => this.castVote(m));
+    this.audio.play('uiReady', { bus: 'ui', gain: 0.4, reverb: 0 });
+  }
+  private castVote(m: MapId) {
+    const v = this.voting;
+    if (!v || v.result) return;
+    if (v.mine) v.votes[v.mine]--;
+    v.mine = m;
+    v.votes[m]++;
+    this.audio.play('uiConfirm', { bus: 'ui', gain: 0.5, reverb: 0 });
+    // everyone's in: wrap it up
+    if (v.bots.every((b) => b.done)) v.t = Math.max(v.t, v.dur - 2);
+    this.ui.showVote(this.voteView(), (mm) => this.castVote(mm));
+  }
+  private voteView() {
+    const v = this.voting!;
+    return { maps: MAPS.map((m) => ({ id: m.id as MapId, name: m.name, blurb: m.blurb, votes: v.votes[m.id as MapId], loaded: m.id === MAP_ID })), mine: v.mine, left: Math.max(0, v.dur - v.t), result: v.result, total: v.bots.length + 1 };
+  }
+  private updateVote(dt: number) {
+    const v = this.voting!;
+    if (v.result) {
+      v.resT += dt;
+      if (v.resT > 2.2) this.finishVote();
+      return;
+    }
+    v.t += dt;
+    for (const b of v.bots) {
+      if (b.done || v.t < b.at) continue;
+      b.done = true;
+      v.votes[b.map]++;
+      this.audio.play('uiHover', { bus: 'ui', gain: 0.35, reverb: 0 });
+    }
+    if (v.mine && v.bots.every((b) => b.done)) v.t = Math.max(v.t, v.dur - 2);
+    if (v.t >= v.dur) {
+      const maps = Object.keys(v.votes) as MapId[];
+      const other = maps.find((m) => m !== MAP_ID)!;
+      // the loaded map keeps a tie
+      v.result = v.votes[other] > v.votes[MAP_ID] ? other : MAP_ID;
+      this.audio.play(v.result === MAP_ID ? 'flagWon' : 'uiHorn', { bus: 'ui', gain: 0.5, reverb: 0 });
+    }
+    this.ui.showVote(this.voteView(), (m) => this.castVote(m));
+  }
+  private finishVote() {
+    const v = this.voting!;
+    const win = v.result!;
+    if (win === MAP_ID) {
+      this.endVote(true);
+      this.startMatch(true);
+      return;
+    }
+    // the other map won: build it and drop straight into the match
+    this.ui.showVote(null);
+    this.ui.notify('DEPLOYING · ' + (MAPS.find((m) => m.id === win)?.name ?? win).toUpperCase(), 'THE VOTE IS IN');
+    try {
+      sessionStorage.setItem('ff.autostart', 'dom');
+    } catch {
+      /* no session storage: you get the menu on the new map instead */
+    }
+    Settings.data.level = win;
+    Settings.save();
+    const q = new URLSearchParams(location.search);
+    q.delete('level');
+    q.delete('vote');
+    if (q.has('test')) q.set('level', win);
+    const qs = q.toString();
+    this.voting = null;
+    setTimeout(() => (location.href = location.pathname + (qs ? '?' + qs : '')), 900);
+  }
+  private endVote(show: boolean) {
+    const v = this.voting;
+    if (!v) return;
+    window.removeEventListener('keydown', v.key);
+    this.voting = null;
+    this.player.frozen = false;
+    for (const b of this.bots) b.root.visible = true;
+    this.ui.showVote(null);
+    void show;
+  }
+
+  startMatch(skipVote = false) {
+    this.endVote(false);
     this.menuScene?.show(false);
     this.ui.soldierTag(null, this.avatar.team);
     this.world?.shootable?.repairAll();
@@ -1437,6 +1549,12 @@ export class Game {
     this.match.initialSpawns = false;
     this.state = 'playing';
     this.minuteCalled = false;
+    // solo matches open with a map vote (Update 40): you're in, on the loaded map, the vote runs
+    const forceVote = new URLSearchParams(location.search).has('vote');
+    if (!skipVote && !this.netg?.active && (!this.testMode || forceVote)) {
+      this.beginVote();
+      return;
+    }
     window.setTimeout(() => this.announcer('start'), 900);
     this.netg?.onMatchStart();
     this.nightNagT = 0;
@@ -1692,7 +1810,13 @@ export class Game {
     }
 
     // ---------------- bots ----------------
+    if (this.voting) this.updateVote(dt);
     for (const b of this.bots) {
+      if (this.voting) {
+        // the map vote: nobody else is deployed yet
+        b.root.visible = false;
+        continue;
+      }
       if (b.netPuppet) {
         // owned by another machine: posed from the network
         b.netUpdate(dt);
@@ -1714,7 +1838,7 @@ export class Game {
         b.spawn(s.pos, s.yaw);
       }
     }
-    if (!this.netg?.isClient) {
+    if (!this.netg?.isClient && !this.voting) {
       // (a client mirrors the host's clock, flags and score instead)
       this.match.update(dt);
       this.match.addPoints(this.dom.update(dt, this.match.players, this.time));
