@@ -97,7 +97,7 @@ URL options: `?quality=low|medium|high|ultra`, `?weather=clear|overcast|rain|sno
 - Post-processing: optional camera motion blur, aim depth of field, bloom, AgX-style filmic tonemapping with a cool/neutral grade, vignette, chromatic aberration, film grain, and damage/suppression effects. SMAA anti-aliasing.
 - Weather presets: broken clouds, overcast, and rain with rain streaks and fog sheets.
 
-**Audio** (`src/audio/`): all sounds are synthesized at load time with `OfflineAudioContext`.
+**Audio** (`src/audio/`): every sound is a real recording (firearm, equipment, ambience, voice and the real-recording bank under `public/assets/sounds/`). The synthesizers in `AudioEngine.ts` remain only as a fallback if a file fails to load.
 - Gunshots per weapon (blast, low thump, supersonic crack, action noise and mountain echoes), plus distant variants that arrive with a speed-of-sound delay.
 - Reload foley, surface-dependent footsteps, impacts, whizzes and suppression.
 - Ambience: wind, waves, rain, seagulls and songbirds.
@@ -289,6 +289,91 @@ URL options: `?quality=low|medium|high|ultra`, `?weather=clear|overcast|rain|sno
 - **MP7:** sprint and jump clutter reduced.
 - **Rifle:** support hand moved so it no longer shows through the optic window.
 - **Pistol:** hold reworked.
+
+## Update 35: Brosund polish, a walk-in cable car and real sounds
+
+### The undersea tunnel
+- **No more sea inside the tunnel.** The sea surface is cut away over the bore wherever there is land above it.
+- **Norwegian tunnel interior**, after the reference photos:
+  - smooth white panel lining above a concrete lower wall, with ribs every 5 m;
+  - two rows of LED lights and pools of light, plus a blue-lit section in the middle;
+  - a cable tray and three jet fans in the crown.
+- **Safety features:**
+  - red **NØDTELEFON** booths with real doors, a phone, an extinguisher and a hanging SOS sign;
+  - green-lit emergency exit niches;
+  - reflectors along the kerbs;
+  - a pump room you can walk into.
+- **More cover in the bore:** a lane closure with cones and a works van, a two-car crash, staggered barriers, a car with pallets in the lay-by, a stalled truck, a burnt-out wreck and sandbags.
+- **The portals** have:
+  - a concrete arch collar with reflector studs;
+  - a red traffic signal with a "STOPP ved rødt blink" sign;
+  - a boom barrier;
+  - SOS and equipment cabinets;
+  - guard rails.
+- The cuttings at the portals are wider. The tunnel name board that was buried in the ground at the town entrance now stands on the road verge.
+
+### The town
+- **Every shop is a real shop.** The Jugendstil ground floors are cafés, barbers, bakeries, pharmacies, kiosks, bookshops, florists, clothes shops, restaurants, pubs, sports shops, jewellers, opticians, pizzerias, fishmongers and galleries.
+- Each shop has:
+  - its own fictional Norwegian name on a board;
+  - a blade sign over the pavement;
+  - a striped awning;
+  - a coloured **neon sign** (KAFFE, BARBER, BAKERI, PUB …) that glows and washes the wall with its colour at dusk and night;
+  - often an "ÅPENT" neon over the door, and a barber pole at the barbers.
+- **The interiors are furnished to match the trade:**
+  - café tables and a counter with a coffee machine;
+  - barber chairs and mirrors;
+  - bread racks;
+  - pharmacy shelves;
+  - book stacks, flower buckets, clothes rails, bar stools and fish counters;
+  - and more.
+- **Traditional Norwegian road signs:**
+  - 30 and 50 speed limits at the ends of roads;
+  - priority road, pedestrian crossing (with zebra stripes), parking, bus stop, one-way, children, speed bump and "gågate" (pedestrian street) signs;
+  - tunnel warnings with a 50 limit before both portals.
+
+### Aksla and the Fjellstua
+- **The stairs now go all the way.** They start at street level on Torget and climb in eight equal flights (about 33°) with landings at every turn, then land on the Fjellstua terrace.
+- The terrace now wraps around the café on a stone base, with a gap in the railing where the stairs arrive.
+- Bots use the stairs too, and flag A (Fjellstua) is contested again.
+
+### Walk-in cable car
+- **The cable car is fully automatic.** There is no button any more.
+- Two red cabins run in opposite directions on their own timetable. They wait 11 s at the stations with the doors open, then travel.
+- **Walk in, stay inside and walk around** while it moves: players and bots ride along. The doors are open only on the platform side when docked.
+- **Towers** are placed wherever the line would come close to the ground, so the cabins never pass through the hillside.
+- Each station has a deck, steps, a roof and the bull wheel.
+
+### Water and waterfalls
+- Rivers and waterfalls no longer run through the playable area. Waterfalls appear only on the mountains around the map.
+
+### Real sounds instead of synthesized ones
+Every sound that used to be synthesized in code is now built from **real recordings** by `tools/real_sfx_build.py` (bank in `public/assets/sounds/real/`). That covers:
+- **The tactical-sprint rattle:** real kit (straps, buckles, pouches, a shaken metal rattle).
+- **Bullet impacts per material**, each made from a sharp strike, the material's body and debris:
+  - concrete / rock: pick strikes, falling stone, grit, a ricochet whine now and then;
+  - metal: real metal hits, plate pings, ricochets;
+  - wood: axe chops, wood knocks, splinters;
+  - dirt: ground thumps with gravel patter;
+  - water: splashes;
+  - glass: glass hits;
+  - flesh: body hits.
+- **The LMG bipod:** spring lever, latch and leg clicks.
+- **Footsteps** on gravel, metal and water.
+- **Foley and weapon cues:** cloth and gear for ADS, jump, landing and mantling; breathing in and out when holding your breath on a scope; the low-ammo tick; real bullet fly-by whizzes.
+- **The mortar whistle:** a real fly-by recording, played with a falling pitch.
+- **Burning wrecks:** a real burn with crackle.
+- **Interface and match stings:**
+  - real interface clicks;
+  - a real bell when you ready up;
+  - flag captured / lost, killstreak and medal stings;
+  - real military radio clicks and beeps.
+- **Birds:** real **gulls** at the shore and songbirds inland.
+- **Ambience loops:** coastal wind, waves lapping, city rain, a blizzard wind with flapping fabric, gravel under you when sliding, and a helicopter rotor built from a slowed fan recording.
+
+### Other fixes and performance
+- The sign atlases are bigger, so no shop shows another shop's name.
+- The cable-car stations are merged into a handful of draw calls.
 
 ## Update 34: Brosund, a second map
 
@@ -2086,7 +2171,13 @@ The environment this was built in could only reach GitHub and npm. Sketchfab, Po
 - **Voice callouts** (bot chatter, your own callouts, HQ, the helicopter pilot and the fire-support operator) were generated with **ElevenLabs** text-to-speech (`tools/voice_build.py`, premade voices). They were made on a free ElevenLabs plan, which requires attribution and allows only non-commercial use. To use the voices commercially, regenerate them on a paid plan with the same script.
 - **Music:** the menu theme, the tension underscore and the victory sting were generated for this game with **Stable Audio 2.5** through the Stability AI API (original text prompts, no reference material; see `tools/music_build.py`). Use them under Stability AI's terms for API outputs. The defeat sting, the night-vision power-up / power-down, the glass crack / shatter sounds, the three door-breach impacts and the ten death screams were made with **ElevenLabs sound generation**, under the same free-plan terms as the voices (attribution, non-commercial).
 - **Hitmarker and elimination sounds** (`public/assets/sounds/ui/hitmarker.ogg`, `killsound.ogg`) were supplied by the project owner.
-- **Interface stings, ambience loops and the helicopter rotor** (flag captured/lost, killstreak ready, radio, UAV ping, mortar whistle, wind, waves, rain) are synthesized in code.
+- **Real-recording bank** (Update 35, `tools/real_sfx_build.py`): tactical-sprint rattle, bullet impacts, bipod, footsteps on gravel / metal / water, cloth and gear foley, breathing, bullet whiz, mortar whistle, fire, interface and match stings, radio, gulls, songbirds and the wind / waves / rain / snow-wind / slide / helicopter loops. Nothing is synthesized any more. Sources:
+  - **CC BY 4.0:** **Oculus Audio Pack 1** by **Oculus VR, LLC** (via `facebookincubator/Meta-open-sound`). Used for clothing and gear movement, shoe footsteps and landings on metal / dirt / concrete / wood, metal surface hits, punches, glass, male breathing, lever pulls, whooshes, interface clicks / alerts / bell trees / power-ups, the fan, machine and car-engine loops (helicopter), ocean waves, city rain, flag flapping and forest birds. Credit: "Oculus Audio Pack 01" by Oculus VR, LLC, licensed under CC BY 4.0. Changes: trimmed, filtered, layered, pitched, looped and normalised.
+  - **CC0:**
+    - Freesound recordings via **Tidewater** (`dgreenheck/tidewater`): gulls by **squashy555** (#353416) and **Soojay** (#462462); "strong wind on coastal path" by **bruno.auzet** (#706471); "WavesOnTheShore" by **richardemoore** (#260263); wading steps by **Nox_Sound** (#490951) and **ryansitz** (#342932); splashes by **qubodup** / blaukreuz (#212143) and **Nox_Sound** (#585744).
+    - Freesound recordings via **Kraken Isles** (`DanWahlin/kraken-isles`): fly-by whizzes by **modusmogulus** (#789222, #789389) and **agaudiodesigns** (#500559); wood breaking by **SoundCollectah** (#109359), **TheLittleCrow** (#589866) and **kevinkace** (#66772); falling stones by **iwanPlays** (#567249); rain on leaves by **newtad1** (#836411); "Small Bell #2" by **steffcaffrey** (#452379).
+    - **Kenney** RPG Audio, Interface Sounds, Impact Sounds and Music Jingles (via `Boyquotes/kenney-rpg-audio-for-godot` and `Cy4nWare/sfx-api`).
+    - qubodup's metal shaking / clicks and radio click / beep, rubberduck's stones, rock falls, wood / glass hits and splashes, and the TNT burn, all already listed below.
 - **Equipment sounds** (Update 31: grenades, explosions, smoke, flash / stun ring, stim, C4, sticky, claymore, trophy, snapshot, decoy, throwing knife) are real recordings, cut and layered by `tools/eq_sfx_build.py`. Sources:
   - **CC BY 4.0, attribution required:**
     - **"Grenade pin pull"** by **CGEffex** (freesound.org #93837), the pin pull. Taken from the `ryno4ever16/cp2020-augmented` mirror.
@@ -2113,7 +2204,7 @@ The environment this was built in could only reach GitHub and npm. Sketchfab, Po
 - **Footstep and impact recordings**: Kenney "Impact Sounds" (CC0), via the GitHub mirror `Boyquotes/kenney-impact-sounds-for-godot`.
 - **waternormals.jpg** comes from the three.js examples (MIT-licensed repository).
 - **Fonts** (Update 29): **Big Shoulders Display** and the **IBM Plex** family (Sans, Sans Condensed, Mono, Serif Italic), all under the **SIL Open Font License 1.1**, self-hosted in `public/assets/fonts/` (from @fontsource; licence texts alongside).
-- **Icons, faction emblems, the chart rendering and the interface sounds** (hover, confirm, back, ready bell, match-found horn) are drawn / synthesized in code for this game.
+- **Icons, faction emblems and the chart rendering** are drawn in code for this game. The interface sounds are real recordings (see the real-recording bank above).
 
 To swap in higher-fidelity licensed assets later (for example CC0 weapon GLBs or recorded audio), use these points:
 - `WEAPON_BUILDERS` in `src/weapons/WeaponModels.ts`: a GLB only needs the same sockets (`muzzle`, `eject`, `sight`, `rightHand`, `leftHand`, `magWell`) and named parts (`mag`, `bolt`, ...).

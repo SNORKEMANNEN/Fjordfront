@@ -548,8 +548,8 @@ export function terrainHeight(x: number, z: number): number {
   if (!onSpan && nr.d < nr.road.width * 0.5 + 8) {
     const hw = nr.road.width * 0.5;
     // stairs cut a narrow notch into the hillside; roads blend out over 7 m
-    const m = nr.road.kind === 'stairs' ? 1 - smoothstep(hw + 0.2, hw + 2.2, nr.d) : 1 - smoothstep(hw + 0.6, hw + 7, nr.d);
-    h = lerp(h, nr.y - (nr.d < hw + 0.3 ? 0.06 : 0), m);
+    const m = nr.road.kind === 'stairs' ? 1 - smoothstep(hw + 1.1, hw + 2.8, nr.d) : 1 - smoothstep(hw + 0.6, hw + 7, nr.d);
+    h = lerp(h, nr.y - (nr.d < hw + 0.3 ? (nr.road.kind === 'stairs' ? 0.25 : 0.06) : 0), m);
   }
   if (!kv) return BR.brTerrainPost(x, z, h);
   // Trenches

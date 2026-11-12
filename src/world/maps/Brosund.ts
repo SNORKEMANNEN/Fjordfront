@@ -116,12 +116,16 @@ export function tunnelLength() {
 }
 /** Emergency features along the tunnel (path distance s, side +1 = right going east). */
 export const TUN_FEATURES = {
-  /** turnaround lay-by (the photo's "Snu og køyr ut"): widened bay on the right, blue light, SOS */
+  /** turnaround lay-by (the photo's "Snu og køyr ut"): widened bay on the left, blue light, SOS */
   layby: { s0: 128, s1: 152, side: -1 as 1 | -1, width: 6.5 },
-  /** SOS / extinguisher niches */
-  niches: [{ s: 62, side: 1 as 1 | -1 }, { s: 214, side: -1 as 1 | -1 }],
+  /** red emergency telephone booths ("NØDTELEFON") — odd stations: each fills one 2 m wall segment */
+  phones: [{ s: 47, side: 1 as 1 | -1 }, { s: 111, side: 1 as 1 | -1 }, { s: 197, side: -1 as 1 | -1 }, { s: 249, side: 1 as 1 | -1 }],
+  /** green-lit emergency exit niches */
+  exits: [{ s: 85, side: -1 as 1 | -1 }, { s: 225, side: 1 as 1 | -1 }],
   /** pump station: a steel door into a side chamber at the low point */
-  pump: { s: 168, side: 1 as 1 | -1 },
+  pump: { s: 169, side: 1 as 1 | -1 },
+  /** kept for compatibility (old SOS niches) */
+  niches: [] as { s: number; side: 1 | -1 }[],
 };
 
 /** Grid bucket of path samples for fast nearest-point queries (terrain workers call this a lot). */
@@ -188,7 +192,7 @@ export function inBrosundTunnel(x: number, y: number, z: number, margin = 0.5) {
 }
 
 // ---------------- terrain ----------------
-const AKSLA = { x: -100, z: -112, h: 58 };
+const AKSLA = { x: -100, z: -112, h: 68 };
 
 function landHeight(x: number, z: number, sd: number): number {
   let h = 3.2 + fbm2(x * 0.012, z * 0.012, 3) * 2.2 + fbm2(x * 0.05 + 3, z * 0.05, 2) * 0.6;
@@ -210,7 +214,7 @@ function landHeight(x: number, z: number, sd: number): number {
       const r2 = Math.pow(dx / (dx > 0 ? 44 : 62), 2) + Math.pow(dz / (dz > 0 ? 46 : 70), 2);
       let a2 = AKSLA.h * Math.exp(-r2 * 1.5);
       a2 += ridged2(x * 0.045, z * 0.045, 3) * 5 * Math.exp(-r2);
-      a2 = Math.min(a2, AKSLA.h - 1.2 + fbm2(x * 0.05, z * 0.05, 2) * 0.6);
+      a2 = Math.min(a2, 56.8 + fbm2(x * 0.05, z * 0.05, 2) * 0.6);
       h = Math.max(h, h * 0.4 + a2);
     }
     // Aspøya's hill and the beach behind the south shore
@@ -335,8 +339,9 @@ export function brTerrainPost(x: number, z: number, h: number): number {
   }
   // portal cuttings: a flat road bed as wide as the bore, flaring out over 26 m
   const along = Math.abs(t.along);
-  if (along < 30 && ad < TUN.hw + 4) {
-    const m = (1 - smoothstep(TUN.hw + 0.5, TUN.hw + 4, ad)) * (1 - smoothstep(16, 30, along));
+  if (along < 34 && ad < TUN.hw + 10) {
+    // a flat bed wide enough for the barriers, signal and cabinets, then the rock cut
+    const m = (1 - smoothstep(TUN.hw + 3.6, TUN.hw + 9, ad)) * (1 - smoothstep(18, 34, along));
     return lerp(h, p.y - 0.06, m);
   }
   return h;
@@ -359,7 +364,7 @@ export function brCapHeight(x: number, z: number, natural: number): number {
 /** Beyond a portal end of the bore (the cap mesh must not hang a curtain down over the opening). */
 export function brPastPortal(x: number, z: number) {
   const t = tunnelNearest(x, z);
-  return !!t && pastEnd(t) && Math.abs(t.d) < TUN.hw + TUN.carve + 4;
+  return !!t && pastEnd(t) && Math.abs(t.d) < TUN.hw + TUN.carve + 8;
 }
 /** Cap-mesh footprint test. */
 export function brCapCovers(x: number, z: number) {
@@ -469,7 +474,7 @@ function townBuildings(): BuildingDef[] {
         tower: corner && rng.chance(0.75) ? (blockStart ? (side > 0 ? 'R' : 'L') : side > 0 ? 'L' : 'R') : undefined,
         gable: rng.chance(0.55) ? (rng.chance(0.5) ? 'curved' : 'stepped') : 'none',
         roofMat: rng.chance(0.22) ? 'copper' : 'slate',
-        enter: off < 30 && rng.chance(0.5),
+        enter: off < 50 ? rng.chance(0.85) : rng.chance(0.35),
         open: 0,
       });
       const me = out[out.length - 1];
@@ -488,7 +493,7 @@ const SITES: BuildingDef[] = [
   // the stone church (its tower is a landmark from everywhere) on Nørvøya's upper street
   { kind: 'stonechurch', x: -2, z: -62, rot: -0.05, name: 'Sundkyrkja' },
   // Fjellstua — the café on Aksla's summit plateau, terrace facing the town
-  { kind: 'cafe', x: -98, z: -108, rot: 0.15, w: 20, d: 10, name: 'Fjellstua' },
+  { kind: 'cafe', x: -98, z: -108, rot: 0.15, w: 20, d: 10, name: 'Fjellstua', padY: 55.5 },
   // Molja: the red breakwater lighthouse at the canal's Atlantic mouth
   { kind: 'molja', x: -214, z: 10, rot: 0, name: 'Molja', padY: 2.6 },
   // Ellingsøya harbour: tall wooden sea houses on the quay
@@ -542,6 +547,28 @@ function ramp(pts: V2[], y0: number, y1: number): Record<number, number> {
   pts.forEach((_, i) => (out[i] = y0 + ((y1 - y0) * L[i]) / L[L.length - 1]));
   return out;
 }
+/** the Aksla stairs: switchback flights up the east face, landing on Fjellstua's terrace */
+const STAIRS: V2[] = [[-67, -51], [-82, -66], [-76, -72], [-94, -72], [-85, -81], [-94, -81], [-88, -87], [-94, -87], [-83.4, -99.4]];
+/**
+ * Heights for a stair with flat landings (each `landing` m long) at every turn: the rise is shared
+ * by the flights in proportion to their length, so every flight has the same grade.
+ */
+function flightRamp(pts: V2[], y0: number, y1: number, landing: number): Record<number, number> {
+  const legs: number[] = [];
+  for (let i = 1; i < pts.length; i++) {
+    const L = Math.hypot(pts[i][0] - pts[i - 1][0], pts[i][1] - pts[i - 1][1]);
+    const trim = (i > 1 ? landing / 2 : landing / 2) + (i < pts.length - 1 ? landing / 2 : 0);
+    legs.push(Math.max(0.5, L - trim));
+  }
+  const total = legs.reduce((a, b) => a + b, 0);
+  const out: Record<number, number> = { 0: y0 };
+  let acc = 0;
+  legs.forEach((l, i) => {
+    acc += l;
+    out[i + 1] = y0 + ((y1 - y0) * acc) / total;
+  });
+  return out;
+}
 /** the road up Aksla's long western slope, looping round the north side to the summit */
 const FJELLVEGEN: V2[] = [[-150, -38], [-170, -60], [-172, -92], [-160, -118], [-140, -140], [-116, -150], [-92, -142], [-82, -128], [-92, -116]];
 
@@ -571,7 +598,9 @@ export function brRoads(): Road[] {
     { name: 'Setervegen', kind: 'gravel', width: 3.6, pts: [[176, -52], [184, -30], [188, -6], [188, 20], [186, 44], [182, 60], [194, 72]] },
     // Aksla: a gravel road up the long western slope, and the stairs up the steep east face
     { name: 'Fjellvegen', kind: 'gravel', width: 4, pts: FJELLVEGEN, fixed: ramp(FJELLVEGEN, 4.6, 57.4) },
-    { name: 'Trappene', kind: 'stairs', width: 2.6, pts: [[-66, -50], [-66, -60], [-66, -72], [-67, -84], [-72, -92], [-82, -96], [-92, -100], [-96, -104]] },
+    // (switchback flights found by a grade-limited path search over the hillside: ~25–35° each;
+    // the last flight lands on Fjellstua's terrace through the gap in its railing)
+    { name: 'Trappene', kind: 'stairs', width: 2.6, pts: STAIRS, fixed: flightRamp(STAIRS, 4.7, 56.0, 2.8) },
     // Aspøya: the hill road and the beach path; the breakwater
     { name: 'Bakkevegen', kind: 'gravel', width: 3.6, pts: [[-112, 70], [-118, 96], [-104, 120], [-92, 128], [-70, 124], [-44, 140], [-24, 160], [-18, 172]] },
     { name: 'Molja', kind: 'gravel', width: 3, pts: [[-186, 22], [-198, 16], [-208, 11]], fixed: { 0: 2.6, 1: 2.6, 2: 2.6 } },

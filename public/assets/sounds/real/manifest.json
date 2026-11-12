@@ -1,0 +1,552 @@
+{
+ "tac": [
+  {
+   "file": "tac_0.ogg",
+   "loop": false
+  },
+  {
+   "file": "tac_1.ogg",
+   "loop": false
+  },
+  {
+   "file": "tac_2.ogg",
+   "loop": false
+  },
+  {
+   "file": "tac_3.ogg",
+   "loop": false
+  }
+ ],
+ "cloth": [
+  {
+   "file": "cloth_0.ogg",
+   "loop": false
+  },
+  {
+   "file": "cloth_1.ogg",
+   "loop": false
+  },
+  {
+   "file": "cloth_2.ogg",
+   "loop": false
+  },
+  {
+   "file": "cloth_3.ogg",
+   "loop": false
+  }
+ ],
+ "adsIn": [
+  {
+   "file": "adsIn_0.ogg",
+   "loop": false
+  },
+  {
+   "file": "adsIn_1.ogg",
+   "loop": false
+  }
+ ],
+ "adsOut": [
+  {
+   "file": "adsOut_0.ogg",
+   "loop": false
+  },
+  {
+   "file": "adsOut_1.ogg",
+   "loop": false
+  }
+ ],
+ "jump": [
+  {
+   "file": "jump_0.ogg",
+   "loop": false
+  },
+  {
+   "file": "jump_1.ogg",
+   "loop": false
+  }
+ ],
+ "land": [
+  {
+   "file": "land_0.ogg",
+   "loop": false
+  },
+  {
+   "file": "land_1.ogg",
+   "loop": false
+  },
+  {
+   "file": "land_2.ogg",
+   "loop": false
+  }
+ ],
+ "mantle": [
+  {
+   "file": "mantle_0.ogg",
+   "loop": false
+  },
+  {
+   "file": "mantle_1.ogg",
+   "loop": false
+  }
+ ],
+ "breathIn": [
+  {
+   "file": "breathIn_0.ogg",
+   "loop": false
+  },
+  {
+   "file": "breathIn_1.ogg",
+   "loop": false
+  }
+ ],
+ "breathOut": [
+  {
+   "file": "breathOut_0.ogg",
+   "loop": false
+  },
+  {
+   "file": "breathOut_1.ogg",
+   "loop": false
+  }
+ ],
+ "bipod": [
+  {
+   "file": "bipod_0.ogg",
+   "loop": false
+  },
+  {
+   "file": "bipod_1.ogg",
+   "loop": false
+  },
+  {
+   "file": "bipod_2.ogg",
+   "loop": false
+  }
+ ],
+ "lowAmmo": [
+  {
+   "file": "lowAmmo_0.ogg",
+   "loop": false
+  },
+  {
+   "file": "lowAmmo_1.ogg",
+   "loop": false
+  }
+ ],
+ "click": [
+  {
+   "file": "click_0.ogg",
+   "loop": false
+  },
+  {
+   "file": "click_1.ogg",
+   "loop": false
+  }
+ ],
+ "whiz": [
+  {
+   "file": "whiz_0.ogg",
+   "loop": false
+  },
+  {
+   "file": "whiz_1.ogg",
+   "loop": false
+  },
+  {
+   "file": "whiz_2.ogg",
+   "loop": false
+  },
+  {
+   "file": "whiz_3.ogg",
+   "loop": false
+  }
+ ],
+ "imp_concrete": [
+  {
+   "file": "imp_concrete_0.ogg",
+   "loop": false
+  },
+  {
+   "file": "imp_concrete_1.ogg",
+   "loop": false
+  },
+  {
+   "file": "imp_concrete_2.ogg",
+   "loop": false
+  },
+  {
+   "file": "imp_concrete_3.ogg",
+   "loop": false
+  }
+ ],
+ "imp_metal": [
+  {
+   "file": "imp_metal_0.ogg",
+   "loop": false
+  },
+  {
+   "file": "imp_metal_1.ogg",
+   "loop": false
+  },
+  {
+   "file": "imp_metal_2.ogg",
+   "loop": false
+  },
+  {
+   "file": "imp_metal_3.ogg",
+   "loop": false
+  }
+ ],
+ "imp_wood": [
+  {
+   "file": "imp_wood_0.ogg",
+   "loop": false
+  },
+  {
+   "file": "imp_wood_1.ogg",
+   "loop": false
+  },
+  {
+   "file": "imp_wood_2.ogg",
+   "loop": false
+  },
+  {
+   "file": "imp_wood_3.ogg",
+   "loop": false
+  }
+ ],
+ "imp_dirt": [
+  {
+   "file": "imp_dirt_0.ogg",
+   "loop": false
+  },
+  {
+   "file": "imp_dirt_1.ogg",
+   "loop": false
+  },
+  {
+   "file": "imp_dirt_2.ogg",
+   "loop": false
+  }
+ ],
+ "imp_water": [
+  {
+   "file": "imp_water_0.ogg",
+   "loop": false
+  },
+  {
+   "file": "imp_water_1.ogg",
+   "loop": false
+  },
+  {
+   "file": "imp_water_2.ogg",
+   "loop": false
+  }
+ ],
+ "imp_glass": [
+  {
+   "file": "imp_glass_0.ogg",
+   "loop": false
+  },
+  {
+   "file": "imp_glass_1.ogg",
+   "loop": false
+  },
+  {
+   "file": "imp_glass_2.ogg",
+   "loop": false
+  }
+ ],
+ "imp_flesh": [
+  {
+   "file": "imp_flesh_0.ogg",
+   "loop": false
+  },
+  {
+   "file": "imp_flesh_1.ogg",
+   "loop": false
+  },
+  {
+   "file": "imp_flesh_2.ogg",
+   "loop": false
+  }
+ ],
+ "step_metal": [
+  {
+   "file": "step_metal_0.ogg",
+   "loop": false
+  },
+  {
+   "file": "step_metal_1.ogg",
+   "loop": false
+  },
+  {
+   "file": "step_metal_2.ogg",
+   "loop": false
+  },
+  {
+   "file": "step_metal_3.ogg",
+   "loop": false
+  },
+  {
+   "file": "step_metal_4.ogg",
+   "loop": false
+  },
+  {
+   "file": "step_metal_5.ogg",
+   "loop": false
+  },
+  {
+   "file": "step_metal_6.ogg",
+   "loop": false
+  },
+  {
+   "file": "step_metal_7.ogg",
+   "loop": false
+  }
+ ],
+ "step_gravel": [
+  {
+   "file": "step_gravel_0.ogg",
+   "loop": false
+  },
+  {
+   "file": "step_gravel_1.ogg",
+   "loop": false
+  },
+  {
+   "file": "step_gravel_2.ogg",
+   "loop": false
+  },
+  {
+   "file": "step_gravel_3.ogg",
+   "loop": false
+  },
+  {
+   "file": "step_gravel_4.ogg",
+   "loop": false
+  },
+  {
+   "file": "step_gravel_5.ogg",
+   "loop": false
+  },
+  {
+   "file": "step_gravel_6.ogg",
+   "loop": false
+  },
+  {
+   "file": "step_gravel_7.ogg",
+   "loop": false
+  }
+ ],
+ "step_water": [
+  {
+   "file": "step_water_0.ogg",
+   "loop": false
+  },
+  {
+   "file": "step_water_1.ogg",
+   "loop": false
+  },
+  {
+   "file": "step_water_2.ogg",
+   "loop": false
+  },
+  {
+   "file": "step_water_3.ogg",
+   "loop": false
+  },
+  {
+   "file": "step_water_4.ogg",
+   "loop": false
+  }
+ ],
+ "uiHover": [
+  {
+   "file": "uiHover_0.ogg",
+   "loop": false
+  },
+  {
+   "file": "uiHover_1.ogg",
+   "loop": false
+  }
+ ],
+ "uiConfirm": [
+  {
+   "file": "uiConfirm_0.ogg",
+   "loop": false
+  }
+ ],
+ "uiBack": [
+  {
+   "file": "uiBack_0.ogg",
+   "loop": false
+  }
+ ],
+ "uiReady": [
+  {
+   "file": "uiReady_0.ogg",
+   "loop": false
+  }
+ ],
+ "uiHorn": [
+  {
+   "file": "uiHorn_0.ogg",
+   "loop": false
+  }
+ ],
+ "medal": [
+  {
+   "file": "medal_0.ogg",
+   "loop": false
+  },
+  {
+   "file": "medal_1.ogg",
+   "loop": false
+  }
+ ],
+ "flagWon": [
+  {
+   "file": "flagWon_0.ogg",
+   "loop": false
+  }
+ ],
+ "flagLost": [
+  {
+   "file": "flagLost_0.ogg",
+   "loop": false
+  }
+ ],
+ "capTick": [
+  {
+   "file": "capTick_0.ogg",
+   "loop": false
+  }
+ ],
+ "streak": [
+  {
+   "file": "streak_0.ogg",
+   "loop": false
+  }
+ ],
+ "radio": [
+  {
+   "file": "radio_0.ogg",
+   "loop": false
+  },
+  {
+   "file": "radio_1.ogg",
+   "loop": false
+  }
+ ],
+ "uavPing": [
+  {
+   "file": "uavPing_0.ogg",
+   "loop": false
+  }
+ ],
+ "carFire": [
+  {
+   "file": "carFire_0.ogg",
+   "loop": true
+  }
+ ],
+ "gull": [
+  {
+   "file": "gull_0.ogg",
+   "loop": false
+  },
+  {
+   "file": "gull_1.ogg",
+   "loop": false
+  },
+  {
+   "file": "gull_2.ogg",
+   "loop": false
+  },
+  {
+   "file": "gull_3.ogg",
+   "loop": false
+  },
+  {
+   "file": "gull_4.ogg",
+   "loop": false
+  },
+  {
+   "file": "gull_5.ogg",
+   "loop": false
+  }
+ ],
+ "song": [
+  {
+   "file": "song_0.ogg",
+   "loop": false
+  },
+  {
+   "file": "song_1.ogg",
+   "loop": false
+  },
+  {
+   "file": "song_2.ogg",
+   "loop": false
+  },
+  {
+   "file": "song_3.ogg",
+   "loop": false
+  },
+  {
+   "file": "song_4.ogg",
+   "loop": false
+  },
+  {
+   "file": "song_5.ogg",
+   "loop": false
+  }
+ ],
+ "loop_wind": [
+  {
+   "file": "loop_wind_0.ogg",
+   "loop": true
+  }
+ ],
+ "loop_waves": [
+  {
+   "file": "loop_waves_0.ogg",
+   "loop": true
+  }
+ ],
+ "loop_rain": [
+  {
+   "file": "loop_rain_0.ogg",
+   "loop": true
+  }
+ ],
+ "loop_snowwind": [
+  {
+   "file": "loop_snowwind_0.ogg",
+   "loop": true
+  }
+ ],
+ "loop_slide": [
+  {
+   "file": "loop_slide_0.ogg",
+   "loop": true
+  }
+ ],
+ "loop_heli": [
+  {
+   "file": "loop_heli_0.ogg",
+   "loop": true
+  }
+ ],
+ "whistle": [
+  {
+   "file": "whistle_0.ogg",
+   "loop": false
+  },
+  {
+   "file": "whistle_1.ogg",
+   "loop": false
+  }
+ ]
+}

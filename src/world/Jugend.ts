@@ -2,6 +2,9 @@ import * as THREE from 'three';
 import type { Buildings } from './Buildings';
 import type { BuildingDef } from './MapLayout';
 import { RNG } from '../core/math';
+import { shopFor, shopInterior, shopFront, townSignMaterials, shopMaterials } from './TownSigns';
+
+let signMatsDone = false;
 
 /**
  * Brosund's Jugendstil (Art Nouveau) town houses, after the rebuilt centre of Ålesund: 3–5 storey
@@ -293,17 +296,19 @@ export function jugend(B: Buildings, def: BuildingDef) {
     // ceiling + the solid upper block
     b.box('wallInt', ix0, P + G - 0.06, iz0, ix1, P + G, iz1);
     b.box(col, -w / 2, P + G, -d / 2, w / 2, eave, d / 2, 'concrete');
-    // a counter, shelves, a table or two, a pendant lamp
-    b.box('wood', ix0 + 0.2, P, iz0 + 1.2, ix0 + 0.8, P + 1.05, iz1 - 2.0, 'wood');
-    b.box('wood', ix1 - 0.45, P, iz0 + 0.6, ix1 - 0.05, P + 2.0, iz0 + 3.2, 'wood');
-    for (let k = 0; k < 2; k++) {
-      const tx = rng.range(ix0 + 2, ix1 - 1.5), tz = rng.range(iz0 + 2, iz1 - 2);
-      b.box('wood', tx - 0.45, P + 0.72, tz - 0.45, tx + 0.45, P + 0.76, tz + 0.45, 'wood');
-      b.box('wood', tx - 0.04, P, tz - 0.04, tx + 0.04, P + 0.72, tz + 0.04);
+    // a real shop: its own trade, interior, name boards (canal side and street side), neon, awning
+    if (!signMatsDone) {
+      Object.assign(b.mats, townSignMaterials(), shopMaterials(B as never));
+      signMatsDone = true;
     }
-    B.fixture(0, P + G - 0.06, 0, 'pendant');
+    const shop = shopFor(def.seed ?? 1);
+    shopInterior(B, shop, ix0, ix1, iz0, iz1, P, P + G - 0.06, rng);
+    Object.assign(b.mats, shopFront(B, shop, w, d / 2 + 0.02, P, G, doorX, rng));
+    b.push([0, 0, 0], Math.PI);
+    Object.assign(b.mats, shopFront(B, shop, w, d / 2 + 0.02, P, G, -backDoor, rng));
+    b.pop();
     B.steps(doorX, d / 2 + 0.05, 0, 1, 1.8, P);
-    B.steps(-backDoor, -d / 2 - 0.05, 0, -1, 1.8, P);
+    B.steps(backDoor, -d / 2 - 0.05, 0, -1, 1.8, P);
     B.link(doorX, P, d / 2 + 2.0, doorX, P, iz1 - 1.0);
     B.link(doorX, P, iz1 - 1.0, backDoor, P, iz0 + 1.0);
     B.link(-(-backDoor), P, iz0 + 1.0, -(-backDoor), P, -d / 2 - 2.0);
@@ -498,12 +503,29 @@ export function cafe(B: Buildings, def: BuildingDef) {
   b.box('roofMetal', -w / 2 - 0.6, F + H, -d / 2 - 0.6, w / 2 + 0.6, F + H + 0.35, d / 2 + 2.6, 'metal');
   b.box('wallInt', -w / 2 + T, F + H - 0.05, -d / 2 + T, w / 2 - T, F + H, d / 2 - T);
   for (const x of [-w / 2 - 0.3, -w / 4, 0, w / 4, w / 2 + 0.3]) b.cyl('steel', x, F, d / 2 + 2.3, 0.08, H, 8, 'metal');
-  // terrace deck and railing on the view side
-  b.box('planks', -w / 2 - 1, F - 0.12, d / 2, w / 2 + 1, F, d / 2 + 6, 'wood');
-  b.box('stone', -w / 2 - 1, -3, d / 2 + 0.2, w / 2 + 1, F - 0.12, d / 2 + 6, 'rock');
-  for (let x = -w / 2 - 1; x <= w / 2 + 1 + 1e-3; x += 1.4) b.box('steel', x - 0.03, F, d / 2 + 5.9, x + 0.03, F + 1.05, d / 2 + 5.96);
-  b.box('wood', -w / 2 - 1, F + 1.0, d / 2 + 5.85, w / 2 + 1, F + 1.08, d / 2 + 6.02, 'wood');
-  b.box(null, -w / 2 - 1, F, d / 2 + 5.85, w / 2 + 1, F + 1.1, d / 2 + 6.02, 'metal');
+  // a terrace wrapping round the view side and the east end, on a stone base, with railings — and
+  // a gap at the south-east corner where the Aksla stairs come up
+  const T0 = d / 2, T1 = d / 2 + 6, E0 = w / 2, E1 = w / 2 + 6;
+  b.box('planks', -w / 2 - 1, F - 0.12, T0, E1, F, T1, 'wood');
+  b.box('planks', E0, F - 0.12, -d / 2 - 1, E1, F, T0, 'wood');
+  b.box('stone', -w / 2 - 1, -4, T0 + 0.2, E1, F - 0.12, T1, 'rock');
+  b.box('stone', E0 + 0.2, -4, -d / 2 - 1, E1, F - 0.12, T0 + 0.2, 'rock');
+  const gap0 = 11.8, gap1 = 14.2;
+  const rail = (x0: number, z0: number, x1: number, z1: number) => {
+    const len = Math.hypot(x1 - x0, z1 - z0);
+    if (len < 0.05) return;
+    const ang = Math.atan2(x1 - x0, z1 - z0);
+    for (let t = 0; t <= len + 1e-3; t += 1.4) b.box('steel', x0 + ((x1 - x0) * t) / len - 0.03, F, z0 + ((z1 - z0) * t) / len - 0.03, x0 + ((x1 - x0) * t) / len + 0.03, F + 1.05, z0 + ((z1 - z0) * t) / len + 0.03);
+    b.obox('wood', [(x0 + x1) / 2, F + 1.04, (z0 + z1) / 2], [0.12, 0.08, len], new THREE.Euler(0, ang, 0), 'wood');
+    b.obox(null, [(x0 + x1) / 2, F + 0.55, (z0 + z1) / 2], [0.14, 1.1, len], new THREE.Euler(0, ang, 0), 'metal');
+  };
+  rail(-w / 2 - 1, T1 - 0.1, gap0, T1 - 0.1);
+  rail(gap1, T1 - 0.1, E1 - 0.1, T1 - 0.1);
+  rail(E1 - 0.1, T1 - 0.1, E1 - 0.1, -d / 2 - 1);
+  rail(E0, -d / 2 - 1, E1 - 0.1, -d / 2 - 1);
+  rail(-w / 2 - 1, T0, -w / 2 - 1, T1 - 0.1);
+  B.link((gap0 + gap1) / 2, F, T1 + 1.5, (gap0 + gap1) / 2, F, T1 - 1.5);
+  B.link((gap0 + gap1) / 2, F, T1 - 1.5, E0 + 3, F, 0);
   // tables and chairs on the terrace; coin binoculars at the rail
   for (let i = 0; i < 5; i++) {
     const x = -w / 2 + 2 + i * (w - 3) / 4, z = d / 2 + 3.6;

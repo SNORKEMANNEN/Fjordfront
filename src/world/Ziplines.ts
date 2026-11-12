@@ -88,7 +88,6 @@ export class Ziplines {
         geos.push(wheel);
       }
     }
-    if (MAP_ID === 'brosund') this.cableCar(geos, ground, group, mats);
     if (geos.length) {
       const merged = mergeGeometries(geos.map((g) => (g.index ? g.toNonIndexed() : g)).map((g) => {
         for (const n of Object.keys(g.attributes)) if (n !== 'position' && n !== 'normal') g.deleteAttribute(n);

@@ -9,10 +9,11 @@ import { makeWorldMaterials } from './WorldMaterials';
 import { Settings } from '../game/Settings';
 import { LightPool, SunShafts, ShootableLights } from './Lighting';
 import { Ziplines } from './Ziplines';
-import { LADDERS, MAP_NAME, MAP_ID, finishLadders } from './MapLayout';
+import { LADDERS, MAP_NAME, MAP_ID, finishLadders, PLAY_HALF } from './MapLayout';
 import { Waterfalls } from './Waterfalls';
+import { CableCar } from './CableCar';
 import { GeoBuilder } from './GeoBuilder';
-import { BR_FALLS, BR_FAR_FALLS } from './maps/Brosund';
+import { BR_FALLS, BR_FAR_FALLS, BR_CABLECAR } from './maps/Brosund';
 import type { Environment } from './Environment';
 
 /** Builds and owns all static map content for the active map (Kvitvika or Brosund). */
@@ -31,6 +32,7 @@ export class World {
   zips!: Ziplines;
   shafts: SunShafts;
   falls: Waterfalls | null = null;
+  cable: CableCar | null = null;
 
   constructor(L: MaterialLib, physics: Physics, scene: THREE.Scene, onProgress: (s: string) => void = () => {}, heights?: Float32Array) {
     this.group.name = 'world';
@@ -72,8 +74,10 @@ export class World {
     physics.step();
     this.zips = new Ziplines(physics, (x, z) => this.terrain.heightAt(x, z), this.group, this.mats);
     if (MAP_ID === 'brosund') {
+      this.cable = new CableCar(physics, this.terrain, BR_CABLECAR.a, BR_CABLECAR.b, this.mats);
+      this.group.add(this.cable.group);
       onProgress('Waterfalls');
-      this.falls = new Waterfalls(this.terrain, BR_FALLS, BR_FAR_FALLS, 26);
+      this.falls = new Waterfalls(this.terrain, BR_FALLS.filter((f) => Math.max(Math.abs(f.x), Math.abs(f.z)) > PLAY_HALF + 30), BR_FAR_FALLS, 22, PLAY_HALF + 60);
       this.group.add(this.falls.group);
     }
   }
@@ -100,6 +104,9 @@ export class World {
       // Brosund's town windows light up at dusk (the blue hour reflects them in the canal)
       const jl = this.mats.jglassLit as THREE.MeshStandardMaterial | undefined;
       if (jl) jl.emissiveIntensity = Math.min(1.6, night * 1.5 + (1 - env.day) * 1.1 + env.blueHour * 0.9);
+      // neon shop signs: modest by day, vivid at dusk and night
+      const neon = this.mats.signNeon as THREE.MeshBasicMaterial | undefined;
+      if (neon) neon.color.setScalar(0.9 + Math.min(2.2, night * 2.2 + (1 - env.day) * 1.6 + env.blueHour * 1.2));
       const cu = this.terrain.cloudUniforms;
       if (cu.uCloudT) {
         cu.uCloudT.value = t;

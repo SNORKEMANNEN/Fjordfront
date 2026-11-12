@@ -753,6 +753,13 @@ export class AudioEngine {
   }
 
   async load(onProgress?: (p: number) => void) {
+    // real-recording bank (Update 35, tools/real_sfx_build.py): keys it covers are not synthesised
+    let realMan: Record<string, { file: string }[]> = {};
+    try {
+      realMan = await (await fetch(import.meta.env.BASE_URL + 'assets/sounds/real/manifest.json')).json();
+    } catch {
+      /* no real bank: synthesis fallback */
+    }
     const jobs: [string, () => Promise<AudioBuffer>][] = [];
     // (weapon audio is recorded only: see the firearm library load below)
     for (const s of ['grass', 'dirt', 'gravel', 'concrete', 'wood', 'metal', 'water']) for (let v = 0; v < 4; v++) jobs.push([`step_${s}`, () => footstep(s, v)]);
@@ -864,6 +871,7 @@ export class AudioEngine {
         /* optional */
       }
     }));
+    for (let i = jobs.length - 1; i >= 0; i--) if (realMan[jobs[i][0]]) jobs.splice(i, 1);
     let done = 0;
     // render in small parallel batches
     for (let i = 0; i < jobs.length; i += 6) {
@@ -916,6 +924,19 @@ export class AudioEngine {
     } catch {
       /* no ambience bank */
     }
+    // real recordings replace every remaining synthesised sound (impacts, foley, UI, loops, birds)
+    await Promise.all(Object.entries(realMan).map(async ([key, list]) => {
+      const bufs: AudioBuffer[] = [];
+      for (const { file } of list) {
+        try {
+          const r = await fetch(`${import.meta.env.BASE_URL}assets/sounds/real/${file}`);
+          if (r.ok) bufs.push(await this.ctx.decodeAudioData(await r.arrayBuffer()));
+        } catch {
+          /* skip this take */
+        }
+      }
+      if (bufs.length) this.bank[key] = bufs;
+    }));
     this.ready = true;
   }
 
@@ -1560,7 +1581,7 @@ export class AudioEngine {
     this.loop('wind', windG * (1 - this.indoor * 0.6));
     const shore = Math.max(0, 1 - shoreDist / 70);
     this.loop('waves', 0.6 * shore * (1 - this.indoor * 0.5), new THREE.Vector3(cam.x - Math.min(shoreDist, 40), 0, cam.z));
-    this.loop('rain', weather === 'rain' ? 0.35 * (1 - this.indoor * 0.4) : 0);
+    this.loop('rain', weather === 'rain' ? 0.5 * (1 - this.indoor * 0.4) : 0);
     this.loop('snowwind', weather === 'snow' ? (0.22 + this.windGust * 0.25) * (1 - this.indoor * 0.75) : 0);
     this.birdT -= dt;
     if (this.birdT <= 0) {

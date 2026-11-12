@@ -247,8 +247,36 @@ export function brosundSignMaterials(): Record<string, THREE.Material> {
     c.arc(118, 318, 20, Math.PI * 0.9, Math.PI * 2.1);
     c.stroke();
   });
+  const nod = canvas(512, 104, (c) => {
+    c.fillStyle = '#1d7a45';
+    c.fillRect(0, 0, 512, 104);
+    c.strokeStyle = '#fff';
+    c.lineWidth = 5;
+    c.strokeRect(6, 6, 500, 92);
+    c.fillStyle = '#fff';
+    c.textAlign = 'center';
+    c.textBaseline = 'middle';
+    c.font = `bold 66px ${F}`;
+    c.fillText('NØDTELEFON', 256, 54);
+  });
+  const stopp = canvas(512, 160, (c) => {
+    c.fillStyle = '#f4f4f0';
+    c.fillRect(0, 0, 512, 160);
+    c.strokeStyle = '#111';
+    c.lineWidth = 6;
+    c.strokeRect(5, 5, 502, 150);
+    c.fillStyle = '#111';
+    c.textAlign = 'center';
+    c.textBaseline = 'middle';
+    c.font = `bold 70px ${F}`;
+    c.fillText('STOPP', 256, 52);
+    c.font = `56px ${F}`;
+    c.fillText('ved rødt blink', 256, 116);
+  });
   const lit = (map: THREE.Texture, k = 1.4) => new THREE.MeshBasicMaterial({ map, color: new THREE.Color(k, k, k), toneMapped: false, side: THREE.DoubleSide });
   return {
+    brNodtelefon: lit(nod, 1.3),
+    brStopp: new THREE.MeshStandardMaterial({ map: stopp, roughness: 0.5, side: THREE.DoubleSide }),
     brTunnelBoard: new THREE.MeshStandardMaterial({ map: board, roughness: 0.4, emissive: 0xffffff, emissiveMap: board, emissiveIntensity: 0.15 }),
     brTurn: lit(turn, 1.25),
     brSOS: lit(sos, 1.2),

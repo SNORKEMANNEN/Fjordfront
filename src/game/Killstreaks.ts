@@ -172,7 +172,7 @@ export class Killstreaks {
     for (let i = this.shells.length - 1; i >= 0; i--) {
       const s = this.shells[i];
       s.t -= dt;
-      if (!s.whistled && s.t < 0.6) {
+      if (!s.whistled && s.t < 1.15) {
         s.whistled = true;
         s.at.y = this.groundAt(s.at.x, s.at.z);
         this.hooks.whistle(s.at);

@@ -6,8 +6,9 @@ import type { Infrastructure } from './Infrastructure';
 import { ROADS, roadHeightAt } from './MapLayout';
 import { RNG, smoothstep } from '../core/math';
 import { brosundSignMaterials } from './Signs';
+import { townSignMaterials, roadSign, RoadSign } from './TownSigns';
 import {
-  canalZ, CANAL_HW, QUAY_Y, CANAL_BRIDGES, FOOTBRIDGES, soundX, soundHW, tunnelPath, TUN, TUN_FEATURES, TunPt, LAKE,
+  canalZ, CANAL_HW, QUAY_Y, CANAL_BRIDGES, FOOTBRIDGES, soundX, soundHW, tunnelPath, TUN, TUN_FEATURES, TunPt, LAKE, tunnelFloorAt,
 } from './maps/Brosund';
 
 /**
@@ -25,7 +26,7 @@ export class BrosundBuild {
   private rng = new RNG(3434);
 
   constructor(private I: Infrastructure, private b: GeoBuilder, private bld: Buildings, private terrain: Terrain, private parent: THREE.Object3D, mats: Record<string, THREE.Material>) {
-    Object.assign(b.mats, brosundSignMaterials());
+    Object.assign(b.mats, brosundSignMaterials(), tunnelMaterials());
     void mats;
     this.quays();
     this.canalBridges();
@@ -231,6 +232,19 @@ export class BrosundBuild {
     }
   }
 
+  /** clear of the Aksla stairs (no posts in the way) */
+  private offStairs(x: number, z: number, r = 3) {
+    const st = ROADS.find((q) => q.kind === 'stairs');
+    if (!st) return true;
+    for (let i = 0; i < st.pts.length - 1; i++) {
+      const [ax, az] = st.pts[i], [bx, bz] = st.pts[i + 1];
+      const dx = bx - ax, dz = bz - az, l2 = dx * dx + dz * dz;
+      const t = Math.max(0, Math.min(1, ((x - ax) * dx + (z - az) * dz) / l2));
+      if (Math.hypot(x - ax - dx * t, z - az - dz * t) < r) return false;
+    }
+    return true;
+  }
+
   /** A Jugend cast-iron street lamp: fluted post, scroll arm, a lantern. */
   jugendLamp(x: number, z: number, y?: number) {
     const b = this.b;
@@ -247,66 +261,87 @@ export class BrosundBuild {
   }
 
   // ------------------------------------------------------------------ Aksla stairs
+  /**
+   * The Aksla stairs: straight granite flights between landings at every turn (so you can turn the
+   * corner), retaining walls and iron handrails along each flight, a smooth ramp collider per
+   * flight, lamps on the landings. The last flight lands on Fjellstua's terrace.
+   */
   private stairs() {
     const b = this.b;
     const r = ROADS.find((q) => q.kind === 'stairs');
     if (!r) return;
-    const s = this.I.resample(r.pts, 0.34);
     const W = r.width / 2;
-    const yOf = (i: number) => {
-      // height along the stair line from the road profile
-      const p = s[i];
-      let seg = 0, t = 0;
-      let acc = 0;
-      for (let k = 0; k < r.pts.length - 1; k++) {
-        const [ax, az] = r.pts[k], [bx, bz] = r.pts[k + 1];
-        const L = Math.hypot(bx - ax, bz - az);
-        if (p.s <= acc + L + 1e-6) {
-          seg = k;
-          t = (p.s - acc) / L;
-          break;
+    const n = r.pts.length;
+    const vy = r.pts.map((_, k) => (k < n - 1 ? roadHeightAt(r, k, 0) : roadHeightAt(r, n - 2, 1)));
+    const V = r.pts.map(([x, z], k) => new THREE.Vector3(x, vy[k], z));
+    const LH = 1.4; // landing half-size (matches the 2.8 m landings in the stair heights)
+    // approach links off the bottom pad onto the street (the nav grid skips the steep stair band)
+    {
+      // toward the nearest point on the nearest street
+      const a = V[0];
+      let bx = a.x, bz = a.z, bd = 1e9;
+      for (const q of ROADS) {
+        if (q.kind === 'stairs') continue;
+        for (let i = 0; i < q.pts.length - 1; i++) {
+          const [x0, z0] = q.pts[i], [x1, z1] = q.pts[i + 1];
+          const ex = x1 - x0, ez = z1 - z0;
+          const t = Math.max(0, Math.min(1, ((a.x - x0) * ex + (a.z - z0) * ez) / (ex * ex + ez * ez || 1)));
+          const x = x0 + ex * t, z = z0 + ez * t, d = Math.hypot(x - a.x, z - a.z);
+          if (d < bd) { bd = d; bx = x; bz = z; }
         }
-        acc += L;
-        seg = k;
-        t = 1;
       }
-      return roadHeightAt(r, seg, Math.min(1, Math.max(0, t)));
-    };
-    const ys = s.map((_, i) => yOf(i));
-    let last = ys[0];
-    for (let i = 0; i < s.length - 1; i++) {
-      const p = s[i], q = s[i + 1];
-      // quantised treads: each riser ≤ 0.19 m
-      let y = ys[i];
-      if (Math.abs(y - last) < 0.06) y = last;
-      last = y;
-      const rot = Math.atan2(p.tx, p.tz);
-      b.push([(p.x + q.x) / 2, 0, (p.z + q.z) / 2], rot);
-      const g = Math.min(this.h(p.x - p.tz * W, p.z + p.tx * W), this.h(p.x + p.tz * W, p.z - p.tx * W), y) - 0.8;
-      b.box('granite', -W, g, -0.18, W, y, 0.18);
-      // low retaining walls on both sides
-      for (const sx of [-1, 1]) b.box('stone', sx * (W + 0.2) - 0.2, g, -0.19, sx * (W + 0.2) + 0.2, y + 0.45, 0.19);
-      b.pop();
+      if (bd < 14) {
+        const mx = (a.x + bx) / 2, mz = (a.z + bz) / 2;
+        this.bld.nav.push({ a: a.clone().setY(a.y + 0.1), b: new THREE.Vector3(mx, this.h(mx, mz) + 0.1, mz) });
+        this.bld.nav.push({ a: new THREE.Vector3(mx, this.h(mx, mz) + 0.1, mz), b: new THREE.Vector3(bx, this.h(bx, bz) + 0.1, bz) });
+      }
     }
-    // a smooth ramp collider over the treads, segment by segment; iron handrails
-    for (let i = 0; i < s.length - 4; i += 4) {
-      const p = s[i], q = s[i + 4];
-      const ya = ys[i], yb = ys[i + 4];
-      const len = Math.hypot(q.x - p.x, q.z - p.z);
-      const ang = Math.atan2(yb - ya, len);
-      const rot = Math.atan2(q.x - p.x, q.z - p.z);
-      b.obox(null, [(p.x + q.x) / 2, (ya + yb) / 2 - 0.05, (p.z + q.z) / 2], [W * 2, 0.12, Math.hypot(len, yb - ya) + 0.05], new THREE.Euler(-ang, rot, 0, 'YXZ'), 'rock');
+    // landings at the turns (and a step-off pad at the bottom)
+    for (let k = 0; k < n - 1; k++) {
+      const v = V[k];
+      const g = Math.min(this.h(v.x, v.z), v.y) - 1.2;
+      b.box('granite', v.x - LH - 0.5, g, v.z - LH - 0.5, v.x + LH + 0.5, v.y, v.z + LH + 0.5, 'rock');
+      if (k > 0) this.jugendLamp(v.x + LH - 0.25, v.z + LH - 0.25, v.y);
+    }
+    for (let k = 0; k < n - 1; k++) {
+      const A = V[k], B = V[k + 1];
+      const dx = B.x - A.x, dz = B.z - A.z;
+      const L = Math.hypot(dx, dz);
+      const tx = dx / L, tz = dz / L;
+      // the flight runs between the landings (the last one ends on the terrace edge)
+      const s0 = LH, s1 = k === n - 2 ? L : L - LH;
+      if (s1 - s0 < 0.6) continue;
+      const y0 = A.y, y1 = B.y;
+      const rise = y1 - y0, run = s1 - s0;
+      const steps = Math.max(1, Math.ceil(Math.abs(rise) / 0.17));
+      const tread = run / steps;
+      const rot = Math.atan2(tx, tz);
+      for (let i = 0; i < steps; i++) {
+        const sm = s0 + (i + 0.5) * tread;
+        const x = A.x + tx * sm, z = A.z + tz * sm;
+        const y = y0 + (rise * (i + 1)) / steps;
+        const g = Math.min(this.h(x - tz * W, z + tx * W), this.h(x + tz * W, z - tx * W), y) - 0.8;
+        b.push([x, 0, z], rot);
+        b.box('granite', -W, g, -tread / 2 - 0.01, W, y, tread / 2 + 0.01);
+        for (const sx of [-1, 1]) b.box('stone', sx * (W + 0.2) - 0.2, g, -tread / 2 - 0.01, sx * (W + 0.2) + 0.2, y + 0.45, tread / 2 + 0.01);
+        b.pop();
+      }
+      // one smooth ramp collider for the flight, side kerbs, handrails
+      const ax = A.x + tx * s0, az = A.z + tz * s0, bx = A.x + tx * s1, bz = A.z + tz * s1;
+      const ang = Math.atan2(rise, run);
+      const mid: [number, number, number] = [(ax + bx) / 2, (y0 + y1) / 2 - 0.02, (az + bz) / 2];
+      b.obox(null, mid, [W * 2, 0.14, Math.hypot(run, rise) + 0.1], new THREE.Euler(-ang, rot, 0, 'YXZ'), 'rock');
       for (const sx of [-1, 1]) {
-        const ox = -p.tz * (W + 0.2) * sx, oz = p.tx * (W + 0.2) * sx;
-        b.obox('iron', [(p.x + q.x) / 2 + ox, (ya + yb) / 2 + 1.35, (p.z + q.z) / 2 + oz], [0.05, 0.05, Math.hypot(len, yb - ya)], new THREE.Euler(-ang, rot, 0, 'YXZ'));
-        b.box('iron', p.x + ox - 0.02, ya + 0.45, p.z + oz - 0.02, p.x + ox + 0.02, ya + 1.35, p.z + oz + 0.02);
+        const ox = -tz * (W + 0.2) * sx, oz = tx * (W + 0.2) * sx;
+        // (stops short of the landings so it never reaches into the next flight at a sharp turn)
+        void ox;
+        b.obox('iron', [mid[0] + ox, mid[1] + 1.35, mid[2] + oz], [0.05, 0.05, Math.max(0.2, Math.hypot(run, rise) - 1.2)], new THREE.Euler(-ang, rot, 0, 'YXZ'));
+        for (let t = 0; t <= run + 1e-3; t += 1.6) {
+          const px = ax + tx * t + ox, pz = az + tz * t + oz, py = y0 + (rise * t) / run;
+          b.box('iron', px - 0.02, py + 0.45, pz - 0.02, px + 0.02, py + 1.35, pz + 0.02);
+        }
       }
-      if (i % 40 === 0) this.bld.nav.push({ a: new THREE.Vector3(p.x, ya + 0.1, p.z), b: new THREE.Vector3(s[Math.min(s.length - 1, i + 40)].x, ys[Math.min(s.length - 1, i + 40)] + 0.1, s[Math.min(s.length - 1, i + 40)].z) });
-    }
-    // little lamps every ~20 m up the stairs
-    for (let i = 20; i < s.length; i += 60) {
-      const p = s[i];
-      this.jugendLamp(p.x - p.tz * (W + 0.6), p.z + p.tx * (W + 0.6), ys[i] + 0.4);
+      this.bld.nav.push({ a: A.clone().setY(A.y + 0.1), b: B.clone().setY(B.y + 0.1) });
     }
   }
 
@@ -332,18 +367,23 @@ export class BrosundBuild {
     // cross-section ring (u lateral, v up) for station s
     const ring = (s: number): [number, number][] => {
       const L = sideW(s, -1), R = sideW(s, 1);
-      const out: [number, number][] = [[-L, 0.18], [-L, WALL]];
+      const out: [number, number][] = [[-L, 0.18], [-L, 1.5], [-L, 2.4], [-L, WALL]];
       const cx = (R - L) / 2, a = (R + L) / 2;
       for (let k = 1; k < 12; k++) {
         const t = Math.PI - (k / 12) * Math.PI;
         out.push([cx + Math.cos(t) * a, WALL + Math.sin(t) * ARCH]);
       }
-      out.push([R, WALL], [R, 0.18]);
+      out.push([R, WALL], [R, 2.4], [R, 1.5], [R, 0.18]);
       return out;
     };
     const world = (p: TunPt, u: number, v: number) => new THREE.Vector3(p.x - p.tz * u, p.y + v, p.z + p.tx * u);
     // shell (walls + arch), road, walkways
     const shell: number[] = [], shellUv: number[] = [];
+    const base: number[] = [], baseUv: number[] = [];
+    const rough: number[] = [], roughUv: number[] = [];
+    // openings in the wall (booths, exit niches, the pump room): one 2 m segment each, up to 2.4 m
+    const openings = [...TUN_FEATURES.phones, ...TUN_FEATURES.exits, TUN_FEATURES.pump];
+    const hole = (sm: number, side: number) => openings.some((f) => f.side === side && Math.abs(sm - f.s) < 1.01);
     const road: number[] = [], roadUv: number[] = [];
     const walk: number[] = [], walkUv: number[] = [];
     const quad = (arr: number[], uv: number[], a: THREE.Vector3, c: THREE.Vector3, d: THREE.Vector3, e: THREE.Vector3, u0: number, u1: number, s0: number, s1: number) => {
@@ -354,10 +394,23 @@ export class BrosundBuild {
       const p = P[idx[k]], q = P[idx[k + 1]];
       const ra = ring(p.s), rb = ring(q.s);
       let ua = 0;
+      const sm = (p.s + q.s) / 2;
+      const last = ra.length - 2;
       for (let j = 0; j < ra.length - 1; j++) {
         const seg = Math.hypot(ra[j + 1][0] - ra[j][0], ra[j + 1][1] - ra[j][1]);
+        const side = j <= 2 ? -1 : j >= last - 2 ? 1 : 0;
+        const low = j <= 1 || j >= last - 1;
+        if (side && low && hole(sm, side)) {
+          ua += seg;
+          continue;
+        }
+        // Norwegian tunnel: a concrete base wall to 1.5 m, smooth panel lining with joints above;
+        // the lay-by bay is bare shotcrete rock
+        const isBase = j === 0 || j === last;
+        const bay = side === lay.side && widen(sm) > 0.5 && !isBase;
+        const [arr, uv] = isBase ? [base, baseUv] : bay ? [rough, roughUv] : [shell, shellUv];
         // inward-facing: order so the normal points to the axis
-        quad(shell, shellUv, world(p, ra[j + 1][0], ra[j + 1][1]), world(p, ra[j][0], ra[j][1]), world(q, rb[j + 1][0], rb[j + 1][1]), world(q, rb[j][0], rb[j][1]), ua + seg, ua, p.s, q.s);
+        quad(arr, uv, world(p, ra[j + 1][0], ra[j + 1][1]), world(p, ra[j][0], ra[j][1]), world(q, rb[j + 1][0], rb[j + 1][1]), world(q, rb[j][0], rb[j][1]), ua + seg, ua, p.s, q.s);
         ua += seg;
       }
       // road surface (between the kerbs) and walkways
@@ -378,8 +431,11 @@ export class BrosundBuild {
       const rot = Math.atan2(mid.tx, mid.tz);
       const e = (u: number, v: number) => [mid.x - mid.tz * u, mid.y + v, mid.z + mid.tx * u] as [number, number, number];
       const Lm = sideW(mid.s, -1), Rm = sideW(mid.s, 1);
-      b.obox(null, e(-Lm - 0.5, 3.0), [1.0, 6.0, len], new THREE.Euler(-grade, rot, 0, 'YXZ'), 'rock');
-      b.obox(null, e(Rm + 0.5, 3.0), [1.0, 6.0, len], new THREE.Euler(-grade, rot, 0, 'YXZ'), 'rock');
+      for (const sx of [-1, 1]) {
+        const W = sx < 0 ? Lm : Rm;
+        if (hole(mid.s, sx)) b.obox(null, e(sx * (W + 0.5), 4.2), [1.0, 3.6, len], new THREE.Euler(-grade, rot, 0, 'YXZ'), 'rock');
+        else b.obox(null, e(sx * (W + 0.5), 3.0), [1.0, 6.0, len], new THREE.Euler(-grade, rot, 0, 'YXZ'), 'rock');
+      }
       b.obox(null, e((Rm - Lm) / 2, TUN.crown + 0.3), [Lm + Rm, 0.6, len], new THREE.Euler(-grade, rot, 0, 'YXZ'), 'rock');
       b.obox(null, e((Rm - Lm) / 2, -0.25), [Lm + Rm, 0.5, len], new THREE.Euler(-grade, rot, 0, 'YXZ'), 'concrete');
       for (const sx of [-1, 1]) b.obox(null, e(sx * ((sx < 0 ? Lm : Rm) - 0.68), 0.09), [1.36, 0.18, len], new THREE.Euler(-grade, rot, 0, 'YXZ'), 'concrete');
@@ -391,7 +447,9 @@ export class BrosundBuild {
       g.computeVertexNormals();
       b.addGeo(mat, g);
     };
-    add('shotcrete', shell, shellUv);
+    add('tunnelLiner', shell, shellUv);
+    add('tunnelBase', base, baseUv);
+    add('shotcrete', rough, roughUv);
     add('asphalt', road, roadUv);
     add('concrete', walk, walkUv);
     // ---- markings: yellow centre line (solid + dashed), white edge lines, chevrons at the lay-by
@@ -419,22 +477,7 @@ export class BrosundBuild {
       const mx = (a.x + c.x) / 2, mz = (a.z + c.z) / 2, my = (a.y + c.y) / 2;
       b.obox('lineYellow', [mx, my, mz], [0.45, 0.01, a.distanceTo(c)], new THREE.Euler(0, Math.atan2(c.x - a.x, c.z - a.z), 0));
     }
-    // ---- light fixtures: a line of fluorescent strips right of the crown, every 6 m
-    const fix = (s: number, u: number, mat: string) => {
-      const p = P[Math.round(s)];
-      if (!p) return;
-      const a = world(p, u, TUN.crown - 0.5);
-      b.push([a.x, a.y, a.z], Math.atan2(p.tx, p.tz));
-      b.box('steel', -0.12, 0.0, -0.75, 0.12, 0.1, 0.75);
-      b.box(mat, -0.08, -0.03, -0.7, 0.08, 0.0, 0.7);
-      b.box('steel', -0.02, 0.1, -0.02, 0.02, 0.55, 0.02);
-      b.pop();
-    };
-    for (let s = 3; s < P[P.length - 1].s - 2; s += 6) fix(s, 1.6, 'bulbCool');
-    for (let s = 12; s < P[P.length - 1].s; s += 26) {
-      const p = P[Math.round(s)];
-      this.I.lights.push({ pos: world(p, 1.2, TUN.crown - 1.2), color: 0xdde8ff, intensity: 9, dist: 20 });
-    }
+    this.tunnelDress(P, sideW, world, hole);
     // ---- the lay-by: blue light strips along the bay, the turn board under a red lamp, SOS sign
     const layMid = P[Math.round((lay.s0 + lay.s1) / 2)];
     for (let s = lay.s0; s <= lay.s1; s += 3) {
@@ -477,25 +520,16 @@ export class BrosundBuild {
       this.I.lights.push({ pos: world(p, side * (sideW(s, side) - 1.0), 2.6), color: 0x9ab8ff, intensity: 3, dist: 7 });
     };
     sosAt((lay.s0 + lay.s1) / 2 + 4, lay.side, false);
-    for (const n of TUN_FEATURES.niches) {
-      // the niche: a recess in the wall with its own little roof
-      const p = P[Math.round(n.s)];
-      const base = world(p, n.side * (sideW(n.s, n.side) + 0.8), 0);
-      b.push([base.x, base.y, base.z], Math.atan2(p.tx, p.tz));
-      b.box('shotcrete', -0.9 * n.side - 0.9, 0, -1.5, -0.9 * n.side + 0.9, 0.18, 1.5);
-      b.box('shotcrete', -0.9, 2.8, -1.6, 0.9, 3.4, 1.6);
-      b.pop();
-      sosAt(n.s, n.side, true);
-    }
     // ---- the pump room: a steel door at the low point, a chamber with pumps, pipes and a sump
     {
       const pm = TUN_FEATURES.pump;
       const p = P[Math.round(pm.s)];
       const u = pm.side * (hw + 0.25);
-      const a = world(p, u, 0.18);
+      const a = world(p, u, 0.0);
       b.push([a.x, a.y, a.z], Math.atan2(p.tx, p.tz) + (pm.side > 0 ? -Math.PI / 2 : Math.PI / 2));
       // in this frame +z points into the room (away from the road), x along the wall
-      b.wall('concrete', -2.5, 2.5, 0, 0.5, 0, 3.0, [{ x: 0, w: 1.2, y0: 0, y1: 2.2 }], 'concrete');
+      b.wall('tunnelBase', -1.02, 1.02, 0, 0.5, 0, 2.45, [{ x: 0, w: 1.2, y0: 0.18, y1: 2.2 }], 'concrete');
+      b.box('concrete', -1.02, 0, -0.3, 1.02, 0.18, 0.3, 'concrete'); // threshold
       b.box('hazard', -0.75, 2.25, -0.27, 0.75, 2.45, -0.25);
       b.box('concrete', -3.2, -0.2, 0.25, 3.2, 0.0, 6.5, 'concrete'); // floor
       b.box('shotcrete', -3.2, 3.0, 0.25, 3.2, 3.4, 6.5, 'rock'); // roof
@@ -552,6 +586,210 @@ export class BrosundBuild {
     this.bld.nav.push({ a: world(layMid, 0, 0.05), b: world(layMid, lay.side * (hw + lay.width - 2), 0.05) });
     // portals onto the approach roads
     for (const [p, dir] of [[P[0], -1], [P[P.length - 1], 1]] as const) this.bld.nav.push({ a: new THREE.Vector3(p.x, p.y + 0.05, p.z), b: new THREE.Vector3(p.x + p.tx * dir * 12, p.y + 0.05, p.z + p.tz * dir * 12) });
+  }
+
+  /**
+   * Dressing of the bore after the Norwegian reference photos: lining ribs every 5 m, two rows of
+   * LED strips, a blue-lit section under the sound, a cable tray, jet fans, red NØDTELEFON booths
+   * with SOS signs hung from the roof, green-lit emergency exits, kerb reflectors, and cover — a
+   * lane closure, crashed cars, a stalled lorry, barriers.
+   */
+  private tunnelDress(P: TunPt[], sideW: (s: number, side: number) => number, world: (p: TunPt, u: number, v: number) => THREE.Vector3, hole: (s: number, side: number) => boolean) {
+    const b = this.b;
+    const lay = TUN_FEATURES.layby;
+    const WALL = TUN.wall, ARCH = TUN.crown - TUN.wall;
+    const total = P[P.length - 1].s;
+    const at = (s: number) => P[Math.max(0, Math.min(P.length - 1, Math.round(s)))];
+    const roofV = (s: number, u: number) => {
+      const L = sideW(s, -1), R = sideW(s, 1);
+      const cx = (R - L) / 2, a = (R + L) / 2;
+      const t = Math.max(-1, Math.min(1, (u - cx) / a));
+      return WALL + Math.sqrt(1 - t * t) * ARCH;
+    };
+    const inLay = (s: number) => s > lay.s0 - 7 && s < lay.s1 + 7;
+    // frame at station s, offset u, height v; +z along the bore
+    const frame = (s: number, u: number, v: number, yaw = 0) => {
+      const p = at(s);
+      const w = world(p, u, v);
+      b.push([w.x, w.y, w.z], Math.atan2(p.tx, p.tz) + yaw);
+    };
+    // ---- lining ribs (image 2): a flat steel rib round the arch every 5 m
+    for (let s = 4; s < total - 2; s += 5) {
+      if (inLay(s)) continue;
+      const L = sideW(s, -1), R = sideW(s, 1);
+      const pts: [number, number][] = [[-L + 0.04, 1.5], [-L + 0.04, WALL]];
+      for (let k = 1; k < 12; k++) {
+        const t = Math.PI - (k / 12) * Math.PI;
+        pts.push([((R - L) / 2) + Math.cos(t) * ((R + L) / 2 - 0.04), WALL + Math.sin(t) * (ARCH - 0.04)]);
+      }
+      pts.push([R - 0.04, WALL], [R - 0.04, 1.5]);
+      for (let i = 0; i < pts.length - 1; i++) {
+        const [u0, v0] = pts[i], [u1, v1] = pts[i + 1];
+        const len = Math.hypot(u1 - u0, v1 - v0);
+        frame(s, (u0 + u1) / 2, (v0 + v1) / 2);
+        b.obox('tunnelRib', [0, 0, 0], [len + 0.02, 0.05, 0.16], new THREE.Euler(0, 0, Math.atan2(v1 - v0, u1 - u0)));
+        b.pop();
+      }
+    }
+    // ---- two LED rows right of the crown (image 1), pool lights every 22 m
+    for (let s = 3; s < total - 2; s += 4) {
+      for (const u of [0.9, 1.8]) {
+        frame(s, u, roofV(s, u) - 0.06);
+        b.box('steel', -0.07, -0.02, -1.3, 0.07, 0.04, 1.3);
+        b.box('bulbCool', -0.05, -0.05, -1.25, 0.05, -0.02, 1.25);
+        b.pop();
+      }
+    }
+    for (let s = 11; s < total; s += 22) this.I.lights.push({ pos: world(at(s), 1.2, TUN.crown - 1.3), color: 0xe4edff, intensity: 9, dist: 20 });
+    // ---- the blue section under the sound (image 2): blue strips along the arch and upper walls
+    const blue0 = 96, blue1 = 176;
+    for (let s = blue0; s < blue1; s += 3) {
+      if (inLay(s)) continue;
+      for (const u of [-2.8, 2.8]) {
+        frame(s, u, roofV(s, u) - 0.08);
+        b.box('blueLight', -0.05, -0.04, -1.1, 0.05, 0.0, 1.1);
+        b.pop();
+      }
+    }
+    for (let s = blue0 + 8; s < blue1; s += 24) this.I.lights.push({ pos: world(at(s), 0, TUN.crown - 1.0), color: 0x2a5cff, intensity: 10, dist: 16 });
+    // ---- cable tray along the left upper wall
+    for (let s = 2; s < total - 2; s += 2) {
+      if (inLay(s)) continue;
+      const L = sideW(s, -1);
+      frame(s, -L + 0.32, WALL + 0.5);
+      b.box('steelGrate', -0.22, -0.03, -1.0, 0.22, 0.0, 1.0);
+      b.box('steel', -0.22, 0, -1.0, -0.2, 0.08, 1.0);
+      b.box('steel', 0.2, 0, -1.0, 0.22, 0.08, 1.0);
+      b.box('rubberBlack', -0.16, 0, -1.0, 0.14, 0.06, 1.0);
+      b.pop();
+    }
+    // ---- jet fans hung in pairs under the crown
+    for (const s of [36, 118, 206]) {
+      for (const u of [-1.5, 1.5]) {
+        const p = at(s);
+        const w = world(p, u, roofV(s, u) - 0.95);
+        const rot = new THREE.Matrix4().makeRotationX(Math.PI / 2);
+        const dir = new THREE.Matrix4().makeRotationY(Math.atan2(p.tx, p.tz));
+        const m = new THREE.Matrix4().setPosition(w).multiply(dir).multiply(rot);
+        b.addGeo('steel', new THREE.CylinderGeometry(0.55, 0.55, 3.4, 16, 1, true), m);
+        b.addGeo('rubberBlack', new THREE.CylinderGeometry(0.42, 0.42, 3.3, 12, 1, false), m);
+        frame(s, u, roofV(s, u) - 0.4);
+        b.box('steel', -0.04, -0.4, -1.0, 0.04, 0.4, -0.9);
+        b.box('steel', -0.04, -0.4, 0.9, 0.04, 0.4, 1.0);
+        b.pop();
+      }
+    }
+    // ---- NØDTELEFON booths: red door in a red frame, sign above, SOS sign hung from the roof
+    for (const f of TUN_FEATURES.phones) {
+      const W = sideW(f.s, f.side);
+      // booth frame: x along the bore, +z into the booth (away from the road)
+      frame(f.s, f.side * W, 0, f.side > 0 ? -Math.PI / 2 : Math.PI / 2);
+      b.wall('redSteel', -1.02, 1.02, 0.12, 0.24, 0, 2.45, [{ x: 0.1, w: 1.05, y0: 0.18, y1: 2.25 }], 'metal');
+      b.box('tunnelBase', -1.02, 0, -0.1, 1.02, 0.18, 0.3, 'concrete');
+      // the room
+      b.box('concrete', -1.0, 0, 0.24, 1.0, 0.18, 2.0, 'concrete');
+      b.box('tunnelBase', -1.1, 0, 0.24, -1.0, 2.6, 2.1, 'concrete');
+      b.box('tunnelBase', 1.0, 0, 0.24, 1.1, 2.6, 2.1, 'concrete');
+      b.box('tunnelBase', -1.1, 0, 2.0, 1.1, 2.6, 2.1, 'concrete');
+      b.box('tunnelBase', -1.1, 2.45, 0.0, 1.1, 2.6, 2.1, 'concrete');
+      b.box('contGrey', -0.35, 1.0, 1.82, 0.35, 1.7, 2.0, 'metal'); // the phone
+      b.box('steel', -0.08, 1.15, 1.76, 0.08, 1.45, 1.82);
+      b.cyl('redSteel', 0.7, 0.18, 1.7, 0.1, 0.55, 10, 'metal');
+      b.box('bulbCool', -0.3, 2.42, 1.0, 0.3, 2.45, 1.2);
+      // green NØDTELEFON board over the door, SOS plate beside it
+      const g = new THREE.PlaneGeometry(1.6, 0.32);
+      b.addGeo('brNodtelefon', g, new THREE.Matrix4().makeRotationY(Math.PI).setPosition(0, 2.62, -0.02));
+      b.box('steel', -0.85, 2.44, -0.02, 0.85, 2.8, 0.0);
+      const sg = new THREE.PlaneGeometry(0.5, 0.75);
+      b.addGeo('brSOS', sg, new THREE.Matrix4().makeRotationY(Math.PI).setPosition(-0.75, 1.55, -0.02));
+      this.bld.fixtures.push({ p: new THREE.Vector3(0, 2.2, 1.1).applyMatrix4(b.m), color: 0xffe0d0, intensity: 3, dist: 5 });
+      this.bld.nav.push({ a: new THREE.Vector3(0.1, 0.2, -1.6).applyMatrix4(b.m), b: new THREE.Vector3(0.1, 0.2, 1.1).applyMatrix4(b.m) });
+      b.pop();
+      this.I.lights.push({ pos: world(at(f.s), f.side * (W - 0.8), 2.2), color: 0xff3a30, intensity: 2.5, dist: 6 });
+      // the blue SOS sign hung from the roof, both faces, readable down the bore (image 1)
+      const hs = f.s - 6;
+      const hu = f.side * 2.6;
+      frame(hs, hu, roofV(hs, hu) - 1.35);
+      for (const fz of [1, -1]) {
+        const pg = new THREE.PlaneGeometry(0.9, 1.35);
+        b.addGeo('brSOS', pg, new THREE.Matrix4().makeRotationY(fz > 0 ? Math.PI : 0).setPosition(0, 0, fz * 0.03));
+      }
+      b.box('steel', -0.47, -0.7, -0.025, 0.47, 0.7, 0.025);
+      b.box('steel', -0.02, 0.7, -0.02, 0.02, 1.3, 0.02);
+      b.pop();
+    }
+    // ---- green emergency exits (image 1): a green-lit alcove with an exit sign and a steel door
+    for (const f of TUN_FEATURES.exits) {
+      const W = sideW(f.s, f.side);
+      frame(f.s, f.side * W, 0, f.side > 0 ? -Math.PI / 2 : Math.PI / 2);
+      b.box('concrete', -1.0, 0, 0, 1.0, 0.18, 1.3, 'concrete');
+      for (const sx of [-1, 1]) b.box('exitGlow', sx * 1.0 - 0.06, 0, 0, sx * 1.0 + 0.06, 2.6, 1.3, 'concrete');
+      b.box('exitGlow', -1.06, 2.5, 0, 1.06, 2.62, 1.3, 'concrete');
+      b.box('steel', -0.65, 0.18, 1.2, 0.65, 2.3, 1.3, 'metal'); // the door to the escape gallery
+      b.box('tunnelBase', -1.06, 0, 1.3, 1.06, 2.62, 1.45, 'concrete');
+      b.box('steel', 0.4, 1.0, 1.15, 0.5, 1.1, 1.2);
+      const g = new THREE.PlaneGeometry(0.6, 0.6);
+      b.addGeo('signExitBlade', g, new THREE.Matrix4().makeRotationY(Math.PI).setPosition(0, 2.95, -0.02));
+      b.box('exitGreen', -0.33, 2.62, -0.01, 0.33, 3.28, 0.02);
+      this.I.lights.push({ pos: new THREE.Vector3(0, 1.6, 0.4).applyMatrix4(b.m), color: 0x30ff70, intensity: 6, dist: 8 });
+      b.pop();
+    }
+    // ---- kerb reflectors every 8 m (white right, orange left)
+    for (let s = 2; s < total; s += 8) {
+      for (const side of [-1, 1]) {
+        const W = sideW(s, side);
+        frame(s, side * (W - 1.36), 0.1);
+        b.box(side > 0 ? 'lamp' : 'sodium', -0.03, -0.04, -0.06, 0.03, 0.04, 0.06);
+        b.pop();
+      }
+    }
+    // ---- cover down the bore
+    const I = this.I;
+    const place = (s: number, u: number) => world(at(s), u, 0);
+    const yawAt = (s: number) => Math.atan2(at(s).tx, at(s).tz);
+    // a lane closure with cones and a works van near the west portal
+    {
+      const v = place(26, 2.0);
+      I.car(v.x, v.y, v.z, yawAt(26), 'carWhite');
+      for (let k = 0; k < 7; k++) {
+        const c = place(14 + k * 2.2, 3.1 - k * 0.42);
+        b.push([c.x, c.y, c.z], 0);
+        b.addGeo('cone', new THREE.ConeGeometry(0.17, 0.7, 10), new THREE.Matrix4().setPosition(0, 0.35, 0));
+        b.box('rubberBlack', -0.22, 0, -0.22, 0.22, 0.04, 0.22);
+        b.pop();
+      }
+    }
+    // a crash: two cars across the lanes
+    {
+      const a = place(70, -1.4), c = place(74, 1.6);
+      I.car(a.x, a.y, a.z, yawAt(70) + 0.75, 'carBlue');
+      I.car(c.x, c.y, c.z, yawAt(74) - 2.4, 'carGrey', true);
+    }
+    // concrete barriers staggered across the road before the low point
+    for (const [s, u] of [[98, -2.2], [104, 1.8], [110, -1.0]] as const) {
+      const w = place(s, u);
+      I.jersey(w.x, w.y, w.z, yawAt(s) + Math.PI / 2 + (u > 0 ? 0.3 : -0.2));
+    }
+    // the lay-by: a broken-down car in the bay, pallets and a stack of crates
+    {
+      const bay = place((lay.s0 + lay.s1) / 2 - 4, lay.side * (TUN.hw + lay.width - 3.2));
+      I.car(bay.x, bay.y, bay.z, yawAt((lay.s0 + lay.s1) / 2), 'carRed');
+      const pl = place((lay.s0 + lay.s1) / 2 + 6, lay.side * (TUN.hw + lay.width - 2.2));
+      b.push([pl.x, pl.y, pl.z], yawAt(lay.s1));
+      for (let k = 0; k < 3; k++) b.box('pallet', -0.6, k * 0.15, -0.6, 0.6, k * 0.15 + 0.14, 0.6, 'wood');
+      b.box('crate', -0.5, 0.45, -0.5, 0.5, 1.35, 0.5, 'wood');
+      b.pop();
+    }
+    // a stalled lorry in the eastbound lane on the climb, a burnt-out wreck and sandbags further up
+    {
+      const t = place(186, 1.8);
+      I.truck(t.x, t.y, t.z, yawAt(186));
+      const w = place(232, -1.6);
+      I.car(w.x, w.y, w.z, yawAt(232) + 0.3, 'carBurnt', true);
+      const sb = place(240, 1.4);
+      I.sandbags(sb.x, sb.z, yawAt(240) + Math.PI / 2, 3);
+    }
+    void hole;
   }
 
   /** Portal faces after the photo: a concrete arch collar proud of a dry-stone retaining wall cut into the rock. */
@@ -621,18 +859,62 @@ export class BrosundBuild {
       // height-limit hazard bar hanging on two rods under the arch
       for (const sx of [-1, 1]) b.box('steel', sx * 2.2 - 0.03, 5.0, 1.4, sx * 2.2 + 0.03, TUN.crown + 0.2, 1.46);
       b.box('hazard', -3.1, 4.75, 1.36, 3.1, 5.05, 1.5);
-      // blue name board on a post to the right, red emergency cabinet beyond it
-      const bx = hw + 4.2;
-      b.cyl('steel', bx, 0, 4.0, 0.07, 2.6, 8, 'metal');
-      b.box('steel', bx - 0.95, 2.4, 3.95, bx + 0.95, 4.3, 4.0);
-      const ng = new THREE.PlaneGeometry(1.86, 1.86);
-      b.addGeo('brTunnelBoard', ng, new THREE.Matrix4().setPosition(bx, 3.35, 4.02));
-      b.box('redSteel', bx + 2.3, 0, 3.4, bx + 3.4, 2.0, 4.1, 'metal');
-      b.box('white', bx + 2.42, 1.2, 4.1, bx + 3.28, 1.85, 4.12);
-      // concrete barriers along both sides of the approach
-      for (const sx of [-1, 1]) for (let z = 3; z < 22; z += 3.1) {
-        const tAt = new THREE.Vector3(sx * (hw + 0.6), 0, z).applyMatrix4(b.m);
-        this.I.jersey(tAt.x, this.h(tAt.x, tAt.z), tAt.z, rot);
+      // ground under a point of this portal frame (the cutting floor rises at its edges)
+      const gy = (lx: number, lz: number) => {
+        const w = new THREE.Vector3(lx, 0, lz).applyMatrix4(b.m);
+        return this.h(w.x, w.z) - p.y;
+      };
+      // reflector studs round the collar's rim (image 3)
+      for (let k = 0; k <= 22; k++) {
+        const t = Math.PI - (k / 22) * Math.PI;
+        const ux = Math.cos(t) * (hw + 0.66), vy = WALL + Math.sin(t) * (ARCH + 0.66);
+        b.box('reflectorStud', ux - 0.04, vy - 0.04, 2.42, ux + 0.04, vy + 0.04, 2.5);
+      }
+      for (const sx of [-1, 1]) for (let y = 0.6; y < WALL; y += 0.7) b.box('reflectorStud', sx * (hw + 0.66) - 0.04, y, 2.42, sx * (hw + 0.66) + 0.04, y + 0.08, 2.5);
+      // blue name board on a post right of the road, standing on the cutting floor
+      const bx = hw + 2.4, bz = 5.5;
+      const by = gy(bx, bz);
+      b.cyl('steel', bx, by, bz, 0.07, 2.6, 8, 'metal');
+      b.box('steel', bx - 0.95, by + 2.4, bz - 0.05, bx + 0.95, by + 4.3, bz);
+      b.addGeo('brTunnelBoard', new THREE.PlaneGeometry(1.86, 1.86), new THREE.Matrix4().setPosition(bx, by + 3.35, bz + 0.02));
+      // traffic signal "STOPP ved rødt blink" on the left: a black head with a red and a grey lamp
+      const sgx = -(hw + 2.2), sgz = 9;
+      const sgy = gy(sgx, sgz);
+      b.cyl('steel', sgx, sgy, sgz, 0.07, 3.6, 8, 'metal');
+      b.box('rubberBlack', sgx - 0.75, sgy + 3.2, sgz - 0.08, sgx + 0.75, sgy + 3.95, sgz + 0.08);
+      b.box('stucco', sgx - 0.79, sgy + 3.16, sgz - 0.06, sgx + 0.79, sgy + 3.99, sgz + 0.06);
+      b.addGeo('signalRed', new THREE.CircleGeometry(0.24, 16), new THREE.Matrix4().setPosition(sgx - 0.32, sgy + 3.575, sgz + 0.09));
+      b.addGeo('steel', new THREE.CircleGeometry(0.24, 16), new THREE.Matrix4().setPosition(sgx + 0.32, sgy + 3.575, sgz + 0.09));
+      b.addGeo('brStopp', new THREE.PlaneGeometry(1.1, 0.34), new THREE.Matrix4().setPosition(sgx, sgy + 2.85, sgz + 0.03));
+      this.I.lights.push({ pos: new THREE.Vector3(sgx - 0.3, sgy + 3.6, sgz + 0.6).applyMatrix4(b.m), color: 0xff2a1a, intensity: 3, dist: 9 });
+      // boom barrier across the inbound lane (vault it or duck under), a yellow/black panel hung from it
+      const bbx = hw - 0.4, bbz = 12;
+      const bby = gy(bbx, bbz);
+      b.box('contGrey', bbx - 0.25, bby, bbz - 0.25, bbx + 0.25, bby + 1.2, bbz + 0.25, 'metal');
+      b.box('white', 0, bby + 1.0, bbz - 0.06, bbx, bby + 1.12, bbz + 0.06, 'metal');
+      b.box('redSteel', 0, bby + 1.0, bbz - 0.065, 0.5, bby + 1.12, bbz + 0.065);
+      b.box('hazard', 1.0, bby + 0.62, bbz - 0.03, 3.2, bby + 0.98, bbz + 0.03);
+      // SOS cabinet sign, grey electrical cabinets and a red emergency cabinet on the right
+      const cx = hw + 2.9, cz = 13;
+      const cy = gy(cx, cz);
+      b.box('steel', cx - 0.32, cy, cz - 0.2, cx + 0.32, cy + 1.7, cz + 0.2, 'metal');
+      b.addGeo('brSOS', new THREE.PlaneGeometry(0.6, 0.9), new THREE.Matrix4().setPosition(cx, cy + 1.25, cz + 0.21));
+      for (const [ex, ez] of [[hw + 2.6, 2.8], [hw + 2.6, 3.9]] as const) {
+        const ey = gy(ex, ez);
+        b.box('contGrey', ex - 0.35, ey, ez - 0.4, ex + 0.35, ey + 1.3, ez + 0.4, 'metal');
+      }
+      const ry = gy(cx + 1.0, cz + 2.4);
+      b.box('red', cx + 0.6, ry, cz + 2.0, cx + 1.4, ry + 2.0, cz + 2.7, 'metal');
+      // guard rails along both walkways
+      for (const sx of [-1, 1]) {
+        const rx = sx * (hw + 1.4);
+        for (let z = 2.6; z < 24; z += 2) {
+          const y0 = gy(rx, z);
+          b.box('steel', rx - 0.05, y0, z - 0.05, rx + 0.05, y0 + 0.8, z + 0.05, 'metal');
+          const y1 = gy(rx, z + 2);
+          const len = Math.hypot(2, y1 - y0);
+          b.obox('steel', [rx, (y0 + y1) / 2 + 0.66, z + 1], [0.08, 0.28, len + 0.02], new THREE.Euler(-Math.atan2(y1 - y0, 2), 0, 0), 'metal');
+        }
       }
       // lights at the portal (bright entry zone)
       this.I.lights.push({ pos: new THREE.Vector3(0, TUN.crown - 1.0, -4).applyMatrix4(b.m), color: 0xfff0d8, intensity: 10, dist: 18 });
@@ -801,16 +1083,76 @@ export class BrosundBuild {
         const side = i % 28 === 6 ? 1 : -1;
         const x = p.x - p.tz * (r.width / 2 + 0.7) * side, z = p.z + p.tx * (r.width / 2 + 0.7) * side;
         if (this.bld.footprints.some((f) => x > f.min.x - 0.6 && x < f.max.x + 0.6 && z > f.min.z - 0.6 && z < f.max.z + 0.6)) continue;
-        if (this.h(x, z) < 1) continue;
+        if (this.h(x, z) < 1 || !this.offStairs(x, z)) continue;
         this.jugendLamp(x, z);
       }
     }
+    this.roadSigns();
     // Norwegian flags: the church, Fjellstua, the harbour office
     for (const [x, z, hh] of [[14, -60, 12], [-84, -100, 9], [146, 26, 10]] as const) {
       const y = this.h(x, z);
       this.b.cyl('white', x, y, z, 0.07, hh, 8, 'metal', 0.045);
       this.I.flag(new THREE.Vector3(x, y + hh - 0.1, z));
     }
+  }
+
+  /**
+   * Norwegian road signs: speed limits at the ends of every street (30 in the town, 50 out on the
+   * bridge and the tunnel roads), "forkjørsvei" on the through roads, pedestrian crossings and
+   * "gågate" at the canal, parking, bus stops, a tunnel warning before each portal, speed bumps
+   * and "barn leker" by the houses on Aspøya, one-way and no-entry pairs on the cross streets.
+   */
+  private roadSigns() {
+    Object.assign(this.b.mats, townSignMaterials());
+    const rng = this.rng;
+    const ok = (x: number, z: number) => {
+      const y = this.h(x, z);
+      if (y < 1 || tunnelFloorAt(x, z, 4) !== null || !this.offStairs(x, z)) return false;
+      return !this.bld.footprints.some((f) => x > f.min.x - 0.5 && x < f.max.x + 0.5 && z > f.min.z - 0.5 && z < f.max.z + 0.5);
+    };
+    const put = (kind: RoadSign, x: number, z: number, faceX: number, faceZ: number, under?: RoadSign) => {
+      if (!ok(x, z)) return false;
+      roadSign(this.b, kind, x, this.h(x, z), z, Math.atan2(faceX, faceZ), under);
+      return true;
+    };
+    for (const r of ROADS) {
+      if (r.kind === 'stairs' || r.kind === 'dirt') continue;
+      const s = this.I.resample(r.pts, 2);
+      if (s.length < 6) continue;
+      const town = r.name !== 'Sundbrua' && r.name !== 'Hamnevegen' && r.name !== 'Dalvegen' && r.name !== 'Setervegen' && r.name !== 'Fjellvegen';
+      const off = r.width / 2 + 0.9;
+      // at both ends, facing traffic coming in
+      for (const [i, dir] of [[2, 1], [s.length - 3, -1]] as const) {
+        const p = s[i];
+        const x = p.x - p.tz * off * dir, z = p.z + p.tx * off * dir;
+        const first: RoadSign = r.kind === 'gravel' ? (rng.chance(0.5) ? 'bump' : 'speed30') : town ? 'speed30' : 'speed50';
+        put(first, x, z, -p.tx * dir, -p.tz * dir, town && rng.chance(0.4) ? 'priority' : undefined);
+      }
+      // along the way
+      for (let i = 14; i < s.length - 10; i += rng.int(18, 30)) {
+        const p = s[i];
+        const side = rng.chance(0.5) ? 1 : -1;
+        const x = p.x - p.tz * off * side, z = p.z + p.tx * off * side;
+        const kinds: RoadSign[] = town ? ['parking', 'crossing', 'pedestrian', 'bus', 'oneway', 'children', 'bump', 'priority'] : ['speed50', 'bump', 'bus', 'priority'];
+        const k = kinds[rng.int(0, kinds.length - 1)];
+        put(k, x, z, -p.tx * side, -p.tz * side);
+        // crossings get the sign on both sides and zebra stripes across the road
+        if (k === 'crossing') {
+          put('crossing', p.x + p.tz * off * side, p.z - p.tx * off * side, p.tx * side, p.tz * side);
+          for (let u = -r.width / 2 + 0.4; u < r.width / 2 - 0.3; u += 0.9) {
+            const cx = p.x - p.tz * u, cz = p.z + p.tx * u;
+            this.b.obox('lineWhite', [cx, this.h(cx, cz) + 0.065, cz], [0.5, 0.012, 3.0], new THREE.Euler(0, Math.atan2(p.tx, p.tz), 0));
+          }
+        }
+      }
+    }
+    // tunnel warnings on both approach roads and "gågate" signs on the promenades
+    const P = tunnelPath();
+    for (const [p, dir] of [[P[0], -1], [P[P.length - 1], 1]] as const) {
+      const ax = p.x + p.tx * dir * 60, az = p.z + p.tz * dir * 60;
+      put('tunnel', ax + p.tz * 6.5, az - p.tx * 6.5, p.tx * dir, p.tz * dir, 'speed50');
+    }
+    for (let x = -170; x < 30; x += 48) for (const side of [-1, 1]) put('pedestrian', x, canalZ(x) + side * (CANAL_HW + 6.6), 0, -side);
   }
 
   /** nav up every cross street past the second building row into the upper town on both islands */
@@ -896,4 +1238,47 @@ export class BrosundBuild {
     this.drops.count = n;
     this.drops.instanceMatrix.needsUpdate = true;
   }
+}
+
+/** The Norwegian tunnel lining: pale grey panels with joints (2.4 m along the bore, a seam round the arch). */
+function tunnelMaterials(): Record<string, THREE.Material> {
+  const c = document.createElement('canvas');
+  c.width = 256;
+  c.height = 512;
+  const x = c.getContext('2d')!;
+  x.fillStyle = '#c9cbc8';
+  x.fillRect(0, 0, 256, 512);
+  // faint mottling and grime streaks
+  for (let i = 0; i < 900; i++) {
+    const g = 180 + Math.random() * 40;
+    x.fillStyle = `rgba(${g},${g},${g - 4},0.08)`;
+    x.fillRect(Math.random() * 256, Math.random() * 512, 2 + Math.random() * 10, 2 + Math.random() * 30);
+  }
+  for (let i = 0; i < 26; i++) {
+    x.fillStyle = 'rgba(70,72,70,0.05)';
+    x.fillRect(Math.random() * 256, 0, 1 + Math.random() * 4, 512);
+  }
+  // panel joints: across the bore every 2.4 m (256 px = 2.4 m), one along it
+  x.fillStyle = 'rgba(60,62,62,0.55)';
+  x.fillRect(0, 0, 256, 3);
+  x.fillRect(0, 256, 256, 3);
+  x.fillRect(0, 0, 3, 512);
+  // bolt heads along the joints
+  x.fillStyle = 'rgba(90,92,92,0.6)';
+  for (let k = 0; k < 8; k++) for (const y of [8, 264]) x.fillRect(16 + k * 32, y, 4, 4);
+  const t = new THREE.CanvasTexture(c);
+  t.colorSpace = THREE.SRGBColorSpace;
+  t.wrapS = t.wrapT = THREE.RepeatWrapping;
+  t.repeat.set(1 / 2.4, 1 / 4.8);
+  t.anisotropy = 4;
+  return {
+    tunnelLiner: new THREE.MeshStandardMaterial({ map: t, roughness: 0.62, metalness: 0.0, envMapIntensity: 0.18 }),
+    tunnelBase: new THREE.MeshStandardMaterial({ color: 0x9a9a96, roughness: 0.9, envMapIntensity: 0.12 }),
+    tunnelRib: new THREE.MeshStandardMaterial({ color: 0xb8bcbc, roughness: 0.45, metalness: 0.5, envMapIntensity: 0.2 }),
+    rubberBlack: new THREE.MeshStandardMaterial({ color: 0x1a1b1c, roughness: 0.8 }),
+    exitGlow: new THREE.MeshBasicMaterial({ color: new THREE.Color(0.25, 2.6, 0.9), toneMapped: false }),
+    cone: new THREE.MeshStandardMaterial({ color: 0xf25a12, roughness: 0.5 }),
+    reflectorStud: new THREE.MeshBasicMaterial({ color: new THREE.Color(2.2, 2.2, 2.0), toneMapped: false }),
+    signalRed: new THREE.MeshBasicMaterial({ color: new THREE.Color(5, 0.4, 0.25), toneMapped: false }),
+  };
 }

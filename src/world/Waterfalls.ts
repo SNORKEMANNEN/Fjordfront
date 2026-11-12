@@ -67,9 +67,11 @@ export class Waterfalls {
   private mist: { p: THREE.Vector3; fall: number; t: number; life: number; v: THREE.Vector3 }[] = [];
   private mistPts!: THREE.Points;
   private rng = new RNG(9191);
+  private minR = 0;
 
-  constructor(private terrain: Terrain, near: { x: number; z: number; w: number; big?: boolean }[], far: [number, number, number][], autoStreams: number) {
+  constructor(private terrain: Terrain, near: { x: number; z: number; w: number; big?: boolean }[], far: [number, number, number][], autoStreams: number, minR = 0) {
     this.group.name = 'waterfalls';
+    this.minR = minR;
     const tex = streakTexture();
     this.mat = new THREE.MeshStandardMaterial({ map: tex, alphaMap: tex, transparent: true, depthWrite: false, side: THREE.DoubleSide, roughness: 0.25, metalness: 0, color: 0xe8f2f4, emissive: 0x4a5a60, emissiveIntensity: 0.6, envMapIntensity: 0.6 });
     const farTex = tex.clone();
@@ -83,8 +85,10 @@ export class Waterfalls {
     // small streams down the cliffs: find steep faces with a lip above them
     let made = 0;
     for (let i = 0; i < 1600 && made < autoStreams; i++) {
-      const a = this.rng.range(0, Math.PI * 2), d = this.rng.range(120, 720);
+      const a = this.rng.range(0, Math.PI * 2), d = this.rng.range(Math.max(120, minR), 760);
       const x = Math.cos(a) * d, z = Math.sin(a) * d;
+      // streams only on the mountains round the map, never through the playable area
+      if (Math.max(Math.abs(x), Math.abs(z)) < minR) continue;
       const h = terrain.heightAt(x, z);
       if (h < 40 || h > 520) continue;
       const n = terrain.normalAt(x, z);
@@ -133,6 +137,7 @@ export class Waterfalls {
     const step = far ? 6 : 1.4;
     for (let i = 0; i < (far ? 160 : 260); i++) {
       const h = t.heightAt(px, pz);
+      if (this.minR && Math.max(Math.abs(px), Math.abs(pz)) < this.minR - 30) break;
       pts.push(new THREE.Vector3(px, h, pz));
       if (h < 0.15) break;
       const e = far ? 4 : 0.8;

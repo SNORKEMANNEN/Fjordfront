@@ -45,14 +45,18 @@ export class Environment {
   midnightSun = false;
   seaState = 0;
   /** Seabed depth map over the play area (from the terrain), for the water colour by depth. */
-  setSeabed(heightAt: (x: number, z: number) => number, half: number, strength: number) {
-    const N = 256;
-    const data = new Uint8Array(N * N);
+  setSeabed(heightAt: (x: number, z: number) => number, half: number, strength: number, cut?: (x: number, z: number) => boolean) {
+    // R: water depth (0..40 m); G: "no water here" — over a tunnel bore that runs above sea level
+    // under the land, so the sea plane never shows inside the tunnel
+    const N = 512;
+    const data = new Uint8Array(N * N * 2);
     for (let j = 0; j < N; j++) for (let i = 0; i < N; i++) {
       const x = -half + ((i + 0.5) / N) * half * 2, z = -half + ((j + 0.5) / N) * half * 2;
-      data[j * N + i] = Math.round(Math.min(1, Math.max(0, -heightAt(x, z) / 40)) * 255);
+      const k = (j * N + i) * 2;
+      data[k] = Math.round(Math.min(1, Math.max(0, -heightAt(x, z) / 40)) * 255);
+      data[k + 1] = cut && cut(x, z) ? 255 : 0;
     }
-    const t = new THREE.DataTexture(data, N, N, THREE.RedFormat);
+    const t = new THREE.DataTexture(data, N, N, THREE.RGFormat);
     t.magFilter = THREE.LinearFilter;
     t.minFilter = THREE.LinearFilter;
     t.needsUpdate = true;
@@ -138,7 +142,11 @@ export class Environment {
         .replace('float reflectance = rf0 + ( 1.0 - rf0 ) * pow( ( 1.0 - theta ), 5.0 );', `float depthM = 30.0;
           if (uSeabedBox.w > 0.0) {
             vec2 suv = (worldPosition.xz - uSeabedBox.xy) / uSeabedBox.z;
-            if (suv.x > 0.0 && suv.y > 0.0 && suv.x < 1.0 && suv.y < 1.0) depthM = texture2D(uSeabed, suv).r * 40.0;
+            if (suv.x > 0.0 && suv.y > 0.0 && suv.x < 1.0 && suv.y < 1.0) {
+              vec2 sb = texture2D(uSeabed, suv).rg;
+              if (sb.g > 0.35) discard;
+              depthM = sb.r * 40.0;
+            }
           }
           float shal = (1.0 - smoothstep(0.4, 9.0, depthM)) * min(1.0, uSeabedBox.w);
           float reflectance = ( rf0 + ( 1.0 - rf0 ) * pow( ( 1.0 - theta ), 5.0 ) ) * uReflK * mix(1.0, 0.6, shal);`)

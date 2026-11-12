@@ -15,7 +15,8 @@ import { World } from '../world/World';
 import { PlayerController } from '../player/PlayerController';
 import { CameraRig } from '../player/CameraRig';
 import { Settings } from './Settings';
-import { SPAWNS, PLAY_HALF, landmarkAt, LANDMARKS, TUNNEL, TUNNEL_EXIT, tunnelShafts, BUILDINGS, MAP_ID, shoreDist, inTunnel, isWet } from '../world/MapLayout';
+import { SPAWNS, PLAY_HALF, landmarkAt, LANDMARKS, TUNNEL, TUNNEL_EXIT, tunnelShafts, BUILDINGS, MAP_ID, shoreDist, inTunnel, isWet, capHeightAt } from '../world/MapLayout';
+import { tunnelFloorAt } from '../world/maps/Brosund';
 import { Viewmodel, ActionType } from '../weapons/Viewmodel';
 import { WeaponSystem, ShotRequest } from '../weapons/WeaponSystem';
 import { makeWeaponMaterials, WeaponMats, WEAPON_BUILDERS, WeaponId } from '../weapons/WeaponModels';
@@ -570,7 +571,12 @@ export class Game {
     this.terrain = this.world.terrain;
     // water colour by depth over the play area
     this.env.brosund = MAP_ID === 'brosund';
-    this.env.setSeabed((x, z) => this.terrain.heightAt(x, z), PLAY_HALF + 18, MAP_ID === 'brosund' ? 1 : 0.7);
+    this.env.setSeabed((x, z) => this.terrain.topAt(x, z), PLAY_HALF + 18, MAP_ID === 'brosund' ? 1 : 0.7, (x, z) => {
+      // over a tunnel bore under land (the cap or the cutting is above the sea): no sea plane
+      const cap = capHeightAt(x, z);
+      if (cap !== null) return cap > -0.5;
+      return MAP_ID === 'brosund' && tunnelFloorAt(x, z, 6) !== null && this.terrain.heightAt(x, z) > -14 && this.terrain.topAt(x, z) > -0.5;
+    });
     mark('world built');
     this.vmScene.environment = this.scene.environment;
     (this.vmScene as any).environmentIntensity = 0.75;
@@ -1595,6 +1601,8 @@ export class Game {
     const sens = (w.ads > 0.5 ? (w.scopeActive ? (Settings.data.scopeSensitivity ?? 0.2) : Settings.data.adsSensitivity) : 1) * (this.stunT > 0 ? 0.3 : 1);
     if (a.alive && !this.tmap.open) this.player.look(inp.mouseDX, inp.mouseDY, sens * this.aimAssist(dt));
     this.updateZipline(dt);
+    // Linbanen: cabins move first and carry whoever stands in them
+    if (this.world.cable) this.world.cable.update(dt, [this.player, ...this.bots.filter((b) => b.alive)]);
     this.player.update(dt);
     this.updateDoors(dt);
     this.physics.step();
