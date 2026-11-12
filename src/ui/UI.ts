@@ -811,6 +811,7 @@ export class UI {
         ${slider('padDeadzone', 'Stick deadzone', 0.03, 0.3, 0.01)}
         ${toggle('padInvertY', 'Invert look (controller)')}
         ${toggle('aimAssist', 'Aim assist (controller only: slow-down + rotational, needs a visible target)')}
+        ${toggle('throwArc', 'Throw arc preview (dotted arc + landing ring while a grenade is held ready)')}
         <div class="lsub">KEYS <small>click a key, then press the new one (Esc cancels, Backspace clears)</small></div>
         <div class="binds">${ACTION_LABELS.map(([a, l]) => `<div class="bind"><span>${l}</span><button data-bind="${a}">${keysFor(a).map(keyLabel).join(' / ') || '—'}</button></div>`).join('')}</div>
         <div class="row"><button data-a="resetkeys">RESET KEYS</button></div>

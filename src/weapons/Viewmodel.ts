@@ -7,7 +7,7 @@ import { breakAction, BreakData } from './BreakAction';
 import { lmgReload } from './LmgAnim';
 import { sd9Reload, mp18Reload, AnimCtx } from './SmgAnims';
 import { akReload, karReload, karCycle, RifleCtx, KarPlan } from './RifleAnims';
-import { lethalGrenade, lethalKnife, lethalC4, tacticalThrow, detPress, EqCtx } from './EquipAnims';
+import { lethalGrenade, lethalKnife, lethalC4, tacticalThrow, detPress, knifePickup, EqCtx } from './EquipAnims';
 import { knifeAction, knifeCarry } from './KnifeAnim';
 import { WeaponModel } from './WeaponModels';
 import { WeaponDef } from './WeaponDefs';
@@ -166,7 +166,7 @@ function localBox(o: THREE.Object3D) {
 export type ActionType = 'reload' | 'reloadEmpty' | 'inspect' | 'inspectMag' | 'draw' | 'holster' | 'pump' | 'bolt' | 'shellStart' | 'shell' | 'shellEnd' | 'melee' | 'throw' | 'stim' | 'uav' | 'designate' | 'nvg' | 'breakReload' | 'knifeSlash' | 'knifeStab' | 'knifeKill'
   | 'claymore' | 'c4Throw' | 'detonate' | 'stickyThrow' | 'snapshotThrow' | 'decoyThrow' | 'trophy'
   | 'karReload' | 'karCycle'
-  | 'lethalFrag' | 'lethalSticky' | 'lethalKnife' | 'lethalC4' | 'tactical' | 'detPress';
+  | 'lethalFrag' | 'lethalSticky' | 'lethalKnife' | 'lethalC4' | 'tactical' | 'detPress' | 'knifePickup';
 
 export interface Action {
   type: ActionType;
@@ -451,6 +451,20 @@ export class Viewmodel {
       if (ring.userData.rest) ring.position.copy(ring.userData.rest as THREE.Vector3);
       ring.visible = true;
     }
+    // parts that fly off during an action come back for the next one
+    for (const n of ['spoon', 'liner', 'cap']) {
+      const o = this.grenade.getObjectByName(n);
+      if (!o) continue;
+      o.visible = true;
+      const r = o.userData.rest as { p: THREE.Vector3; q: THREE.Quaternion } | undefined;
+      if (r && r.p) {
+        o.position.copy(r.p);
+        o.quaternion.copy(r.q);
+      }
+    }
+    const fx = this.grenade.getObjectByName('fuseFx');
+    if (fx) fx.visible = false;
+    this.grenade.userData.toss = 0;
   }
   /** C4 remote kept in the left hand (gun one-handed) until it is used or put away */
   detonatorOut = false;
@@ -474,6 +488,11 @@ export class Viewmodel {
       jolt: (u, r, b) => this.jolt(u, r, b),
       time: this.t,
       data: a.data,
+      cook: typeof a.data.cook === 'function' ? (a.data.cook as () => number)() : -1,
+      power: typeof a.data.power === 'function' ? (a.data.power as () => number)() : 1,
+      held: (a.data.heldT as number | undefined) ?? 0,
+      cls: this.def?.cls ?? 'Assault Rifle',
+      bipod: this.bipodBlend,
     };
   }
   /** UAV phone screen (canvas texture) */
@@ -668,6 +687,7 @@ export class Viewmodel {
     const spoon = new THREE.Mesh(new THREE.BoxGeometry(0.012, 0.062, 0.004), steel);
     spoon.position.set(0, 0.02, 0.03);
     spoon.rotation.x = -0.18;
+    spoon.name = 'spoon';
     g.add(spoon);
     const ring = new THREE.Mesh(new THREE.TorusGeometry(0.011, 0.0016, 6, 16), steel);
     ring.position.set(0.016, 0.05, 0);
@@ -713,6 +733,7 @@ export class Viewmodel {
     g.add(fuse);
     const spoon = new THREE.Mesh(new THREE.BoxGeometry(0.012, h * 0.85, 0.004), steel);
     spoon.position.set(0, h * 0.1, r + 0.003);
+    spoon.name = 'spoon';
     g.add(spoon);
     const ring = new THREE.Mesh(new THREE.TorusGeometry(0.011, 0.0016, 6, 16), steel);
     ring.position.set(0.016, h / 2 + 0.014, 0);
@@ -1413,14 +1434,20 @@ export class Viewmodel {
       this.freeL.q.copy(handQ(new THREE.Vector3(0.35, 0.2, -1), new THREE.Vector3(1, 0.1, 0.35)));
       this.freeL.pose = POSES.grip;
       this.grenade.visible = k > 0.3;
+      // charges out: the status light blinks, the safety cover stays flipped up, thumb ready
+      setLed(this.grenade.getObjectByName('led'), Math.sin(this.t * 9) > 0.6 ? 1 : 0.1);
+      const cover = this.grenade.getObjectByName('cover');
+      if (cover) cover.rotation.x = 1.9;
       pos.x += 0.012 * k;
       rot.z -= 0.05 * k;
     } else if (!a && this.grenade === this.items.detonator) this.grenade.visible = false;
     if (a) {
       // actions can pause at a point while a button is held (cooking a grenade)
       const holdAt = a.data?.holdAt as number | undefined;
-      if (holdAt !== undefined && a.t >= holdAt && a.data.hold?.()) a.t = holdAt;
-      else a.t += dt / a.dur;
+      if (holdAt !== undefined && a.t >= holdAt && a.data.hold?.()) {
+        a.t = holdAt;
+        a.data.heldT = (a.data.heldT ?? 0) + dt;
+      } else a.t += dt / a.dur;
       const t = clamp(a.t, 0, 1);
       for (let i = 0; i < a.events.length; i++) {
         if (!a.fired.has(i) && t >= a.events[i][0]) {
@@ -1516,6 +1543,12 @@ export class Viewmodel {
       if (hold.p) palm.add(hold.p);
       this.grenade.position.copy(lp).add(palm.applyQuaternion(lq));
       this.grenade.quaternion.copy(lq).multiply(hold.q ?? new THREE.Quaternion().setFromEuler(new THREE.Euler(...hold.e)));
+      // tossed out of the hand (the spent stim injector)
+      const toss = this.grenade.userData.toss as number | undefined;
+      if (toss && toss > 0) {
+        this.grenade.position.add(new THREE.Vector3(-1.6 * toss, 0.6 * toss - 4 * toss * toss, 0.2 * toss));
+        this.grenade.rotateZ(toss * 18);
+      }
     }
     // tactical sprint: support arm off the gun, pumping in time with the stride
     const tacTarget = this.action ? 0 : clamp(c.tactical, 0, 1) * (1 - leftBlend);
@@ -1728,25 +1761,42 @@ export class Viewmodel {
         break;
       }
       case 'stim': {
-        // one-handed: the left hand brings the injector up low on the left, thumb flicks the cap,
-        // a short wind-up and a jab down into the thigh, then back to the gun. The right hand keeps
-        // the gun up and can fire throughout.
+        // one-handed: the left hand brings the injector up low on the left, the thumb flicks the
+        // cap off (it spins away), a short wind-up and a hard jab down into the thigh, a squeeze,
+        // then the empty injector is flicked away to the side and the hand goes back to the gun.
+        // The right hand keeps the gun up and can fire throughout.
         const away = kf(t, [[0, 0], [0.12, 1], [0.84, 1], [1, 0]]);
         pos.x += 0.012 * away;
         pos.y -= 0.01 * away;
         rot.z -= 0.05 * away;
+        // the jab jolts the whole body
+        const jab = win(t, 0.53, 0.56) * (1 - win(t, 0.58, 0.66));
+        pos.y -= 0.012 * jab;
+        rot.x -= 0.03 * jab;
         this.freeL.b = kf(t, [[0, 0], [0.13, 1], [0.86, 1], [1, 0]]);
         kv(t, [
           [0, [-0.17, -0.34, -0.28]], [0.2, [-0.152, -0.142, -0.27]], [0.34, [-0.148, -0.132, -0.27]], [0.38, [-0.146, -0.127, -0.268]],
-          [0.47, [-0.148, -0.115, -0.262]], [0.55, [-0.16, -0.37, -0.22]], [0.7, [-0.16, -0.36, -0.22]], [1, [-0.17, -0.34, -0.28]],
+          [0.47, [-0.148, -0.105, -0.262]], [0.54, [-0.16, -0.39, -0.22]], [0.64, [-0.16, -0.37, -0.22]], [0.7, [-0.24, -0.3, -0.24]], [0.76, [-0.2, -0.33, -0.26]], [1, [-0.17, -0.34, -0.28]],
         ], this.freeL.p);
-        // fist upright, knuckles out to the left, injector pointing down past the little finger
-        const fd = kv(t, [[0, [0.3, -0.2, -1]], [0.2, [0.25, 0.05, -1]], [0.47, [0.2, 0.25, -1]], [0.55, [0.25, -0.35, -1]], [1, [0.3, -0.2, -1]]]);
+        // fist upright, knuckles out to the left, injector pointing down past the little finger;
+        // the toss turns the wrist out
+        const fd = kv(t, [[0, [0.3, -0.2, -1]], [0.2, [0.25, 0.05, -1]], [0.47, [0.2, 0.25, -1]], [0.54, [0.25, -0.35, -1]], [0.64, [0.25, -0.35, -1]], [0.7, [-0.4, 0.1, -1]], [1, [0.3, -0.2, -1]]]);
         this.freeL.q.copy(handQ(fd, new THREE.Vector3(1, 0.05, 0.25)));
-        this.freeL.pose = POSES.grip;
-        this.grenade.visible = t > 0.05 && t < 0.8;
-        const cap = this.grenade.getObjectByName('cap');
-        if (cap) cap.visible = t < 0.38;
+        this.freeL.pose = t > 0.69 ? POSES.open : POSES.grip;
+        const it = this.grenade;
+        // the injector: in the fist until the toss, then it flies off to the left, tumbling
+        const tossT = Math.max(0, t - 0.69) * a.dur;
+        it.userData.toss = tossT;
+        it.visible = t > 0.05 && tossT < 0.3;
+        const cap = it.getObjectByName('cap');
+        if (cap) {
+          if (!cap.userData.rest) cap.userData.rest = { p: cap.position.clone(), q: cap.quaternion.clone() };
+          const r = cap.userData.rest as { p: THREE.Vector3; q: THREE.Quaternion };
+          const ct = Math.max(0, t - 0.36) * a.dur;
+          cap.visible = ct < 0.35;
+          cap.position.copy(r.p).add(new THREE.Vector3(0.3 * ct, 0.9 * ct - 5 * ct * ct, 0.15 * ct));
+          cap.quaternion.copy(r.q).multiply(new THREE.Quaternion().setFromEuler(new THREE.Euler(ct * 20, 0, ct * 9)));
+        }
         if (t > 0.36 && t < 0.41) this.freeL.p.y += 0.008; // cap flick
         break;
       }
@@ -2050,6 +2100,9 @@ export class Viewmodel {
         break;
       case 'detPress':
         detPress(t, pos, rot, this.eqCtx(a));
+        break;
+      case 'knifePickup':
+        knifePickup(t, pos, rot, this.eqCtx(a));
         break;
       case 'karReload':
       case 'karCycle': {

@@ -55,6 +55,8 @@ export interface SettingsData {
   padDeadzone: number;
   padInvertY: boolean;
   aimAssist: boolean;
+  /** dotted throw-arc preview while holding a grenade ready */
+  throwArc: boolean;
   /** multiplayer: voice chat */
   voice: boolean;
   voiceMode: 'ptt' | 'open';
@@ -115,6 +117,7 @@ const DEFAULTS: SettingsData = {
   padDeadzone: 0.12,
   padInvertY: false,
   aimAssist: true,
+  throwArc: false,
   voice: false,
   voiceMode: 'ptt',
   voiceChannel: 'team',

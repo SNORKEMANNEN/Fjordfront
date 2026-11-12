@@ -290,6 +290,113 @@ URL options: `?quality=low|medium|high|ultra`, `?weather=clear|overcast|rain|sno
 - **Rifle:** support hand moved so it no longer shows through the optic window.
 - **Pistol:** hold reworked.
 
+## Update 31: equipment, from pin to blast
+
+Every grenade, charge and gadget was reworked: how you pull and throw it, how it flies and lands, what it does to the room, and how it sounds. Every equipment sound is now a real recording.
+
+### Throwing
+- **Full pull-and-throw sequence for every grenade.**
+  - **Frag:** grab it off the belt, the left fingers hook the ring and rip the pin out (the ring is flicked away), cock the arm, throw.
+  - **Tacticals:** the left thumb takes the pin.
+  - **Snapshot and decoy:** armed with a twist of the canister instead (two detent clicks).
+- **Cooking you can see.** Hold the throw key at the ready and the spoon springs off with a ping and the fuse lights.
+  - The fist comes forward into view, so you watch the fuse spit and smoke.
+  - The hand starts to tremble as time runs down, and the fuse hiss gets louder and higher.
+  - The fuse runs from the spoon release, not the pin. Hold too long and it goes off in your hand.
+  - Throw it without cooking and the spoon flies off as it leaves your hand (it tumbles to the ground in the world).
+- **Throw strength by hold time.** A tap lobs it short. Holding for about 0.9 s winds up a full-power throw, and the arm visibly draws further back as power builds.
+- **Weapon-aware tactical throws.** The gun stays up in the right hand (you can keep firing), held differently per gun:
+  - **Pistol:** pulled in close to the chest and canted in.
+  - **LMG with bipod deployed:** stays planted. Only the shoulder rolls off it.
+  - **LMG off the bipod:** sags on the sling, butt on the hip.
+  - **Shotgun:** tucked under the arm, muzzle canted inboard.
+  - **Rifles and SMGs:** the body turns to free the arm. Snipers and marksman rifles dip the muzzle.
+  - The throw rocks the gun with the shoulder.
+- **Claymore placement:** you drop to a knee, set it on its legs and press it into the ground, with recorded foley.
+- **C4:** both hands bring it up and arm it. Then the right hand drops it low and flicks it underhand, so it leaves flat with hard backspin. The detonator comes up in the left hand, the thumb flips the yellow safety cover up, and it stays in hand with its light blinking while charges are out. To fire, the thumb comes up high and slams the button.
+- **Sticky grenade:** the left fingers pinch the tab of the liner over the adhesive pad and peel it off in one pull (it flutters away with a velcro rip). Then the LED starts racing.
+- **Throwing knife:**
+  - Drawn up out of a sheath on the chest rig (a blade-scrape sound), then flicked with the wrist, no wind-up.
+  - Hold it ready for a while and the hand gets restless: a small toss, the knife spins once and is caught by the handle.
+  - Walk over a thrown knife and you get a slow pickup: the gun tips away, the hand reaches down, picks it up and slides it home into the sheath.
+- **Stim:**
+  - The thumb flicks the cap off and it spins away.
+  - A hard jab into the thigh jolts the whole view, with a shudder (shake, desaturation) and a pneumatic hiss.
+  - Your heartbeat picks up for a few beats.
+  - The empty injector is flicked aside and clatters on the ground.
+- **Snapshot and decoy** are bowled low from the knee and roll along the ground instead of being thrown.
+- **Throw arc preview** (optional, **off by default**, Settings → Controls): a dotted arc and a landing ring while a grenade is held ready.
+
+### Third person: readable before it leaves the hand
+- **Bots and online players show the same beats:**
+  - **Lethals:** hand to the belt, the other hand rips the pin, arm cocked high behind the head (held while cooking, trembling), throw.
+  - **Tacticals:** thrown left-handed with the gun still up.
+  - **Snapshot and decoy:** bowled underhand.
+- **The item is in their hand:** a frag, sticky, flash, smoke can, C4 brick, injector or clacker. A cooking frag spits a spark.
+- **Bots now really throw at the release point.** Before this update the grenade left their hand instantly. Closer targets and rooms get a cooked frag.
+- **Visible placement crouch** for claymores. Players who carry C4 hold the clacker in front of the chest, raised high before the press, as counterplay.
+- **Stim:** a jab into the thigh and a flinch through the body.
+- The held item and the cooking state are sent with the pose to other players.
+
+### Grenade physics
+- **Bounce by surface.** Real surfaces come from the terrain material map, not just the collider.
+  - **Soft:** grass and snow.
+  - **Dead:** soft dirt.
+  - **Lively:** concrete, asphalt and metal.
+  - **In between:** wood and gravel.
+- **Rolling.** In contact with the ground, a grenade rolls: gravity along the slope keeps it going downhill and down stairs, and rolling resistance stops it on the flat. It only comes to rest where the slope is gentle enough for that surface.
+- **Water:** a splash, then it sinks slowly. It goes off underwater as a muffled thump with a white plume, a smaller radius and no fireball.
+- **Frag cook kills:** a kill with a frag cooked to go off in the air or right as it lands gives **+50 COOK KILL**.
+- **Sticky sticks to:**
+  - **Players:** they get a red pulsing screen warning, racing beeps, a panicked shout and a breath. Bots shout too.
+  - **Doors:** it rides the swing of the leaf.
+  - **The attack helicopter:** it rides it until it goes down.
+  - **Cars:** sticks with a metal clank.
+
+### Smoke
+- **A volumetric cloud** (`src/fx/SmokeVolume.ts`): puffs that swell, push each other apart, drift with the wind (not under a roof), rise a little and slide along walls.
+  - In a room it packs the space, and a full canister keeps pushing, so the smoke **pours out of doorways and windows**.
+  - **Rain** knocks it down faster.
+  - At night it is dark grey, not lit.
+- **Blocking:** sight lines test the actual puffs, about 1.5 m of thick smoke blocks. This now stops bot vision **and the snapshot scan**.
+
+### Explosions
+- **Shockwave ring** racing out along the ground, tinted by what it crosses.
+- **Dust from the actual surface:** powder snow thrown high, grey gravel grit, pale sand, dark soil.
+- **Debris from props nearby:** the blast is traced outwards, and what it reaches throws chips of itself (splinters, concrete flecks, metal sparks, glass).
+- **Marks:** a scorch decal under the blast and a dirt-spray pattern on walls within reach.
+- **Heat shimmer:** a screen-space refraction over the spot for a second or two.
+
+### Sound
+Every equipment sound is a real recording, cut, layered and normalised by `tools/eq_sfx_build.py` into `public/assets/sounds/equipment/`. No more synthesized equipment sounds.
+
+- **Grenade handling:**
+  - A layered pin pull (pin slide and ring jingle), the spoon ping, and throw swishes (light for tacticals, heavier with an effort grunt for full-power throws).
+  - **Bounces by surface:** hard, metal, wood, soft, gravel, mud, and a tin-can clank for canisters.
+  - A roll and a splash.
+  - **Fuse hiss:** a real burning fuse, looping, that rises in level and pitch as the fuse runs out, both in your hand and on the ground.
+- **Explosions change with distance and space** (`AudioEngine.explosionAt`):
+  - **Close:** a sharp crack on top of the blast.
+  - **Mid range:** the full real explosion recordings.
+  - **Far:** a low rumble and roll.
+  - **In the tunnel:** extra delayed, darker echoes.
+  - **Through a wall or between inside and outside:** muffled.
+  - Falling debris follows the blast.
+- **Flash and stun:** the recorded tinnitus tone rings and **ducks all other sound** under it, then everything fades back together.
+- **Smoke:** a steam / road-flare hiss that fades (level and brightness) over the canister's life.
+- **Stim:** cap click, needle jab, a pneumatic hydraulic hiss, then a real heartbeat.
+- **Recorded gadget sounds:** sticky slap and liner peel, C4 beeps, safety-cover flip and clacker, claymore clicks and legs, trophy deploy / servo / intercept, snapshot pulse, canister twist, knife draw / throw / catch / pickup, injector toss.
+
+### Tested
+- `tools/eqtest.cjs`: the whole sound bank loads (53 keys). Every lethal and tactical runs through its action, including cook, power, spoon and release. Cooked time reaches the grenade.
+  - Frags rest on flat ground and roll down slopes, and a snapshot rolled 4.8 m down a hillside. A frag dropped in the sea sinks.
+  - A smoke cloud blocks a sight line through it and not one above it. Explosion FX and audio paths run.
+  - A bot pulls, cooks (1.0 s) and throws, with the held item and cooking flag in its replicated pose.
+  - Stim, C4 + detonator, claymore and knife pickup run to the end with no errors.
+- A smoke canister 2 m inside a doorway fills the room and pushes about a third of the cloud out through the door in 12 s. Rain thins it.
+- Third-person checks: the held prop sits 7.5 cm past the hand in every pose, and the hand targets land where intended.
+- `tools/eqshots.cjs` captures daylight screenshots of each sequence.
+
 ## Update 30: loadout screen reorganised
 
 The loadout screen is laid out like a modern console shooter's loadout editor. Only the layout changed: every colour, font, border, texture and effect is the Sjøkart style from Update 29.
@@ -1829,12 +1936,34 @@ src/
 The environment this was built in could only reach GitHub and npm. Sketchfab, Poly Haven, Quaternius, Mixamo, BlenderKit and Freesound were blocked by the network policy. So:
 
 - **Weapons, buildings, vegetation, props and all textures** are original, procedurally generated in code. Nothing proprietary is used.
-- **Gunshots and weapon handling** are field recordings from the **Free Firearm Sound Library** by B. Jaszczak (**CC0**), via the GitHub mirror `buddingmonkey/freefirearmssfxlibrary`, trimmed by `tools/sfx_build.py`. The heavier sniper report, the explosions, the hit-marker tick, the kill confirm, the knife hit and the door sounds are designed offline in the browser by layering and processing those CC0 recordings and the Kenney CC0 impacts. No weapon sound is synthesized any more.
+- **Gunshots and weapon handling** are field recordings from the **Free Firearm Sound Library** by B. Jaszczak (**CC0**), via the GitHub mirror `buddingmonkey/freefirearmssfxlibrary`, trimmed by `tools/sfx_build.py`. The heavier sniper report, the hit-marker tick, the kill confirm, the knife hit and the door sounds are designed offline in the browser by layering and processing those CC0 recordings and the Kenney CC0 impacts. No weapon sound is synthesized any more.
 - **Revolver sounds** come from the Smith & Wesson 642 recordings in the same CC0 library: shots, cylinder open/close/flip, ejecting and loading shells, spinning, hammer and dry fire.
 - **Voice callouts** (bot chatter, your own callouts, HQ, the helicopter pilot and the fire-support operator) were generated with **ElevenLabs** text-to-speech (`tools/voice_build.py`, premade voices). They were made on a free ElevenLabs plan, which requires attribution and allows only non-commercial use. To use the voices commercially, regenerate them on a paid plan with the same script.
 - **Music:** the menu theme, the tension underscore and the victory sting were generated for this game with **Stable Audio 2.5** through the Stability AI API (original text prompts, no reference material; see `tools/music_build.py`). Use them under Stability AI's terms for API outputs. The defeat sting, the night-vision power-up / power-down, the glass crack / shatter sounds, the three door-breach impacts and the ten death screams were made with **ElevenLabs sound generation**, under the same free-plan terms as the voices (attribution, non-commercial).
 - **Hitmarker and elimination sounds** (`public/assets/sounds/ui/hitmarker.ogg`, `killsound.ogg`) were supplied by the project owner.
-- **Interface stings, ambience loops and the helicopter rotor** (flag captured/lost, killstreak ready, radio, UAV ping, heartbeat, mortar whistle, wind, waves, rain) are synthesized in code.
+- **Interface stings, ambience loops and the helicopter rotor** (flag captured/lost, killstreak ready, radio, UAV ping, mortar whistle, wind, waves, rain) are synthesized in code.
+- **Equipment sounds** (Update 31: grenades, explosions, smoke, flash / stun ring, stim, C4, sticky, claymore, trophy, snapshot, decoy, throwing knife) are real recordings, cut and layered by `tools/eq_sfx_build.py`. Sources:
+  - **CC BY 4.0, attribution required:**
+    - **"Grenade pin pull"** by **CGEffex** (freesound.org #93837), the pin pull. Taken from the `ryno4ever16/cp2020-augmented` mirror.
+    - **Oculus Audio Pack 1** by **Meta / Oculus** (Meta-open-sound, `facebookincubator/Meta-open-sound`). Used for:
+      - lever pulls (canister twist), small switches (detonator cover and clacker, stim cap)
+      - spoon drop (spoon ping), can / metal / plastic drops and metal hits (bounces, canister roll, injector toss)
+      - hydraulic hiss (stim, trophy servo)
+      - swooshes and whooshes (throws), knife scrape (knife draw), paper tear
+      - gear movement (placement), key drop (pin ring), male breathing (panic breath), male effort (throw effort)
+    - Changes for both: trimmed, filtered, layered, pitched and normalised.
+  - **CC0:**
+    - Real explosion recordings by **modusmogulus**, **derplayer** and **Kinoton** (Freesound #737321, #784163, #587193, #587194, #734094, #516914), via `webdevcody/survive-the-night-fps`.
+    - Military recordings by **qubodup**, US Government footage, public domain / CC0, Freesound pack 4366 via `frostburn/amortization2`: blast, metal clicks, metal crash, radio beep and clicks.
+    - **"Sparkler fuse"** by **theneedle.tv** (#316682) and **"road flare ignite burns"** by **frankelmedico** (#348767), via Minetest Game's TNT mod (`luanti-org/minetest_game`).
+    - **unfa** "explosion huge" (#352143), via `Fris0uman/CDDA-Soundpacks`.
+    - Flashbang, smoke steam, gas, shockwave, big explosion and melee whooshes from the CC0 set listed in `ryno4ever16/cp2020-augmented` (whoosh 2 = "Clean fast Swoosh" by Danjocross, #507466).
+    - **"Heart Beating"** by **michorvath** (#273150), via `briossant/ombres`.
+    - **"tinnitus"** by **tnturner** (#377205), via `SpeedyVelcro/advanced-invasion`.
+    - **"Fall debris"** by **xkeril** (#703247 / #703248), via `AnthonE/Gates`.
+    - **rubberduck**'s "75 CC0 breaking / falling / hit sfx", "40 CC0 water / splash / slime SFX" and "100 CC0 SFX #2", plus **OwlishMedia**'s "202 More Sound Effects" (velcro, nasal spray), all from OpenGameArt via `1993velezpadilla-source/config-old-3`.
+    - **Nox_Sound** "Footsteps – Essentials" (landing thuds on snow, grass, mud, gravel), via `helzpont/home4`.
+    - **MATRIXXX_** beep (#657948) and **qubodup** mine / water-mine explosions, via `OpenHV/OpenHV`.
 - **fps_arms.glb**: "fps arms" by DJMaesen (https://sketchfab.com/bumstrum), licensed **CC BY 4.0**. Changes: its material was rebuilt for three.js, and its textures were re-encoded from PNG to JPEG (the unused specular-glossiness map was replaced by a stub) to cut the download (`tools/glb_compress.py`).
 - **Footstep and impact recordings**: Kenney "Impact Sounds" (CC0), via the GitHub mirror `Boyquotes/kenney-impact-sounds-for-godot`.
 - **waternormals.jpg** comes from the three.js examples (MIT-licensed repository).

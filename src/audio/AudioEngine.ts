@@ -271,83 +271,11 @@ async function mech(kind: string): Promise<AudioBuffer> {
         burst(ctx, out, t, { dur: 2.3, attack: 0.3, decay: 1.8, gain: 0.05, type: 'bandpass', freq: 500, q: 0.7, color: 'pink' });
         break;
       }
-      // ---- Update 20 equipment ----
-      case 'beep':
-        tone(ctx, out, t, 2750, 2750, 0.07, 0.32, 'sine', 0.06);
-        tone(ctx, out, t, 5500, 5500, 0.05, 0.06, 'sine', 0.04);
-        break;
-      case 'beepLow':
-        tone(ctx, out, t, 1450, 1450, 0.09, 0.3, 'square', 0.08);
-        break;
-      case 'armChirp':
-        tone(ctx, out, t, 1800, 3400, 0.12, 0.28, 'sine', 0.11);
-        tone(ctx, out, t + 0.13, 3400, 3400, 0.06, 0.22, 'sine', 0.05);
-        break;
-      case 'clack':
-        // detonator: a stiff plastic switch
-        burst(ctx, out, t, { dur: 0.012, attack: 0.0003, decay: 0.008, gain: 0.9, type: 'bandpass', freq: 2400, q: 0.9 });
-        tone(ctx, out, t, 900, 500, 0.03, 0.4, 'triangle', 0.02);
-        burst(ctx, out, t + 0.035, { dur: 0.01, decay: 0.006, gain: 0.5, type: 'bandpass', freq: 3200, q: 1.2 });
-        break;
-      case 'stick':
-        // wet, heavy slap of the adhesive
-        burst(ctx, out, t, { dur: 0.08, attack: 0.001, decay: 0.05, gain: 0.9, type: 'lowpass', freq: 900, color: 'brown' });
-        tone(ctx, out, t, 140, 70, 0.08, 0.6, 'sine', 0.06);
-        burst(ctx, out, t + 0.01, { dur: 0.12, decay: 0.09, gain: 0.25, type: 'bandpass', freq: 2200, q: 2 });
-        break;
-      case 'legs':
-        metal(ctx, out, t, 2100, 0.14, 0.05);
-        burst(ctx, out, t, { dur: 0.015, decay: 0.01, gain: 0.5, type: 'highpass', freq: 3000 });
-        break;
-      case 'claymoreClick':
-        metal(ctx, out, t, 3100, 0.2, 0.04);
-        tone(ctx, out, t + 0.06, 2200, 2200, 0.08, 0.25, 'square', 0.07);
-        break;
-      case 'zap':
-        // trophy intercept: a sharp electrical crack, a pop and a short sizzle
-        burst(ctx, out, t, { dur: 0.03, attack: 0.0003, decay: 0.02, gain: 1.0, type: 'highpass', freq: 2500 });
-        for (let i = 0; i < 6; i++) tone(ctx, out, t + i * 0.012, 1200 + Math.random() * 2400, 300, 0.03, 0.18, 'sawtooth', 0.025);
-        burst(ctx, out, t + 0.05, { dur: 0.08, attack: 0.001, decay: 0.06, gain: 0.8, type: 'lowpass', freq: 1200, color: 'brown' });
-        tone(ctx, out, t + 0.05, 180, 60, 0.12, 0.6, 'sine', 0.1);
-        burst(ctx, out, t + 0.1, { dur: 0.6, attack: 0.01, decay: 0.45, gain: 0.18, type: 'highpass', freq: 4000 });
-        break;
-      case 'servo':
-        tone(ctx, out, t, 420, 760, 0.45, 0.12, 'sawtooth', 0.42);
-        tone(ctx, out, t, 840, 1520, 0.45, 0.05, 'square', 0.42);
-        burst(ctx, out, t, { dur: 0.45, attack: 0.05, decay: 0.38, gain: 0.08, type: 'bandpass', freq: 1800, q: 3 });
-        tone(ctx, out, t + 0.5, 1900, 1900, 0.08, 0.2, 'sine', 0.07);
-        tone(ctx, out, t + 0.6, 2500, 2500, 0.08, 0.2, 'sine', 0.07);
-        break;
-      case 'trophyDeploy':
-        // heavy set-down: thud, legs locking, then the spin-up
-        tone(ctx, out, t, 110, 55, 0.18, 0.7, 'sine', 0.15);
-        burst(ctx, out, t, { dur: 0.1, attack: 0.001, decay: 0.08, gain: 0.7, type: 'lowpass', freq: 700, color: 'brown' });
-        metal(ctx, out, t + 0.12, 1700, 0.15, 0.06);
-        metal(ctx, out, t + 0.17, 1850, 0.15, 0.06);
-        metal(ctx, out, t + 0.21, 1600, 0.15, 0.06);
-        tone(ctx, out, t + 0.3, 300, 1400, 0.55, 0.1, 'sawtooth', 0.5);
-        break;
-      case 'snapPulse':
-        // snapshot: a deep whump and a bright sweep outward
-        tone(ctx, out, t, 90, 40, 0.5, 0.8, 'sine', 0.45);
-        burst(ctx, out, t, { dur: 0.15, attack: 0.002, decay: 0.12, gain: 0.6, type: 'lowpass', freq: 600, color: 'brown' });
-        tone(ctx, out, t + 0.02, 600, 4200, 0.9, 0.14, 'sine', 0.85);
-        tone(ctx, out, t + 0.02, 603, 4230, 0.9, 0.1, 'triangle', 0.85);
-        burst(ctx, out, t + 0.05, { dur: 1.1, attack: 0.1, decay: 0.9, gain: 0.12, type: 'bandpass', freq: 3000, q: 4, freqEnd: 7000 });
-        break;
       case 'bipod':
         metal(ctx, out, t, 1500, 0.2, 0.08);
         burst(ctx, out, t, { dur: 0.04, decay: 0.03, gain: 0.5, type: 'bandpass', freq: 1800, q: 1 });
         metal(ctx, out, t + 0.09, 1250, 0.25, 0.1);
         tone(ctx, out, t + 0.09, 160, 90, 0.08, 0.4, 'sine', 0.07);
-        break;
-      case 'debris':
-        // wood / metal bits landing
-        for (let i = 0; i < 9; i++) burst(ctx, out, t + Math.random() * 0.8, { dur: 0.04, decay: 0.03, gain: 0.2 + Math.random() * 0.3, type: 'bandpass', freq: 600 + Math.random() * 2400, q: 1.5 });
-        break;
-      case 'fireIgnite':
-        burst(ctx, out, t, { dur: 1.2, attack: 0.02, decay: 1.0, gain: 0.7, type: 'lowpass', freq: 900, freqEnd: 400, color: 'brown' });
-        burst(ctx, out, t, { dur: 0.6, attack: 0.01, decay: 0.5, gain: 0.3, type: 'bandpass', freq: 2500, q: 0.6 });
         break;
       case 'carFire':
         // crackling fire bed (looped while a vehicle burns)
@@ -510,28 +438,10 @@ async function mech(kind: string): Promise<AudioBuffer> {
         tone(ctx, out, t, 1400, 1380, 0.4, 0.14, 'sine', 0.4);
         tone(ctx, out, t, 2800, 2780, 0.2, 0.05, 'sine', 0.2);
         break;
-      case 'heartbeat':
-        tone(ctx, out, t, 62, 40, 0.11, 0.9, 'sine', 0.1);
-        tone(ctx, out, t + 0.17, 55, 36, 0.12, 0.65, 'sine', 0.12);
-        break;
       case 'whistle':
         // incoming mortar round: falling whistle
         tone(ctx, out, t, 1500, 520, 0.55, 0.12, 'sine', 0.55);
         burst(ctx, out, t, { dur: 0.55, attack: 0.2, decay: 0.35, gain: 0.08, type: 'bandpass', freq: 1200, freqEnd: 500, q: 4 });
-        break;
-      case 'swish':
-        burst(ctx, out, t, { dur: 0.18, attack: 0.04, decay: 0.12, gain: 0.45, type: 'bandpass', freq: 900, freqEnd: 2600, q: 1.2, color: 'pink' });
-        break;
-      case 'smokeHiss':
-        burst(ctx, out, t, { dur: 6.5, attack: 0.15, decay: 6.0, gain: 0.32, type: 'bandpass', freq: 2600, freqEnd: 1400, q: 0.5 });
-        burst(ctx, out, t, { dur: 6.5, attack: 0.4, decay: 6.0, gain: 0.18, type: 'lowpass', freq: 700, color: 'pink' });
-        break;
-      case 'stimHiss':
-        burst(ctx, out, t, { dur: 0.5, attack: 0.02, decay: 0.45, gain: 0.3, type: 'bandpass', freq: 3500, freqEnd: 2200, q: 0.8 });
-        break;
-      case 'pin':
-        metal(ctx, out, t, 3400, 0.06, 0.07);
-        metal(ctx, out, t + 0.09, 2600, 0.05, 0.12);
         break;
     }
   });
@@ -721,8 +631,11 @@ export class AudioEngine {
   private birdT = 3;
   private muffle!: BiquadFilterNode;
   private ring!: GainNode;
+  private ringSrc: AudioBufferSourceNode | null = null;
+  private duck!: GainNode;
   /** 0..1 ear ringing after a close explosion */
   tinnitus = 0;
+  private lastTin = 0;
   /** 0..1 low-health muffle */
   hurt = 0;
   /** subtitle text per voice key and variant */
@@ -773,15 +686,18 @@ export class AudioEngine {
     this.muffle.type = 'lowpass';
     this.muffle.frequency.value = 20000;
     this.muffle.Q.value = 0.5;
-    this.master.connect(this.muffle).connect(comp);
-    // tinnitus ring (bypasses the muffle on purpose)
+    // flash / stun / close blasts: everything else ducks under the ear ring, then fades back
+    try { this.duck?.disconnect(); } catch { /* ignore */ }
+    this.duck = this.ctx.createGain();
+    this.master.connect(this.duck).connect(this.muffle).connect(comp);
+    // tinnitus ring (bypasses the duck and the muffle on purpose): the recorded tone, looped,
+    // started once the sound bank has it
     try { this.ring?.disconnect(); } catch { /* ignore */ }
-    const osc = this.ctx.createOscillator();
-    osc.frequency.value = 3950;
+    try { this.ringSrc?.stop(); } catch { /* ignore */ }
+    this.ringSrc = null;
     this.ring = this.ctx.createGain();
     this.ring.gain.value = 0;
-    osc.connect(this.ring).connect(comp);
-    osc.start();
+    this.ring.connect(comp);
     this.probe = this.ctx.createAnalyser();
     this.probe.fftSize = 256;
     this.master.connect(this.probe);
@@ -841,7 +757,7 @@ export class AudioEngine {
     // (weapon audio is recorded only: see the firearm library load below)
     for (const s of ['grass', 'dirt', 'gravel', 'concrete', 'wood', 'metal', 'water']) for (let v = 0; v < 4; v++) jobs.push([`step_${s}`, () => footstep(s, v)]);
     for (const s of ['concrete', 'metal', 'wood', 'glass', 'flesh', 'water', 'dirt']) for (let v = 0; v < 2; v++) jobs.push([`imp_${s}`, () => impact(s)]);
-    for (const k of ['uiHover', 'uiConfirm', 'uiBack', 'uiReady', 'uiHorn', 'click', 'cloth', 'adsIn', 'adsOut', 'lowAmmo', 'breathIn', 'breathOut', 'whiz', 'jump', 'land', 'mantle', 'tac', 'medal', 'flagWon', 'flagLost', 'capTick', 'streak', 'radio', 'uavPing', 'heartbeat', 'whistle', 'swish', 'pin', 'smokeHiss', 'stimHiss', 'beep', 'beepLow', 'armChirp', 'clack', 'stick', 'legs', 'claymoreClick', 'zap', 'servo', 'trophyDeploy', 'snapPulse', 'bipod', 'debris', 'fireIgnite', 'carFire'])
+    for (const k of ['uiHover', 'uiConfirm', 'uiBack', 'uiReady', 'uiHorn', 'click', 'cloth', 'adsIn', 'adsOut', 'lowAmmo', 'breathIn', 'breathOut', 'whiz', 'jump', 'land', 'mantle', 'tac', 'medal', 'flagWon', 'flagLost', 'capTick', 'streak', 'radio', 'uavPing', 'whistle', 'bipod', 'carFire'])
       jobs.push([k, () => mech(k)]);
     for (const k of ['wind', 'waves', 'rain', 'slide', 'heli', 'snowwind'] as const) jobs.push([`loop_${k}`, () => loopBuffer(k)]);
     for (let i = 0; i < 3; i++) jobs.push(['gull', () => bird('gull')]);
@@ -961,6 +877,26 @@ export class AudioEngine {
     for (const [k, v] of Object.entries(rec)) if (v.length) this.bank[k] = v;
     await this.designSounds();
     for (const [k, v] of Object.entries(provided)) this.bank[k] = v;
+    // equipment sound bank (Update 31): every grenade / explosive / gadget / stim sound cut from
+    // real recordings by tools/eq_sfx_build.py — replaces the old synthesised and designed ones
+    try {
+      const man = await (await fetch(import.meta.env.BASE_URL + 'assets/sounds/equipment/manifest.json')).json() as Record<string, { file: string }[]>;
+      await Promise.all(Object.entries(man).map(async ([key, list]) => {
+        const bufs: AudioBuffer[] = [];
+        for (const { file } of list) {
+          try {
+            const r = await fetch(`${import.meta.env.BASE_URL}assets/sounds/equipment/${file}`);
+            if (r.ok) bufs.push(await this.ctx.decodeAudioData(await r.arrayBuffer()));
+          } catch {
+            /* skip this take */
+          }
+        }
+        if (bufs.length) this.bank[key] = bufs;
+      }));
+      if (this.bank.bounce_hard) this.bank.nadeBounce = this.bank.bounce_hard;
+    } catch {
+      /* no equipment bank */
+    }
     this.ready = true;
   }
 
@@ -1316,6 +1252,36 @@ export class AudioEngine {
     this.echo.out.gain.setTargetAtTime(0.75 * tun + 0.22 * small, t, 0.25);
   }
 
+  /**
+   * An explosion heard from where you are: a sharp crack on top when it is close, the full blast
+   * body at mid range, a low rumble and roll far away; underwater it is a deep thump and a splash.
+   * In the tunnel the concrete throws it back (long reverb, slapback echoes); between inside and
+   * outside — or through walls — it comes through muffled.
+   */
+  explosionAt(p: THREE.Vector3, o: { size?: number; water?: boolean; srcIndoor?: boolean; srcTunnel?: boolean; occluded?: boolean; flavour?: 'frag' | 'flash' | 'stun' } = {}) {
+    if (!this.ready) return;
+    const size = o.size ?? 1;
+    const d = p.distanceTo(this.listenerPos);
+    const tunnel = this.room.tunnel > 0.5 || !!o.srcTunnel;
+    const inside = this.indoor > 0.5;
+    // listener and blast on different sides of a wall, or something solid in between
+    const through = !!o.occluded || (!!o.srcIndoor !== inside && !tunnel);
+    const lp = through ? 650 : undefined;
+    const g0 = (through ? 0.62 : 1) * Math.min(1.35, size);
+    const rev = tunnel ? 1.6 : inside ? 1.0 : 0.65;
+    const body = o.flavour === 'flash' ? 'flashBang' : o.flavour === 'stun' ? 'stunBang' : o.water ? 'explosionWater' : 'explosion';
+    // the full-range blast fades out over distance and hands over to the rumble
+    const near = d < 160 ? Math.max(0.12, 1 - Math.max(0, d - 50) / 110) : 0;
+    if (near > 0) this.play(body, { pos: p, gain: g0 * near, ref: 14 * size, reverb: rev, delay: true, prio: 3, lowpass: lp, vary: 0.05 });
+    if (d < 26 && !through && !o.water) this.play('explosionCrack', { pos: p, gain: 0.9 * (1 - d / 26) * size, ref: 5, reverb: 0.2, prio: 3, vary: 0.05 });
+    if (d > 40) this.play('explosionFar', { pos: p, gain: Math.min(1, (d - 40) / 60) * 1.1 * Math.min(1.3, size) * (through ? 0.8 : 1), ref: 45, reverb: rev * 0.8, delay: true, prio: 2, lowpass: through ? 500 : undefined });
+    // tunnel: the blast comes back off the far walls a beat later, darker each time
+    if (tunnel) {
+      for (let i = 1; i <= 3; i++) this.play('explosionFar', { pos: p, gain: 0.55 / i * size, ref: 20, reverb: 1.4, delay: true, prio: 1, lowpass: 1600 / i, at: 0.16 * i + 0.05 * Math.random() });
+    }
+    if (o.flavour === undefined && d < 70 && !o.water) this.play('debris', { pos: p, gain: 0.55 * (through ? 0.5 : 1), ref: 6, reverb: rev * 0.5, delay: true, at: 0.18, prio: 1, lowpass: lp });
+  }
+
   /** Is a sound bank entry loaded? */
   has(name: string) {
     return !!this.bank[name]?.length;
@@ -1557,7 +1523,19 @@ export class AudioEngine {
       const k = Math.max(this.tinnitus * 1.1, this.hurt * 0.75);
       const f = Number.isFinite(k) ? 20000 * Math.pow(0.028, Math.min(1, k)) : 20000;
       this.muffle.frequency.setTargetAtTime(Math.max(380, f), t, 0.08);
-      this.ring.gain.setTargetAtTime(Number.isFinite(this.tinnitus) ? Math.pow(this.tinnitus, 1.5) * 0.035 : 0, t, 0.1);
+      const tin = Number.isFinite(this.tinnitus) ? Math.min(1, Math.max(0, this.tinnitus)) : 0;
+      if (!this.ringSrc && this.bank.tinnitus?.length && tin > 0.01) {
+        const src = this.ctx.createBufferSource();
+        src.buffer = this.bank.tinnitus[0];
+        src.loop = true;
+        src.connect(this.ring);
+        src.start();
+        this.ringSrc = src;
+      }
+      // the ring swells in fast and fades with the effect; the rest of the mix drops away under it
+      this.ring.gain.setTargetAtTime(Math.pow(tin, 1.3) * 0.32, t, tin > this.lastTin ? 0.03 : 0.25);
+      this.duck.gain.setTargetAtTime(1 - 0.88 * Math.pow(tin, 0.8), t, tin > this.lastTin ? 0.02 : 0.35);
+      this.lastTin = tin;
     }
     const windG = 0.25 + Math.min(0.4, Math.max(0, elevation - 10) * 0.01) + (weather === 'rain' ? 0.15 : 0);
     this.loop('wind', windG * (1 - this.indoor * 0.6));

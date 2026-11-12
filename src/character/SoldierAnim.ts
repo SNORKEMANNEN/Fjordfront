@@ -16,7 +16,16 @@ import { REST } from './SoldierRig';
  * swings a downward limb backwards; about +Z tilts +Y towards the soldier's right.
  */
 
-export type ActionKind = 'none' | 'reload' | 'throw' | 'melee' | 'knife' | 'switch' | 'bolt' | 'plant';
+export type ActionKind = 'none' | 'reload' | 'throw' | 'melee' | 'knife' | 'switch' | 'bolt' | 'plant' | 'throwL' | 'stim' | 'detonate' | 'place';
+/**
+ * What is in the hand (Update 31): shown on bots and online players so an incoming grenade reads
+ * before it leaves the hand. +32 = a cooking frag (fuse burning).
+ */
+export const HELD_ITEMS = ['', 'frag', 'sticky', 'flash', 'stun', 'smoke', 'snapshot', 'decoy', 'c4', 'tknife', 'claymore', 'stim', 'detonator', 'trophy'] as const;
+export type HeldItem = (typeof HELD_ITEMS)[number];
+export function heldCode(item: string, cooking = false) {
+  return Math.max(0, HELD_ITEMS.indexOf(item as HeldItem)) | (cooking ? 32 : 0);
+}
 export type ReloadStyle = 'mag' | 'shell' | 'bolt' | 'break' | 'box' | 'rev' | 'pistol';
 
 export interface AnimState {
@@ -47,12 +56,14 @@ export interface AnimState {
   pistol: boolean;
   /** fidgets allowed (idle, not engaged) */
   calm: boolean;
+  /** held equipment code (HELD_ITEMS index, +32 cooking) */
+  item: number;
 }
 
 export function newAnimState(): AnimState {
   return {
     vel: new THREE.Vector3(), yaw: 0, aimYaw: 0, aimPitch: 0, stance: 0, sprint: false, tactical: false, slide: false, dive: false,
-    ladder: false, mantle: -1, air: false, lean: 0, ready: false, action: 'none', actionT: 0, reloadStyle: 'mag', pistol: false, calm: false,
+    ladder: false, mantle: -1, air: false, lean: 0, ready: false, action: 'none', actionT: 0, reloadStyle: 'mag', pistol: false, calm: false, item: 0,
   };
 }
 
@@ -84,10 +95,25 @@ const wrap = (a: number) => Math.atan2(Math.sin(a), Math.cos(a));
 const bell = (t: number, a: number, b: number) => (t <= a || t >= b ? 0 : Math.sin(((t - a) / (b - a)) * Math.PI));
 /** piecewise: progress of the segment [a, b], smoothed */
 const seg = (t: number, a: number, b: number) => sm((t - a) / (b - a));
+const vTmp = new THREE.Vector3();
+/** smoothed keyframe track of model-space points */
+function keyV(t: number, keys: [number, [number, number, number]][], out: THREE.Vector3) {
+  if (t <= keys[0][0]) return out.set(...keys[0][1]);
+  for (let i = 1; i < keys.length; i++) {
+    if (t <= keys[i][0]) {
+      const [t0, a] = keys[i - 1], [t1, b] = keys[i];
+      const u = sm((t - t0) / Math.max(1e-6, t1 - t0));
+      return out.set(a[0] + (b[0] - a[0]) * u, a[1] + (b[1] - a[1]) * u, a[2] + (b[2] - a[2]) * u);
+    }
+  }
+  return out.set(...keys[keys.length - 1][1]);
+}
 
 export class SoldierAnimator {
   /** gait phase 0..1 (left foot strike at 0) */
   phase = 0;
+  /** running clock (tremble / flinch oscillations) */
+  time = 0;
   private sw = { upright: 1, prone: 0, slide: 0, dive: 0, ladder: 0 };
   private crouch = 0;
   private lean = 0;
@@ -128,6 +154,7 @@ export class SoldierAnimator {
    * locomotion values the upper body needs.
    */
   body(s: AnimState, dt: number) {
+    this.time += dt;
     dt = Math.min(dt, 0.1);
     // ---- smoothed drivers
     const yawWorld = s.yaw + Math.PI;
@@ -477,18 +504,88 @@ export class SoldierAnimator {
     }
     // ---- actions
     out.magOut = false;
+    out.flinch = 0;
+    // C4 out: the clacker stays up in the left fist (counterplay: you can see it coming)
+    if (act === 'none' && (s.item & 31) === 12) {
+      out.leftFree = Math.max(out.leftFree, 1);
+      out.leftTarget.set(0.14, 1.18, 0.32);
+    }
     if (act === 'reload') this.reload(s, t, out);
     else if (act === 'throw') {
-      // right hand leaves the grip: wind up behind the head, throw, come back
-      const free = sm(t / 0.12) * (1 - sm((t - 0.8) / 0.18));
+      // lethal, right hand (same beats as the first-person throw): the gun drops away, hand to the
+      // belt, up to the chest where the left hand rips the pin out sideways, arm cocked high behind
+      // the head — held there while cooking — then the throw and the follow-through
+      const free = sm(t / 0.1) * (1 - sm((t - 0.8) / 0.18));
       out.rightFree = free;
-      const wind = seg(t, 0.05, 0.38), thr = seg(t, 0.4, 0.55);
-      out.rightTarget.set(-0.2 + 0.1 * thr, 1.45 + 0.35 * wind - 0.2 * thr, 0.05 - 0.25 * wind + 0.75 * thr);
-      out.gunPos.y -= 0.1 * free;
-      out.gunPos.x += 0.06 * free;
-      out.gunRot.x -= 0.6 * free;
-      out.gunRot.z += 0.3 * free;
-      out.spineTwist = (-0.35 * wind + 0.6 * thr) * free;
+      const P: [number, [number, number, number]][] = [[0, [-0.2, 1.0, 0.15]], [0.12, [-0.2, 0.95, 0.08]], [0.26, [-0.06, 1.25, 0.3]], [0.4, [-0.06, 1.25, 0.3]],
+        [0.52, [-0.24, 1.72, -0.14]], [0.6, [-0.12, 1.55, 0.62]], [0.7, [-0.02, 1.15, 0.55]], [1, [-0.2, 1.0, 0.15]]];
+      keyV(t, P, out.rightTarget);
+      // cooking: the cocked arm trembles
+      if (s.item & 32 && t > 0.48 && t < 0.54) {
+        out.rightTarget.x += Math.sin(this.time * 47) * 0.01;
+        out.rightTarget.y += Math.sin(this.time * 39) * 0.01;
+      }
+      // the support hand comes over for the pin, then out front for balance
+      const lf = sm((t - 0.2) / 0.06) * (1 - sm((t - 0.66) / 0.14));
+      out.leftFree = Math.max(out.leftFree, lf);
+      const pull = seg(t, 0.3, 0.4);
+      out.leftTarget.set(-0.02 + 0.22 * pull, 1.27 + 0.02 * pull, 0.32 + 0.05 * pull);
+      if (t > 0.44) out.leftTarget.lerp(vTmp.set(0.12, 1.45, 0.55), sm((t - 0.44) / 0.08));
+      out.gunPos.y -= 0.14 * free;
+      out.gunPos.x += 0.08 * free;
+      out.gunRot.x -= 0.8 * free;
+      out.gunRot.z += 0.35 * free;
+      const wind = seg(t, 0.4, 0.52), thr = seg(t, 0.52, 0.62);
+      out.spineTwist = (-0.4 * wind + 0.75 * thr) * free;
+    } else if (act === 'throwL') {
+      // tactical, left hand: the gun stays up in the right hand. Vest → chest (pin out with a
+      // twist) → cocked high (or low behind the hip for a bowled snapshot / decoy) → throw
+      const code = s.item & 31;
+      const bowl = code === 6 || code === 7;
+      const free = sm(t / 0.1) * (1 - sm((t - 0.8) / 0.18));
+      out.leftFree = Math.max(out.leftFree, free);
+      const P: [number, [number, number, number]][] = bowl
+        ? [[0, [0.2, 1.0, 0.15]], [0.13, [0.2, 0.95, 0.08]], [0.28, [0.08, 1.2, 0.32]], [0.42, [0.08, 1.2, 0.32]], [0.53, [0.3, 0.72, -0.2]], [0.63, [0.12, 0.62, 0.62]], [0.75, [0.15, 0.85, 0.45]], [1, [0.2, 1.0, 0.15]]]
+        : [[0, [0.2, 1.0, 0.15]], [0.13, [0.2, 0.95, 0.08]], [0.27, [0.08, 1.28, 0.32]], [0.42, [0.08, 1.28, 0.32]], [0.5, [0.24, 1.7, -0.08]], [0.6, [0.1, 1.5, 0.62]], [0.72, [0.12, 1.2, 0.5]], [1, [0.2, 1.0, 0.15]]];
+      keyV(t, P, out.leftTarget);
+      if (t > 0.32 && t < 0.42) out.leftTarget.x += Math.sin(seg(t, 0.32, 0.42) * Math.PI) * 0.05;
+      out.gunPos.x -= 0.03 * free;
+      out.gunRot.z -= 0.15 * free;
+      const thr = seg(t, 0.52, 0.62);
+      out.spineTwist = (0.25 * seg(t, 0.4, 0.5) - 0.45 * thr) * free;
+      if (bowl) out.gunPos.y -= 0.08 * free;
+    } else if (act === 'stim') {
+      // stim: left hand up to the chest, thumb flicks the cap, a jab down into the thigh and a
+      // flinch through the whole body, then the empty injector is flicked away to the side
+      const free = sm(t / 0.12) * (1 - sm((t - 0.82) / 0.16));
+      out.leftFree = Math.max(out.leftFree, free);
+      keyV(t, [[0, [0.2, 1.0, 0.15]], [0.2, [0.12, 1.22, 0.28]], [0.36, [0.12, 1.24, 0.28]], [0.47, [0.16, 1.34, 0.24]], [0.54, [0.17, 0.78, 0.08]], [0.64, [0.17, 0.8, 0.08]],
+        [0.72, [0.5, 1.05, 0.2]], [1, [0.2, 1.0, 0.15]]], out.leftTarget);
+      const jolt = bell(t, 0.53, 0.75);
+      out.gunRot.x += 0.25 * jolt * Math.sin(t * 90);
+      out.gunPos.y -= 0.05 * jolt;
+      out.spineTwist = 0.18 * jolt * Math.sin(t * 70);
+      out.flinch = jolt;
+    } else if (act === 'detonate') {
+      // the clacker comes up in the left fist, high in front of the chest — readable — the thumb
+      // presses, then it drops back down
+      const free = sm(t / 0.2) * (1 - sm((t - 0.75) / 0.2));
+      out.leftFree = Math.max(out.leftFree, free);
+      const press = bell(t, 0.4, 0.52);
+      out.leftTarget.set(0.1, 1.45 - 0.04 * press, 0.4);
+    } else if (act === 'place') {
+      // claymore / charge placement: down on a knee (the owner sets the crouch), the gun swings
+      // away, both hands lower it to the ground in front and press it in
+      const b = sm(t / 0.15) * (1 - sm((t - 0.75) / 0.2));
+      out.leftFree = Math.max(out.leftFree, b);
+      out.rightFree = Math.max(out.rightFree, b);
+      const down = seg(t, 0.35, 0.58), press = bell(t, 0.55, 0.66);
+      out.leftTarget.set(0.12, 1.15 - 0.75 * down - 0.04 * press, 0.35 + 0.15 * down);
+      out.rightTarget.set(-0.12, 1.15 - 0.75 * down - 0.04 * press, 0.35 + 0.15 * down);
+      out.gunPos.y -= 0.3 * b;
+      out.gunPos.x += 0.12 * b;
+      out.gunRot.x -= 1.1 * b;
+      out.gunRot.z += 0.5 * b;
     } else if (act === 'melee') {
       // rifle butt-stroke
       const b = bell(t, 0.05, 0.75), hit = seg(t, 0.25, 0.42);
@@ -571,8 +668,10 @@ export interface UpperOut {
   rightBolt: number;
   boltBack: number;
   magOut: boolean;
+  /** 0..1 whole-body flinch (stim jab) */
+  flinch: number;
 }
 
 export function newUpperOut(): UpperOut {
-  return { gunPos: new THREE.Vector3(), gunRot: new THREE.Vector3(), leftFree: 0, rightFree: 0, leftTarget: new THREE.Vector3(), rightTarget: new THREE.Vector3(), slung: 0, spineTwist: 0, leftReload: 0, leftPhase: ['grip', 'grip', 0], rightBolt: 0, boltBack: 0, magOut: false };
+  return { gunPos: new THREE.Vector3(), gunRot: new THREE.Vector3(), leftFree: 0, rightFree: 0, leftTarget: new THREE.Vector3(), rightTarget: new THREE.Vector3(), slung: 0, spineTwist: 0, leftReload: 0, leftPhase: ['grip', 'grip', 0], rightBolt: 0, boltBack: 0, magOut: false, flinch: 0 };
 }

@@ -754,3 +754,9 @@ button[disabled] { opacity: .45; pointer-events: none; }
   .ldback { width: 34px; height: 34px; }
   .ldpreset { padding: 6px 10px; }
 }
+
+/* Update 31: a sticky grenade on you — a hard red pulse round the screen edge */
+.stuckwarn { position: fixed; inset: 0; pointer-events: none; opacity: 0; z-index: 6;
+  box-shadow: inset 0 0 0 3px rgba(214, 48, 32, .9), inset 0 0 140px 30px rgba(190, 20, 10, .55); transition: opacity .15s; }
+.stuckwarn.on { animation: stuckpulse .32s ease-in-out infinite alternate; }
+@keyframes stuckpulse { from { opacity: .35; } to { opacity: 1; } }

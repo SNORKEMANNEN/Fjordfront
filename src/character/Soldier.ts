@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { heldProp } from './HeldProps';
 import type { TextureBaker } from '../render/TextureBaker';
 import type { WeaponModel } from '../weapons/WeaponModels';
 import { buildSkeleton } from './SoldierRig';
@@ -249,6 +250,12 @@ export class Soldier {
       rotateBoneWorld(b.Spine2, flinch.axis, flinch.body * 0.16);
     }
     rotateBoneWorld(b.Head, R, -pitch * 0.3);
+    // stim jab: a shudder runs through the upper body
+    if (up.flinch > 0.01) {
+      const sh = Math.sin(this.anim.time * 62) * up.flinch;
+      rotateBoneWorld(b.Spine2, R, 0.09 * sh);
+      rotateBoneWorld(b.Head, R, -0.12 * sh);
+    }
     // cheek weld: the head cants onto the stock when aiming a long gun
     if (!s.pistol) rotateBoneWorld(b.Head, vT3.set(-Math.sin(s.aimYaw), 0, -Math.cos(s.aimYaw)), 0.16 * k.ready * (1 - k.sprint));
     if (flinch && Math.abs(flinch.head) > 1e-3) rotateBoneWorld(b.Head, flinch.axis, flinch.head * 0.08);
@@ -328,6 +335,63 @@ export class Soldier {
       b[`${side}HandIndex1`].quaternion.setFromAxisAngle(ZV, curl);
       b[`${side}HandThumb1`].quaternion.setFromAxisAngle(XV, -0.6);
     }
+    this.placeHeld(s, up);
+  }
+
+  // ---------------------------------------------------------------- held equipment
+  private held: THREE.Group | null = null;
+  private heldCode = -1;
+  private heldT = 0;
+  /**
+   * The grenade / charge / injector / clacker in a hand while an equipment action runs (read off
+   * the action and its progress, so remote players show it too): placed past the palm along the
+   * fingers. A cooking frag spits a spark.
+   */
+  private placeHeld(s: AnimState, up: UpperOut) {
+    const code = s.item & 31;
+    const a = s.action, t = s.actionT;
+    let side: 'Left' | 'Right' | null = null;
+    if (code) {
+      if (a === 'throw') side = t > 0.08 && t < 0.6 ? 'Right' : null;
+      else if (a === 'throwL') side = t > 0.1 && t < 0.6 ? 'Left' : null;
+      else if (a === 'stim') side = t > 0.08 && t < 0.72 ? 'Left' : null;
+      else if (a === 'detonate') side = 'Left';
+      else if (a === 'place') side = t > 0.12 && t < 0.62 ? 'Right' : null;
+      else if (a === 'plant') side = t > 0.1 && t < 0.6 ? 'Left' : null;
+      else if (a === 'none' && code === 12) side = 'Left';
+    }
+    if (!side || this.lod > 1) {
+      if (this.held) this.held.visible = false;
+      return;
+    }
+    if (code !== this.heldCode || !this.held) {
+      if (this.held) this.model.remove(this.held);
+      this.held = heldProp(code);
+      this.heldCode = code;
+      if (!this.held) return;
+      this.model.add(this.held);
+    }
+    const g = this.held;
+    g.visible = true;
+    const b = this.bones;
+    const hand = b[`${side}Hand`].getWorldPosition(vT1);
+    const fore = b[`${side}ForeArm`].getWorldPosition(vT2);
+    const dir = vT3.copy(hand).sub(fore).normalize();
+    const at = hand.addScaledVector(dir, 0.075);
+    // world → model space, item up along the fingers
+    this.model.worldToLocal(at);
+    g.position.copy(at);
+    const mq = this.model.getWorldQuaternion(_q3).invert();
+    g.quaternion.setFromUnitVectors(UPV, dir.applyQuaternion(mq));
+    this.heldT += 1 / 60;
+    const spark = g.getObjectByName('spark');
+    if (spark) {
+      spark.visible = !!(s.item & 32);
+      if (spark.visible) spark.scale.setScalar(0.7 + 0.6 * Math.abs(Math.sin(this.heldT * 41)));
+    }
+    const led = g.getObjectByName('led');
+    if (led) led.visible = Math.sin(this.heldT * 9) > 0.4 || a === 'detonate';
+    void up;
   }
 
   /** reload anchor points (world) */

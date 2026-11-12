@@ -263,6 +263,8 @@ class GradePass extends Pass {
         uBloom: { value: 0 },
         uTint: { value: new THREE.Color(1, 1, 1) },
         uSatBoost: { value: 1 },
+        // heat shimmer over fresh explosions: screen uv, radius (screen heights), strength
+        uHeat: { value: [new THREE.Vector4(), new THREE.Vector4(), new THREE.Vector4(), new THREE.Vector4()] },
       },
       vertexShader: `varying vec2 vUv; void main(){ vUv = uv; gl_Position = vec4(position.xy, 0.0, 1.0); }`,
       fragmentShader: /* glsl */ `
@@ -295,8 +297,17 @@ class GradePass extends Pass {
         }
         float rand(vec2 c){ return fract(sin(dot(c, vec2(12.9898, 78.233))) * 43758.5453); }
         ${SAFE_GLSL}
+        uniform vec4 uHeat[4];
         void main(){
           vec2 uv = vUv;
+          for (int i = 0; i < 4; i++) {
+            vec4 h = uHeat[i];
+            if (h.w <= 0.0) continue;
+            vec2 d = (uv - h.xy) * vec2(uRes.x / uRes.y, 1.0);
+            float k = smoothstep(h.z, h.z * 0.2, length(d)) * h.w;
+            // rising, wobbling refraction (stronger low, where the air is hottest)
+            uv += vec2(sin(uv.y * 160.0 - uTime * 16.0 + float(i) * 2.1), cos(uv.x * 130.0 - uTime * 12.0)) * 0.0026 * k;
+          }
           vec2 dc = uv - 0.5;
           float r2 = dot(dc, dc);
           float ca = uCA * (1.0 + uSuppression * 3.0 + uDamage * 2.0);
@@ -406,6 +417,7 @@ export class Pipeline {
   smaa: SMAAPass;
   private prevViewProj = new THREE.Matrix4();
   private tmpM = new THREE.Matrix4();
+  private tmpV = new THREE.Vector3();
   renderScale = 1;
   /** dynamic-resolution multiplier on top of the user's render scale (0.6..1) */
   dynScale = 1;
@@ -497,10 +509,23 @@ export class Pipeline {
     this.world.mat.uniforms.uRes.value.set(rw, rh);
   }
 
-  render(dt: number, fx: { dofFocus: number; dof: number; damage: number; flash: number; suppression: number; underwater: number; exposure?: number; rays?: number; sunDir?: THREE.Vector3; sunColor?: THREE.Color }) {
+  render(dt: number, fx: { dofFocus: number; dof: number; damage: number; flash: number; suppression: number; underwater: number; exposure?: number; rays?: number; sunDir?: THREE.Vector3; sunColor?: THREE.Color; heat?: { p: THREE.Vector3; t: number; life: number; r: number }[] }) {
     const cam = this.camera;
     cam.updateMatrixWorld();
     const g = this.grade.mat.uniforms;
+    // heat shimmer spots: projected to the screen, faded over their life and with distance
+    const hu = g.uHeat.value as THREE.Vector4[];
+    for (let i = 0; i < 4; i++) {
+      const h = fx.heat?.[i];
+      hu[i].set(0, 0, 0, 0);
+      if (!h) continue;
+      const d = h.p.distanceTo(cam.position);
+      const v = this.tmpV.copy(h.p).project(cam);
+      if (v.z > 1 || d < 0.5) continue;
+      const life = 1 - h.t / h.life;
+      const rad = Math.min(0.6, (h.r / d) / Math.tan((cam.fov * Math.PI) / 360));
+      hu[i].set(v.x * 0.5 + 0.5, v.y * 0.5 + 0.5, rad, Math.min(1, life * 1.6) * Math.min(1, 60 / d));
+    }
     g.uTime.value += dt;
     g.uDamage.value = fx.damage;
     g.uFlash.value = fx.flash;

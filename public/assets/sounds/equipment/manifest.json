@@ -1,0 +1,452 @@
+{
+ "pin": [
+  {
+   "file": "pin_0.ogg",
+   "loop": false
+  },
+  {
+   "file": "pin_1.ogg",
+   "loop": false
+  }
+ ],
+ "spoon": [
+  {
+   "file": "spoon_0.ogg",
+   "loop": false
+  },
+  {
+   "file": "spoon_1.ogg",
+   "loop": false
+  }
+ ],
+ "swish": [
+  {
+   "file": "swish_0.ogg",
+   "loop": false
+  },
+  {
+   "file": "swish_1.ogg",
+   "loop": false
+  },
+  {
+   "file": "swish_2.ogg",
+   "loop": false
+  }
+ ],
+ "swishLight": [
+  {
+   "file": "swishLight_0.ogg",
+   "loop": false
+  },
+  {
+   "file": "swishLight_1.ogg",
+   "loop": false
+  }
+ ],
+ "effort": [
+  {
+   "file": "effort_0.ogg",
+   "loop": false
+  },
+  {
+   "file": "effort_1.ogg",
+   "loop": false
+  }
+ ],
+ "fuse": [
+  {
+   "file": "fuse_0.ogg",
+   "loop": true
+  }
+ ],
+ "fuseLight": [
+  {
+   "file": "fuseLight_0.ogg",
+   "loop": false
+  }
+ ],
+ "bounce_hard": [
+  {
+   "file": "bounce_hard_0.ogg",
+   "loop": false
+  },
+  {
+   "file": "bounce_hard_1.ogg",
+   "loop": false
+  },
+  {
+   "file": "bounce_hard_2.ogg",
+   "loop": false
+  }
+ ],
+ "bounce_metal": [
+  {
+   "file": "bounce_metal_0.ogg",
+   "loop": false
+  },
+  {
+   "file": "bounce_metal_1.ogg",
+   "loop": false
+  },
+  {
+   "file": "bounce_metal_2.ogg",
+   "loop": false
+  }
+ ],
+ "bounce_wood": [
+  {
+   "file": "bounce_wood_0.ogg",
+   "loop": false
+  },
+  {
+   "file": "bounce_wood_1.ogg",
+   "loop": false
+  }
+ ],
+ "bounce_soft": [
+  {
+   "file": "bounce_soft_0.ogg",
+   "loop": false
+  },
+  {
+   "file": "bounce_soft_1.ogg",
+   "loop": false
+  }
+ ],
+ "bounce_gravel": [
+  {
+   "file": "bounce_gravel_0.ogg",
+   "loop": false
+  }
+ ],
+ "bounce_mud": [
+  {
+   "file": "bounce_mud_0.ogg",
+   "loop": false
+  },
+  {
+   "file": "bounce_mud_1.ogg",
+   "loop": false
+  }
+ ],
+ "bounce_can": [
+  {
+   "file": "bounce_can_0.ogg",
+   "loop": false
+  },
+  {
+   "file": "bounce_can_1.ogg",
+   "loop": false
+  }
+ ],
+ "roll": [
+  {
+   "file": "roll_0.ogg",
+   "loop": false
+  }
+ ],
+ "splash": [
+  {
+   "file": "splash_0.ogg",
+   "loop": false
+  },
+  {
+   "file": "splash_1.ogg",
+   "loop": false
+  },
+  {
+   "file": "splash_2.ogg",
+   "loop": false
+  }
+ ],
+ "explosion": [
+  {
+   "file": "explosion_0.ogg",
+   "loop": false
+  },
+  {
+   "file": "explosion_1.ogg",
+   "loop": false
+  },
+  {
+   "file": "explosion_2.ogg",
+   "loop": false
+  },
+  {
+   "file": "explosion_3.ogg",
+   "loop": false
+  },
+  {
+   "file": "explosion_4.ogg",
+   "loop": false
+  }
+ ],
+ "explosionCrack": [
+  {
+   "file": "explosionCrack_0.ogg",
+   "loop": false
+  },
+  {
+   "file": "explosionCrack_1.ogg",
+   "loop": false
+  }
+ ],
+ "explosionFar": [
+  {
+   "file": "explosionFar_0.ogg",
+   "loop": false
+  },
+  {
+   "file": "explosionFar_1.ogg",
+   "loop": false
+  },
+  {
+   "file": "explosionFar_2.ogg",
+   "loop": false
+  }
+ ],
+ "explosionWater": [
+  {
+   "file": "explosionWater_0.ogg",
+   "loop": false
+  }
+ ],
+ "debris": [
+  {
+   "file": "debris_0.ogg",
+   "loop": false
+  },
+  {
+   "file": "debris_1.ogg",
+   "loop": false
+  },
+  {
+   "file": "debris_2.ogg",
+   "loop": false
+  }
+ ],
+ "flashBang": [
+  {
+   "file": "flashBang_0.ogg",
+   "loop": false
+  },
+  {
+   "file": "flashBang_1.ogg",
+   "loop": false
+  }
+ ],
+ "stunBang": [
+  {
+   "file": "stunBang_0.ogg",
+   "loop": false
+  },
+  {
+   "file": "stunBang_1.ogg",
+   "loop": false
+  }
+ ],
+ "smokePop": [
+  {
+   "file": "smokePop_0.ogg",
+   "loop": false
+  }
+ ],
+ "smokeHiss": [
+  {
+   "file": "smokeHiss_0.ogg",
+   "loop": true
+  }
+ ],
+ "gasHiss": [
+  {
+   "file": "gasHiss_0.ogg",
+   "loop": true
+  }
+ ],
+ "twist": [
+  {
+   "file": "twist_0.ogg",
+   "loop": false
+  },
+  {
+   "file": "twist_1.ogg",
+   "loop": false
+  }
+ ],
+ "snapPulse": [
+  {
+   "file": "snapPulse_0.ogg",
+   "loop": false
+  }
+ ],
+ "stimCap": [
+  {
+   "file": "stimCap_0.ogg",
+   "loop": false
+  }
+ ],
+ "stimInject": [
+  {
+   "file": "stimInject_0.ogg",
+   "loop": false
+  }
+ ],
+ "stimHiss": [
+  {
+   "file": "stimHiss_0.ogg",
+   "loop": false
+  }
+ ],
+ "injectorToss": [
+  {
+   "file": "injectorToss_0.ogg",
+   "loop": false
+  }
+ ],
+ "heartbeat": [
+  {
+   "file": "heartbeat_0.ogg",
+   "loop": false
+  }
+ ],
+ "tinnitus": [
+  {
+   "file": "tinnitus_0.ogg",
+   "loop": true
+  }
+ ],
+ "panicBreath": [
+  {
+   "file": "panicBreath_0.ogg",
+   "loop": false
+  }
+ ],
+ "stick": [
+  {
+   "file": "stick_0.ogg",
+   "loop": false
+  },
+  {
+   "file": "stick_1.ogg",
+   "loop": false
+  }
+ ],
+ "peel": [
+  {
+   "file": "peel_0.ogg",
+   "loop": false
+  },
+  {
+   "file": "peel_1.ogg",
+   "loop": false
+  }
+ ],
+ "clack": [
+  {
+   "file": "clack_0.ogg",
+   "loop": false
+  }
+ ],
+ "coverFlip": [
+  {
+   "file": "coverFlip_0.ogg",
+   "loop": false
+  }
+ ],
+ "beep": [
+  {
+   "file": "beep_0.ogg",
+   "loop": false
+  },
+  {
+   "file": "beep_1.ogg",
+   "loop": false
+  }
+ ],
+ "beepLow": [
+  {
+   "file": "beepLow_0.ogg",
+   "loop": false
+  }
+ ],
+ "armChirp": [
+  {
+   "file": "armChirp_0.ogg",
+   "loop": false
+  }
+ ],
+ "claymoreClick": [
+  {
+   "file": "claymoreClick_0.ogg",
+   "loop": false
+  }
+ ],
+ "legs": [
+  {
+   "file": "legs_0.ogg",
+   "loop": false
+  }
+ ],
+ "place": [
+  {
+   "file": "place_0.ogg",
+   "loop": false
+  },
+  {
+   "file": "place_1.ogg",
+   "loop": false
+  }
+ ],
+ "zap": [
+  {
+   "file": "zap_0.ogg",
+   "loop": false
+  }
+ ],
+ "servo": [
+  {
+   "file": "servo_0.ogg",
+   "loop": false
+  }
+ ],
+ "trophyDeploy": [
+  {
+   "file": "trophyDeploy_0.ogg",
+   "loop": false
+  }
+ ],
+ "fireIgnite": [
+  {
+   "file": "fireIgnite_0.ogg",
+   "loop": false
+  }
+ ],
+ "knifeDraw": [
+  {
+   "file": "knifeDraw_0.ogg",
+   "loop": false
+  }
+ ],
+ "knifeThrow": [
+  {
+   "file": "knifeThrow_0.ogg",
+   "loop": false
+  },
+  {
+   "file": "knifeThrow_1.ogg",
+   "loop": false
+  }
+ ],
+ "knifeCatch": [
+  {
+   "file": "knifeCatch_0.ogg",
+   "loop": false
+  }
+ ],
+ "knifePickup": [
+  {
+   "file": "knifePickup_0.ogg",
+   "loop": false
+  }
+ ]
+}

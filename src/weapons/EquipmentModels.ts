@@ -248,6 +248,19 @@ export function makeSticky() {
   gel.position.y = -0.03;
   gel.name = 'gel';
   g.add(gel);
+  // release liner over the pad: hinged at one edge (-x), a pull tab sticking out at +x; peeled off
+  // before the throw
+  const liner = new THREE.Group();
+  liner.name = 'liner';
+  liner.position.set(-0.026, -0.0432, 0);
+  const film = new THREE.MeshStandardMaterial({ color: 0xd8d0b0, roughness: 0.6, side: THREE.DoubleSide });
+  const disc = new THREE.Mesh(new THREE.CylinderGeometry(0.026, 0.026, 0.0012, 18), film);
+  disc.position.x = 0.026;
+  liner.add(disc);
+  const tab = new THREE.Mesh(new THREE.BoxGeometry(0.014, 0.0012, 0.01), new THREE.MeshStandardMaterial({ color: 0xd8a020, roughness: 0.6 }));
+  tab.position.x = 0.058;
+  liner.add(tab);
+  g.add(liner);
   return finish(g);
 }
 

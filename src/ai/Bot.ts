@@ -3,7 +3,7 @@ import { NETF } from '../net/NetFlags';
 import { bakeFlat, bakeProxy } from '../render/Batch';
 import { Soldier } from '../character/Soldier';
 import { roleFor, SoldierLook } from '../character/SoldierMesh';
-import { AnimState, ActionKind, newAnimState, ReloadStyle } from '../character/SoldierAnim';
+import { AnimState, ActionKind, newAnimState, ReloadStyle, heldCode } from '../character/SoldierAnim';
 import { CharacterBody } from '../player/CharacterBody';
 import { Physics } from '../core/Physics';
 import { NavGraph, NavNode } from './NavGraph';
@@ -16,7 +16,7 @@ import { AimController, CoverMap, detectRate, Exposure, Order, SKILL } from './B
 
 /** replicated / recorded pose: see Bot.replayState */
 export const POSE_N = 20;
-const ACTIONS: ActionKind[] = ['none', 'reload', 'throw', 'melee', 'knife', 'switch', 'bolt', 'plant'];
+const ACTIONS: ActionKind[] = ['none', 'reload', 'throw', 'melee', 'knife', 'switch', 'bolt', 'plant', 'throwL', 'stim', 'detonate', 'place'];
 export function actionCode(a: ActionKind) {
   return Math.max(0, ACTIONS.indexOf(a));
 }
@@ -68,7 +68,7 @@ export interface BotWorld {
   viewDist?(): number;
   callout?: (from: Bot, enemyPos: THREE.Vector3, enemy?: Combatant) => void;
   /** lob a frag at a position (bots carry one per life) */
-  throwGrenade?(bot: Bot, at: THREE.Vector3): void;
+  throwGrenade?(bot: Bot, at: THREE.Vector3, cooked?: number): void;
   /** throw a tactical (flash / stun / smoke) */
   throwTactical?(bot: Bot, at: THREE.Vector3, kind: 'flash' | 'stun' | 'smoke'): void;
   /** smoke between two points blocks sight */
@@ -134,6 +134,13 @@ export class Bot implements Combatant {
   /** the animation inputs, rebuilt every frame from what the bot is doing */
   anim: AnimState = newAnimState();
   private throwT = -1;
+  /**
+   * the throw in progress (Update 31): the grenade only leaves the hand at the release point of the
+   * animation; a frag may be cooked first (held cocked while the fuse burns)
+   */
+  private pending: { lethal: boolean; tk: 'flash' | 'stun' | 'smoke'; at: THREE.Vector3; cook: number; cooked: number; item: string } | null = null;
+  /** sticky grenades instead of frags (set by the game) */
+  sticky = false;
   private reloadDur = 1;
   weapon: WeaponModel;
   def: WeaponDef;
@@ -1045,19 +1052,14 @@ export class Bot implements Combatant {
       this.nadeCd = 6 + this.rng.range(0, 8);
       if (indoor && this.tacticals > 0 && this.tacKind !== 'smoke' && dd > 4 && dd < 22 && this.rng.chance(0.7)) {
         this.tacticals--;
-        this.throwT = 0;
-        this.w.voice?.(this, this.tacKind);
-        this.w.throwTactical?.(this, this.lastSeen.clone(), this.tacKind);
+        this.startThrow(false, this.lastSeen.clone());
       } else if (this.frags > 0 && dd > 9 && dd < 32 && this.rng.chance(indoor ? 0.75 : 0.55)) {
         this.frags--;
-        this.throwT = 0;
-        this.w.voice?.(this, 'frag');
-        this.w.throwGrenade?.(this, this.lastSeen.clone());
+        // closer targets in a room get a cooked frag (no time to throw it back / run)
+        this.startThrow(true, this.lastSeen.clone(), !this.sticky && (indoor || dd < 16) && this.rng.chance(0.6) ? 0.6 + this.rng.range(0, 1.2) : 0);
       } else if (this.tacticals > 0 && dd > 7 && dd < 26 && this.tacKind !== 'smoke' && this.rng.chance(0.5)) {
         this.tacticals--;
-        this.throwT = 0;
-        this.w.voice?.(this, this.tacKind);
-        this.w.throwTactical?.(this, this.lastSeen.clone(), this.tacKind);
+        this.startThrow(false, this.lastSeen.clone());
       }
     }
     // smoke to cover a retreat, a dash to cover or a push across open ground
@@ -1065,9 +1067,7 @@ export class Bot implements Combatant {
       const dd = this.target.position().distanceTo(this.body.pos);
       if (dd > 16 && this.rng.chance(0.03)) {
         this.tacticals--;
-        this.throwT = 0;
-        this.w.voice?.(this, 'smoke');
-        this.w.throwTactical?.(this, this.body.pos.clone().lerp(this.target.position(), 0.35), 'smoke');
+        this.startThrow(false, this.body.pos.clone().lerp(this.target.position(), 0.35), 0, 'smoke');
       }
     }
     // status effects
@@ -1194,7 +1194,20 @@ export class Bot implements Combatant {
     this.root.rotation.y = this.yaw + Math.PI; // soldier model faces +Z
     const sp = this.moveSpeed;
     if (this.throwT >= 0) {
-      this.throwT += dt / 0.9;
+      const pd = this.pending;
+      // cocked and cooking: hold at the top of the wind-up while the fuse burns
+      if (pd && pd.cook > 0 && this.throwT >= 0.52) {
+        pd.cook -= dt;
+        pd.cooked += dt;
+        this.throwT = 0.52;
+      } else this.throwT += dt / 1.15;
+      if (pd && this.throwT >= 0.61) {
+        this.pending = null;
+        if (this.alive) {
+          if (pd.lethal) this.w.throwGrenade?.(this, pd.at, pd.cooked);
+          else this.w.throwTactical?.(this, pd.at, pd.tk);
+        }
+      }
       if (this.throwT >= 1) this.throwT = -1;
     }
     // animation LOD: full rate near/on screen, reduced for far or off-screen soldiers
@@ -1305,13 +1318,26 @@ export class Bot implements Combatant {
       a.action = 'reload';
       a.actionT = THREE.MathUtils.clamp(1 - this.reloadT / this.reloadDur, 0, 1);
     } else if (this.throwT >= 0) {
-      a.action = 'throw';
+      const lethal = this.pending ? this.pending.lethal : this.lastThrowLethal;
+      a.action = lethal ? 'throw' : 'throwL';
       a.actionT = this.throwT;
     } else {
       a.action = 'none';
       a.actionT = 0;
     }
+    a.item = this.throwT >= 0 ? heldCode(this.heldItem, !!this.pending && this.pending.cooked > 0) : 0;
     this.poseFromAnim(dt);
+  }
+
+  private lastThrowLethal = true;
+  private heldItem = 'frag';
+  /** begin the pull-cook-throw (the grenade leaves the hand at the release point) */
+  private startThrow(lethal: boolean, at: THREE.Vector3, cook = 0, tk: 'flash' | 'stun' | 'smoke' = this.tacKind) {
+    this.throwT = 0;
+    this.lastThrowLethal = lethal;
+    this.heldItem = lethal ? (this.sticky ? 'sticky' : 'frag') : tk;
+    this.pending = { lethal, tk, at, cook, cooked: 0, item: this.heldItem };
+    this.w.voice?.(this, lethal ? 'frag' : tk);
   }
 
   // ---------------------------------------------------------------- night gear
@@ -1428,7 +1454,7 @@ export class Bot implements Combatant {
     r[11] = a.stance;
     r[12] = (a.sprint ? 1 : 0) | (a.tactical ? 2 : 0) | (a.slide ? 4 : 0) | (a.dive ? 8 : 0) | (a.ladder ? 16 : 0) | (a.mantle >= 0 ? 32 : 0) | (a.air ? 64 : 0) | (this.w.night?.() ? 128 : 0);
     r[13] = a.lean; r[14] = actionCode(a.action); r[15] = a.actionT;
-    r[16] = this.vel.x; r[17] = this.vel.z; r[18] = this.vel.y; r[19] = 0;
+    r[16] = this.vel.x; r[17] = this.vel.z; r[18] = this.vel.y; r[19] = a.item;
     return r;
   }
   /** Visual-only state touched by puppet(); saved before a replay and restored after. */
@@ -1539,6 +1565,7 @@ export class Bot implements Combatant {
       a.lean = s[13];
       a.action = ACTIONS[s[14] | 0] ?? 'none';
       a.actionT = s[15];
+      a.item = s[19] | 0;
     } else {
       // older 11-value recordings: velocity from speed along the facing
       a.vel.set(-Math.sin(this.yaw) * s[6], 0, -Math.cos(this.yaw) * s[6]);

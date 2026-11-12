@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import { Vegetation } from '../world/Vegetation';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
-import { Physics } from '../core/Physics';
+import { Physics, Surface } from '../core/Physics';
 import { Input, applyKeybinds } from '../core/Input';
 import { MaterialLib } from '../render/Materials';
 import { Pipeline } from '../render/Pipeline';
@@ -36,7 +36,7 @@ import { SpawnSystem } from './SpawnSystem';
 import { BotDirector } from '../ai/BotDirector';
 import { Match } from './Match';
 import { Domination, Flag, FlagEvent } from './Domination';
-import { Explosives, lobVelocity, FRAG, MORTAR, MELEE, HELI, GrenadeKind, FUSE, SmokeCloud, Decoy, BARREL, VEHICLE } from './Explosives';
+import { Explosives, lobVelocity, FRAG, MORTAR, MELEE, HELI, GrenadeKind, FUSE, SmokeCloud, Decoy, BARREL, VEHICLE, BOUNCE, Grenade } from './Explosives';
 import { Deployables } from './Deployables';
 import { Destruction } from '../world/Destruction';
 import { ICONS } from '../ui/Icons';
@@ -69,6 +69,11 @@ import { Weather } from '../fx/Weather';
 import { patchSnow, bakeSnowCover } from '../fx/Snow';
 import { Doors, Door, Mover } from '../world/Doors';
 import { clamp, damp, RNG } from '../core/math';
+import { SmokeVolume } from '../fx/SmokeVolume';
+import { BlastFx } from '../fx/BlastFx';
+import { ArcPreview } from '../fx/ArcPreview';
+import { heldCode } from '../character/SoldierAnim';
+import { heldProp } from '../character/HeldProps';
 
 type GameState = 'loading' | 'menu' | 'playing' | 'paused' | 'ended';
 const TACTICAL_COUNT: Record<string, number> = { flash: 2, stun: 2, smoke: 1, stim: 1, snapshot: 1, decoy: 2 };
@@ -202,6 +207,16 @@ export class Game {
   streaks!: Killstreaks;
   frags = 2;
   private cookStart = -1;
+  /** Update 31 equipment: smoke volume, blast layers, the throw-arc preview */
+  smoke!: SmokeVolume;
+  blastFx!: BlastFx;
+  private arc: ArcPreview | null = null;
+  /** when the throw key went down (power grows with the hold) */
+  private throwPressT = 0;
+  /** smoke canisters hissing (fading over their life) */
+  private hissing: { c: SmokeCloud; key: string }[] = [];
+  /** stim: the view shudder after the jab */
+  private shudder = 0;
   /** the loadout in use for the current life (UI choices apply on the next spawn) */
   loadout: { primary: WeaponId; secondary: WeaponId; tactical: TacticalId; lethal: LethalId } = { primary: 'k416', secondary: 'p80', tactical: 'flash', lethal: 'frag' };
   /** tactical equipment of the current life */
@@ -614,9 +629,13 @@ export class Game {
 
     // ---- weapons & fx ----
     this.fx = new Effects(this.scene, this.mats.baker);
+    this.smoke = new SmokeVolume(this.scene, this.physics, this.mats.baker);
+    this.blastFx = new BlastFx(this.scene, this.physics, this.fx, this.mats.baker);
     this.fx.groundHeight = (x, z) => this.groundHeightAt(x, z);
     this.fx.onShellBounce = (p, kind) => {
       if (kind === 'mag' || kind === 'magSmall') this.audio.play('imp_plate_light', { pos: p, gain: kind === 'mag' ? 0.8 : 0.6, ref: 2, reverb: 0.1, rate: kind === 'mag' ? 0.9 : 1.15 });
+      else if (kind === 'spoon') this.audio.play('bounce_metal', { pos: p, gain: 0.25, ref: 1.5, reverb: 0.05, rate: 1.9, vary: 0.1 });
+      else if (kind === 'injector') this.audio.play('injectorToss', { pos: p, gain: 0.55, ref: 2, reverb: 0.1, vary: 0.08 });
       else {
         // casings: recorded impacts chosen by what they land on (and brass vs shotgun hull)
         const hit = this.physics.raycast(new THREE.Vector3(p.x, p.y + 0.2, p.z), new THREE.Vector3(0, -1, 0), 0.6);
@@ -1085,12 +1104,12 @@ export class Game {
             return k === 'capture' || k === 'defend';
           },
           pathOpts: (b) => this.director.pathOpts(b.id, b.team, this.bots.filter((o) => o.alive).map((o) => ({ id: o.id, team: o.team, goal: o.goalPos }))),
-          throwGrenade: (b, at) => {
+          throwGrenade: (b, at, cooked = 0) => {
             const from = b.eye(new THREE.Vector3());
             const v = lobVelocity(from, at.clone().add(new THREE.Vector3((Math.random() - 0.5) * 4, 0, (Math.random() - 0.5) * 4)));
-            // some soldiers carry sticky grenades instead of frags
-            const sticky = b.id % 4 === 1;
-            this.explosives.throw(b, from, sticky ? v.multiplyScalar(1.05) : v, sticky ? FUSE.sticky : 2.6 + Math.random() * 0.9, sticky ? 'sticky' : 'frag');
+            // some soldiers carry sticky grenades instead of frags; a cooked frag has less fuse left
+            const sticky = b.sticky;
+            this.explosives.throw(b, from, sticky ? v.multiplyScalar(1.05) : v, sticky ? FUSE.sticky : Math.max(0.5, 2.9 + Math.random() * 0.6 - cooked), sticky ? 'sticky' : 'frag', cooked);
           },
           throwTactical: (b, at, kind) => {
             const from = b.eye(new THREE.Vector3());
@@ -1124,6 +1143,7 @@ export class Game {
         // the sun's shadow camera see it, the reflection camera does not)
         bot.root.traverse((o) => o.layers.set(1));
         this.scene.add(bot.root);
+        bot.sticky = bot.id % 4 === 1;
         this.bots.push(bot);
       });
     }
@@ -1298,6 +1318,13 @@ export class Game {
     this.dom.myTeam = this.avatar.team;
     this.dom.setup(homes[0], homes[1]);
     this.explosives.clear();
+    this.smoke?.clear();
+    this.blastFx?.clear();
+    this.arc?.hide();
+    this.audio.stopEmitter('fuseHand');
+    if (this.stuckEl) this.stuckWarn(false);
+    for (const h of this.hissing) this.audio.stopEmitter(h.key);
+    this.hissing.length = 0;
     this.deployables.clear();
     this.destruction?.reset();
     this.fieldCharge = 0.5;
@@ -1651,6 +1678,8 @@ export class Game {
     this.world.buildings.glass.update(dt);
     this.ballistics.update(dt);
     this.explosives.update(dt);
+    this.updateSmoke(dt);
+    this.blastFx.update(dt);
     this.runTimers();
     if (this.vm.detonatorOut && (!this.avatar.alive || !this.myC4().length || this.weapons.reloading || this.weapons.switching || this.player.ladder || this.player.mantle || this.player.tactical || this.vm.action?.type === 'nvg')) this.vm.detonatorOut = false;
     this.deployables.update(dt, this.camera.position);
@@ -1663,7 +1692,11 @@ export class Game {
     const picked = this.tknives.update(dt, this.avatar.alive ? { pos: this.player.pos.clone().setY(this.player.pos.y + 0.3), team: this.avatar.team, owner: this.avatar } : null);
     if (picked > 0 && this.loadout.lethal === 'tknife') {
       this.frags = Math.min(2, this.frags + picked);
-      this.audio.play('imp_metal_light', { gain: 0.4, rate: 1.8, reverb: 0 });
+      // a slow dip to pick it up and slide it back into the chest sheath
+      if (!this.vm.action && !this.weapons.switching && !this.weapons.reloading && !this.weapons.knifeOut) {
+        this.vm.holdItem('tknife');
+        this.vm.play('knifePickup', 1.2, []);
+      } else this.audio.play('knifePickup', { gain: 0.5, reverb: 0 });
       this.ui.notify('THROWING KNIFE', 'PICKED UP');
     }
     this.updateKnife(dt);
@@ -1978,6 +2011,7 @@ export class Game {
       rays: this.env.rays,
       sunDir: this.env.sunDir,
       sunColor: this.env.sunColor,
+      heat: this.blastFx?.heat,
     });
   }
 
@@ -2012,12 +2046,18 @@ export class Game {
     if (act) {
       const ty = act.type;
       code = ty.startsWith('reload') || ty === 'breakReload' || ty === 'karReload' || ty.startsWith('shell') ? 1
-        : ty.startsWith('lethal') || ty === 'throw' || ty === 'tactical' || ty.endsWith('Throw') ? 2
-        : ty === 'melee' ? 3 : ty.startsWith('knife') ? 4 : ty === 'draw' || ty === 'holster' ? 5 : ty === 'bolt' || ty === 'karCycle' || ty === 'pump' ? 6 : ty === 'claymore' || ty === 'trophy' ? 7 : 0;
+        : ty.startsWith('lethal') || ty === 'throw' || ty.endsWith('Throw') ? 2
+        : ty === 'tactical' ? 8 : ty === 'stim' ? 9 : ty === 'detonate' || ty === 'detPress' ? 10 : ty === 'claymore' ? 11
+        : ty === 'melee' ? 3 : ty === 'knifePickup' ? 0 : ty.startsWith('knife') ? 4 : ty === 'draw' || ty === 'holster' ? 5 : ty === 'bolt' || ty === 'karCycle' || ty === 'pump' ? 6 : ty === 'trophy' ? 7 : 0;
+      // down on a knee while setting the claymore
+      if (ty === 'claymore' && act.t > 0.38 && act.t < 0.72) a[o + 11] = Math.max(1, a[o + 11]);
     }
     a[o + 14] = code;
     a[o + 15] = act ? act.t : 0;
-    a[o + 16] = pl.vel.x; a[o + 17] = pl.vel.z; a[o + 18] = pl.vel.y; a[o + 19] = 0;
+    // what is in the hand (+ the fuse burning): bots and other players see it coming
+    const item = !act ? (this.vm.detonatorOut ? 'detonator' : '') : act.type === 'tactical' ? this.throwKind : act.type === 'stim' ? 'stim' : act.type === 'claymore' ? 'claymore' : act.type === 'trophy' ? 'trophy'
+      : act.type === 'detonate' || act.type === 'detPress' ? 'detonator' : act.type.startsWith('lethal') ? this.throwKind : '';
+    a[o + 16] = pl.vel.x; a[o + 17] = pl.vel.z; a[o + 18] = pl.vel.y; a[o + 19] = heldCode(item, this.cookStart >= 0);
   }
 
   /** third-person animation events: magazines dropped by soldiers reloading near you */
@@ -2584,13 +2624,24 @@ export class Game {
         }
         if (v instanceof Bot && v.alive) v.hear(att.position());
       },
-      kill: (att, v, def) => this.onKill(att, v, def.name, false, false),
+      kill: (att, v, def) => {
+        // a frag cooked so it went off in the air / right as it landed: COOK KILL
+        const g = this.explosives.lastGrenade;
+        if (att === this.avatar && v !== this.avatar && g && g.kind === 'frag' && g.cooked > 0.9 && (g.bounces === 0 || g.age < 0.9)) {
+          this.ui.popup('COOK KILL', 50, 'kill');
+          this.avatar.score += 50;
+        }
+        this.onKill(att, v, def.name, false, false);
+      },
       blast: (p, n, scale, surface) => {
-        this.fx.explosion(p, n, scale, surface);
+        const wet = !!this.explosives.lastGrenade?.wet || (p.y < 0.3 && this.terrain.heightAt(p.x, p.z) < p.y - 0.3);
+        // underwater: a dull thump and a white plume instead of a fireball
+        this.fx.explosion(p, n, wet ? scale * 0.3 : scale, surface);
+        this.blastFx.blast(p, n, scale, surface, { water: wet });
         this.world.buildings.glass.blast(p, 5.5 * Math.min(1.5, scale));
         const d = p.distanceTo(this.camera.position);
         const occl = d > 6 && !this.physics.lineOfSight(this.camera.position, p.clone().setY(p.y + 0.5));
-        this.audio.play(d > 90 ? 'explosionFar' : 'explosion', { pos: p, gain: 1.0 * Math.min(1.2, scale) * (occl ? 0.75 : 1), ref: 14, reverb: 0.7, delay: true, prio: 3, lowpass: occl ? 900 : undefined });
+        this.audio.explosionAt(p, { size: Math.min(1.4, scale), water: wet, occluded: occl, srcIndoor: this.isIndoorAt(p), srcTunnel: this.inTunnelAt(p) });
         if (d < 45 && this.avatar.alive) {
           const k = 1 - d / 45;
           this.rig.addTrauma(0.75 * k * k + 0.08);
@@ -2601,31 +2652,67 @@ export class Game {
         this.noteGunfire(p);
         this.alertBots(p, 70, -1);
       },
-      bounce: (p, speed) => this.audio.play('nadeBounce', { pos: p, gain: Math.min(1, 0.25 + speed / 12), ref: 2, reverb: 0.1, vary: 0.1 }),
+      bounce: (p, speed, surface, g) => this.grenadeBounce(p, speed, surface, g),
+      splash: (p, g) => {
+        this.audio.play('splash', { pos: p, gain: 0.7, ref: 3, reverb: 0.15, vary: 0.08 });
+        for (let i = 0; i < 10; i++) this.fx.dust.spawn(p, new THREE.Vector3((Math.random() - 0.5) * 1.5, 1.5 + Math.random() * 2.5, (Math.random() - 0.5) * 1.5), [0.85, 0.9, 0.92], 0.7, 0.05 + Math.random() * 0.05, 0.6, { drag: 0.8, grav: 9.8 });
+        void g;
+      },
+      tick: (g, dt) => this.grenadeTick(g, dt),
+      gone: (g) => this.audio.stopEmitter('fuse' + g.id),
+      isWater: (p) => p.y < 0 && this.terrain.heightAt(p.x, p.z) < p.y,
+      surface: (hit) => (hit.info.tag === 'terrain' ? this.terrain.surfaceAt(hit.point.x, hit.point.z) as Surface : hit.info.surface),
+      stickObj: (hit, from, dir, len) => {
+        if (hit && hit.info.tag === 'door') {
+          const d = this.doors.doors.find((x) => x.collider === hit.collider);
+          if (d) return { obj: d.leaf, point: hit.point, normal: hit.normal, what: 'door' };
+        }
+        const h = this.streaks?.hitHeli(from, dir, len, -1);
+        if (h && (!hit || h.dist < hit.distance)) return { obj: h.h.root, point: from.clone().addScaledVector(dir, h.dist), normal: dir.clone().negate(), what: 'heli' };
+        return null;
+      },
       flash: (p, owner) => this.flashBang(p, owner),
       stun: (p, owner) => this.stunBlast(p, owner),
-      smokeStart: (p) => {
+      smokeStart: (p, c) => {
         this.audio.play('smokePop', { pos: p, gain: 0.8, ref: 4, reverb: 0.2 });
-        this.audio.play('smokeHiss', { pos: p, gain: 0.7, ref: 4, reverb: 0.3 });
+        if (c) {
+          this.smoke.start(p, c.life - 3, !!c.wet);
+          const key = 'smoke' + Math.random().toString(36).slice(2, 7);
+          this.hissing.push({ c, key });
+        }
       },
-      smokeEmit: (c, dt) => this.emitSmoke(c, dt),
+      smokeEmit: () => {},
       stick: (g, victim) => {
+        const what = g.stuck?.what ?? 'world';
         this.audio.play('stick', { pos: g.pos, gain: 0.9, ref: 3, reverb: 0.15, vary: 0.08 });
+        // on metal (a car, the helicopter, a metal door) it clanks as well
+        if (what === 'car' || what === 'heli' || g.surface === 'metal') this.audio.play('bounce_metal', { pos: g.pos, gain: 0.6, ref: 3, reverb: 0.1, rate: 0.9 });
         if (g.kind === 'sticky') this.audio.play('beep', { pos: g.pos, gain: 0.5, ref: 3, rate: 1.1, reverb: 0 });
         if (victim === this.avatar) {
+          // you are the bomb: a red screen warning, racing beeps in your ear and a panicked shout
           this.ui.announce('STUCK!', 'GET AWAY FROM YOUR TEAM', 'bad');
+          this.stuckWarn(true);
           this.audio.play('beep', { gain: 0.7, bus: 'ui', reverb: 0, rate: 1.3 });
+          this.playerVoice('grenade', 1);
+          this.audio.play('panicBreath', { gain: 0.6, reverb: 0, bus: 'ui' });
         } else if (victim && g.owner === this.avatar) {
           this.ui.killText(0, ['STUCK']);
           this.audio.play('hit', { gain: 0.6, bus: 'ui', reverb: 0 });
         }
-        if (victim instanceof Bot && victim.alive) victim.hear(g.owner.position());
+        if (victim instanceof Bot && victim.alive) {
+          victim.hear(g.owner.position());
+          this.voiceT.delete(victim.id);
+          this.botVoice(victim, 'grenade');
+          this.audio.play('panicBreath', { pos: victim.chest(new THREE.Vector3()), gain: 0.6, ref: 3, reverb: 0.1 });
+        }
+        if (what === 'heli' && g.owner === this.avatar) this.ui.killText(0, ['STUCK · HELICOPTER']);
       },
       snapshot: (p, owner) => this.snapshotPulse(p, owner),
       decoyStart: (d) => this.audio.play('click', { pos: d.p, gain: 0.5, ref: 2, rate: 1.4 }),
       decoyShot: (d) => this.decoyShot(d),
       intercept: (g) => this.deployables?.intercept(g) ?? false,
     }, () => this.match.players);
+    this.explosives.smokeTest = (a, b) => this.smoke.blocks(a, b);
     this.explosives.onExplode = (p, radius, owner) => {
       this.lastBlast = { p: p.clone(), t: this.time };
       this.deployables.blast(p, radius, owner);
@@ -2748,7 +2835,9 @@ export class Game {
       else if (this.frags > 0) {
         this.frags--;
         // lethals: thrown when the key is released (each has its own ready hold)
-        const held = { hold: () => inp.isDown('grenade') };
+        this.throwPressT = this.time;
+        this.throwKey = 'grenade';
+        const held = { hold: () => inp.isDown('grenade'), power: () => this.throwPower(), cook: () => (this.cookStart >= 0 ? clamp((this.time - this.cookStart) / this.explosives.fuseTime, 0, 1) : -1) };
         if (lethal === 'tknife') this.startEquip('tknife', 'lethalKnife', 0.8, [], { holdAt: 0.28, ...held });
         else if (lethal === 'frag') this.startEquip('frag', 'lethalFrag', 1.3, [], { holdAt: 0.52, ...held });
         else if (lethal === 'sticky') this.startEquip('sticky', 'lethalSticky', 1.25, [], { holdAt: 0.52, ...held });
@@ -2770,14 +2859,16 @@ export class Game {
       if (tk === 'stim') {
         this.player.sprinting = false;
         vm.holdItem('stim');
-        vm.play('stim', 1.15, [[0.05, 'cloth'], [0.36, 'stimCap'], [0.56, 'stimInject']]);
+        vm.play('stim', 1.25, [[0.05, 'cloth'], [0.36, 'stimCap'], [0.55, 'stimInject'], [0.7, 'injectorToss']]);
       } else {
         // left hand only: the gun stays up (and keeps firing); held ready until the key is released
         this.throwKind = tk;
         this.cookStart = -1;
         this.vm.detonatorOut = false;
+        this.throwPressT = this.time;
+        this.throwKey = 'tactical';
         vm.holdItem(tk);
-        vm.play('tactical', tk === 'snapshot' ? 1.05 : 1.1, [], undefined, { kind: tk, holdAt: 0.5, hold: () => inp.isDown('tactical') });
+        vm.play('tactical', tk === 'snapshot' || tk === 'decoy' ? 1.05 : 1.1, [], undefined, { kind: tk, holdAt: 0.5, hold: () => inp.isDown('tactical'), power: () => this.throwPower() });
       }
     }
     // [H] field upgrade: the trophy system, two-handed deploy
@@ -2845,6 +2936,15 @@ export class Game {
       } else if (!this.streaks.use(this.avatar, id, this.time)) this.ui.notify('UNAVAILABLE', 'HELICOPTER ALREADY IN THE AIR');
     }
     if (this.designating) this.updateDesignator();
+    // power freezes when the throw key comes up
+    if (this.throwRelT < this.throwPressT && !inp.isDown(this.throwKey)) this.throwRelT = this.time;
+    // a cooking frag in your fist: its fuse spits louder and higher as it runs down
+    if (this.cookStart >= 0 && this.avatar.alive) {
+      const k = clamp((this.time - this.cookStart) / this.explosives.fuseTime, 0, 1);
+      const hp = this.camera.position.clone().add(new THREE.Vector3(0.15, -0.05, -0.35).applyQuaternion(this.camera.quaternion));
+      this.audio.emitter('fuseHand', 'fuse', 0.14 + 0.5 * k * k, hp, { ref: 1, bus: 'sfx', rate: 0.85 + 0.55 * k });
+    } else this.audio.stopEmitter('fuseHand');
+    this.updateArc();
     // cooked too long: it goes off in your hand
     if (this.cookStart >= 0 && (vm.action?.type === 'throw' || vm.action?.type === 'lethalFrag') && this.time - this.cookStart >= this.explosives.fuseTime) {
       this.cookStart = -1;
@@ -2853,30 +2953,76 @@ export class Game {
     }
   }
 
-  private throwPlayerGrenade() {
-    const cooked = this.cookStart >= 0 ? this.time - this.cookStart : 0;
-    this.cookStart = -1;
+  /** 0..1 throw power: a tap lobs it short, holding ~0.9 s winds up a full throw */
+  private throwPower() {
+    const end = this.throwRelT >= this.throwPressT ? this.throwRelT : this.time;
+    return clamp((end - this.throwPressT - 0.15) / 0.75, 0, 1);
+  }
+  private throwKey: 'grenade' | 'tactical' = 'grenade';
+  private throwRelT = 0;
+
+  /**
+   * Where the held item leaves the hand and how fast: per item, scaled by the throw power.
+   * Frags / tacticals: overhand lobs. Sticky: hard and flat. C4: an underhand toss (backspin is
+   * added by Explosives). Snapshot / decoy: bowled low and rolled along the ground.
+   */
+  private throwLaunch(kind: GrenadeKind | 'tknife', power: number) {
     const fwd = new THREE.Vector3(0, 0, -1).applyQuaternion(this.camera.quaternion);
     const right = new THREE.Vector3(1, 0, 0).applyQuaternion(this.camera.quaternion);
     // thrown from the hand that holds it: lethals right, tacticals left, C4 from the middle
-    const kind0 = this.throwKind;
-    const side = kind0 === 'frag' || kind0 === 'sticky' || kind0 === 'tknife' ? 0.15 : kind0 === 'c4' ? 0 : -0.15;
+    const side = kind === 'frag' || kind === 'sticky' || kind === 'tknife' ? 0.15 : kind === 'c4' ? 0 : -0.15;
     const from = this.camera.position.clone().addScaledVector(fwd, 0.5).addScaledVector(right, side);
+    const bowl = kind === 'snapshot' || kind === 'decoy';
+    if (bowl) {
+      // released down by the knee
+      from.y -= 0.85;
+      const g = this.terrain.heightAt(from.x, from.z);
+      const floor = this.physics.raycast(from.clone().setY(from.y + 0.8), new THREE.Vector3(0, -1, 0), 2);
+      from.y = Math.max(from.y, (floor ? floor.point.y : g) + 0.12);
+    }
     // keep the spawn point out of walls right in front of you
     const blocked = this.physics.raycast(this.camera.position, fwd, 0.6);
     if (blocked) from.copy(this.camera.position).addScaledVector(fwd, Math.max(0.05, blocked.distance - 0.15));
+    const k = 0.55 + 0.45 * power;
+    let v: THREE.Vector3;
+    if (kind === 'tknife') v = fwd.clone().multiplyScalar(32).add(new THREE.Vector3(0, 0.8, 0));
+    else if (bowl) {
+      const flat = new THREE.Vector3(fwd.x, 0, fwd.z).normalize();
+      v = flat.multiplyScalar(6 + 8 * power).add(new THREE.Vector3(0, 0.9 + Math.max(0, fwd.y) * 4, 0));
+    } else {
+      const [spd, up] = ({ c4: [10, 2.2], sticky: [21, 2.8] } as Record<string, [number, number]>)[kind] ?? [19, 3.2];
+      v = fwd.clone().multiplyScalar(spd * k).add(new THREE.Vector3(0, up * (0.7 + 0.3 * power), 0));
+    }
+    v.addScaledVector(this.player.vel, kind === 'tknife' ? 0.5 : 0.6);
+    return { from, v };
+  }
+
+  private throwPlayerGrenade() {
+    const cooked = this.cookStart >= 0 ? this.time - this.cookStart : 0;
+    this.cookStart = -1;
+    this.audio.stopEmitter('fuseHand');
     const kind = this.throwKind;
+    const { from, v } = this.throwLaunch(kind, this.throwPower());
     if (kind === 'tknife') {
       // a fast, flat throw straight down the crosshair (it drops a little over 20 m)
-      const kv = fwd.clone().multiplyScalar(32).add(new THREE.Vector3(0, 0.8, 0)).addScaledVector(this.player.vel, 0.5);
-      this.tknives.throw(this.avatar, from, kv);
+      this.tknives.throw(this.avatar, from, v);
       return;
     }
-    // per item: sticky flies hard and flat, C4 is a short underhand toss, the snapshot rolls low,
-    // the decoy is flicked side-arm
-    const [spd, up] = ({ c4: [11, 2.2], sticky: [21, 2.8], snapshot: [15, 1.8], decoy: [16, 2.2] } as Record<string, [number, number]>)[kind] ?? [19, 3.2];
-    const v = fwd.clone().multiplyScalar(spd).add(new THREE.Vector3(0, up, 0)).addScaledVector(this.player.vel, 0.6);
-    this.explosives.throw(this.avatar, from, v, kind === 'frag' ? Math.max(0.25, this.explosives.fuseTime - cooked) : FUSE[kind], kind);
+    this.explosives.throw(this.avatar, from, v, kind === 'frag' ? Math.max(0.25, this.explosives.fuseTime - cooked) : FUSE[kind], kind, cooked);
+  }
+
+  /** the optional dotted arc while a grenade is held ready */
+  private updateArc() {
+    const a = this.vm.action;
+    const ty = a?.type;
+    const ready = !!a && (ty === 'lethalFrag' || ty === 'lethalSticky' || ty === 'lethalC4' || ty === 'tactical') && a.t >= ((a.data?.holdAt as number) ?? 1) - 0.02 && a.t < 0.6;
+    if (!Settings.data.throwArc || !ready || !this.avatar.alive) {
+      this.arc?.hide();
+      return;
+    }
+    this.arc ??= new ArcPreview(this.scene, this.physics);
+    const { from, v } = this.throwLaunch(this.throwKind as GrenadeKind, this.throwPower());
+    this.arc.show(from, v, this.time);
   }
 
   /** Equipment with its own viewmodel action (sticky, C4, claymore, snapshot, decoy). */
@@ -2985,7 +3131,7 @@ export class Game {
     this.fx.explosion(p, new THREE.Vector3(0, 1, 0), 0.25, 'concrete');
     this.fx.flashPop(p);
     const d = p.distanceTo(this.camera.position);
-    this.audio.play('flashBang', { pos: p, gain: 1.0, ref: 10, reverb: 0.6, prio: 3, delay: true });
+    this.audio.explosionAt(p, { flavour: 'flash', occluded: d > 6 && !this.physics.lineOfSight(this.camera.position, p.clone().setY(p.y + 0.3)), srcIndoor: this.isIndoorAt(p), srcTunnel: this.inTunnelAt(p) });
     const eye = this.camera.position;
     if (this.avatar.alive && d < 32 && this.physics.lineOfSight(p.clone().setY(p.y + 0.2), eye)) {
       const fwd = new THREE.Vector3(0, 0, -1).applyQuaternion(this.camera.quaternion);
@@ -3012,9 +3158,9 @@ export class Game {
 
   private stunBlast(p: THREE.Vector3, owner: Combatant) {
     this.fx.explosion(p, new THREE.Vector3(0, 1, 0), 0.35, 'concrete');
-    this.audio.play('stunBang', { pos: p, gain: 1.0, ref: 10, reverb: 0.6, prio: 3, delay: true });
     const eye = this.camera.position;
     const d = p.distanceTo(eye);
+    this.audio.explosionAt(p, { flavour: 'stun', occluded: d > 6 && !this.physics.lineOfSight(eye, p.clone().setY(p.y + 0.3)), srcIndoor: this.isIndoorAt(p), srcTunnel: this.inTunnelAt(p) });
     if (this.avatar.alive && d < 13 && this.physics.lineOfSight(p.clone().setY(p.y + 0.2), eye)) {
       const k = Math.max(0, 1 - d / 13) * (owner === this.avatar ? 0.7 : 1);
       this.stunT = Math.max(this.stunT, 1.8 + 3.2 * k);
@@ -3032,23 +3178,78 @@ export class Game {
     this.alertBots(p, 35, -1);
   }
 
-  /** Thick, rolling smoke: big soft puffs swelling out of the canister and drifting with the wind. */
-  private smokeAcc = new Map<SmokeCloud, number>();
-  private emitSmoke(c: SmokeCloud, dt: number) {
-    // (fewer, slightly bigger puffs on the lower presets: same cover, less overdraw)
-    const q = Settings.data.quality;
-    const rate = q === 'low' ? 0.5 : q === 'medium' ? 0.75 : 1;
-    const acc = (this.smokeAcc.get(c) ?? 0) + dt * (c.t < 3 ? 16 : 7) * rate;
-    let n = Math.floor(acc);
-    this.smokeAcc.set(c, acc - n);
-    const wind = this.weather.wind;
-    while (n-- > 0) {
-      const a = Math.random() * Math.PI * 2, r = Math.random() * Math.max(0.5, c.r * 0.7);
-      const p = c.p.clone().add(new THREE.Vector3(Math.cos(a) * r, 0.3 + Math.random() * Math.min(2.5, c.r * 0.4), Math.sin(a) * r));
-      const v = new THREE.Vector3((Math.random() - 0.5) * 0.8 + wind.x * 0.05, 0.25 + Math.random() * 0.3, (Math.random() - 0.5) * 0.8 + wind.z * 0.05);
-      const g = 0.7 + Math.random() * 0.12;
-      this.fx.smokePuff(p, v, [g, g, g * 1.02], (2.2 + Math.random() * 1.8) / Math.sqrt(rate), 9 + Math.random() * 4);
+  // ---- Update 31: equipment world behaviour
+  /** is a point under a roof (inside a building)? */
+  private isIndoorAt(p: THREE.Vector3) {
+    if (this.inTunnelAt(p)) return false;
+    return !!this.physics.raycast(p.clone().setY(p.y + 0.4), new THREE.Vector3(0, 1, 0), 10);
+  }
+  private inTunnelAt(p: THREE.Vector3) {
+    const W = TUNNEL.width / 2;
+    return Math.abs(p.x - TUNNEL.x) < W + TUNNEL_EXIT.gx1 + 1 && p.z > TUNNEL.z0 - 4 && p.z < TUNNEL.z1 + 4 && p.y < TUNNEL_EXIT.floor + TUNNEL.height + 2;
+  }
+  /** a grenade hits something: the sound of that surface (a can on concrete clanks, a frag thuds into snow) */
+  private grenadeBounce(p: THREE.Vector3, speed: number, surface?: Surface, g?: Grenade) {
+    const can = !!g && g.kind !== 'frag' && g.kind !== 'sticky' && g.kind !== 'c4';
+    let snd = (surface && BOUNCE[surface]?.snd) ?? 'bounce_hard';
+    if (can && (snd === 'bounce_hard' || snd === 'bounce_wood' || snd === 'bounce_gravel')) snd = 'bounce_can';
+    const soft = snd === 'bounce_soft' || snd === 'bounce_mud';
+    const k = Math.min(1, 0.2 + speed / 10);
+    this.audio.play(snd, { pos: p, gain: k * (soft ? 0.95 : 0.75), ref: 2.2, reverb: 0.12, vary: 0.1, rate: can ? 1.08 : 1 });
+    if (g?.roll && !g.mesh.userData.rolled && g.bounces > 1) {
+      g.mesh.userData.rolled = true;
+      this.audio.play('roll', { pos: p, gain: 0.55, ref: 2, reverb: 0.1, vary: 0.06 });
     }
+    // soft ground: a little puff of it
+    if (surface === 'snow' || surface === 'sand' || surface === 'dirt' || surface === 'grass') this.fx.dust.spawn(p, new THREE.Vector3(0, 0.6, 0), this.blastFx.dustColour(surface), 0.4, 0.15, 0.6, { grow: 1.2, drag: 3 });
+  }
+  /** per live grenade: a frag's fuse hisses louder and higher as it runs down; a sticky's beeps race */
+  private grenadeTick(g: Grenade, dt: number) {
+    if (g.kind === 'frag' && !g.wet) {
+      const k = 1 - Math.max(0, g.fuse) / FUSE.frag;
+      this.audio.emitter('fuse' + g.id, 'fuse', 0.1 + 0.55 * k * k, g.pos, { ref: 2, bus: 'sfx', rate: 0.85 + 0.55 * k });
+    }
+    if (g.kind === 'sticky') {
+      const ud = g.mesh.userData;
+      ud.beepT = (ud.beepT ?? 0.3) - dt;
+      if (ud.beepT <= 0) {
+        const k = Math.max(0, g.fuse) / FUSE.sticky;
+        ud.beepT = 0.07 + 0.38 * k;
+        this.audio.play('beep', { pos: g.pos, gain: 0.45, ref: 2.5, reverb: 0, rate: 1.15 + (1 - k) * 0.35 });
+      }
+      if (g.stuck?.to === this.avatar && g.fuse < 0.05) this.stuckWarn(false);
+    }
+  }
+  private stuckEl: HTMLElement | null = null;
+  /** red pulsing edge while a sticky is on you */
+  private stuckWarn(on: boolean) {
+    if (!this.stuckEl) {
+      this.stuckEl = document.createElement('div');
+      this.stuckEl.className = 'stuckwarn';
+      this.ui.root.appendChild(this.stuckEl);
+    }
+    this.stuckEl.classList.toggle('on', on);
+  }
+  /** smoke volume: wind, rain, light; each canister's hiss fades over its life */
+  private updateSmoke(dt: number) {
+    const sm = this.smoke;
+    sm.wind.copy(this.weather.wind);
+    sm.rain = this.env.weather === 'rain' ? 1 : 0;
+    sm.light = clamp(this.env.sun.intensity / 3 + this.env.blueHour * 0.1, 0.05, 1);
+    const q = Settings.data.quality;
+    sm.quality = q === 'low' ? 0.55 : q === 'medium' ? 0.8 : 1;
+    sm.update(dt);
+    for (let i = this.hissing.length - 1; i >= 0; i--) {
+      const h = this.hissing[i];
+      const live = this.explosives.smokes.includes(h.c);
+      const k = live ? Math.max(0, 1 - h.c.t / Math.max(1, h.c.life - 3)) : 0;
+      this.audio.emitter(h.key, 'smokeHiss', 0.8 * Math.pow(k, 0.7), h.c.p, { ref: 4, bus: 'sfx', rate: 0.88 + 0.16 * k, lowpass: 1800 + 9000 * k });
+      if (!live || k <= 0) {
+        this.audio.stopEmitter(h.key);
+        this.hissing.splice(i, 1);
+      }
+    }
+    if (this.stuckEl?.classList.contains('on') && (!this.avatar.alive || !this.explosives.grenades.some((g) => g.stuck?.to === this.avatar))) this.stuckWarn(false);
   }
 
   // ---- voice callouts (ElevenLabs-generated lines, see tools/voice_build.py)
@@ -3899,21 +4100,35 @@ export class Game {
     const fwd = new THREE.Vector3(-Math.sin(this.player.yaw), 0, -Math.cos(this.player.yaw));
     switch (name) {
       case 'legs': this.audio.play('legs', { gain: 0.6, reverb: 0, vary: 0.08 }); break;
-      case 'stickyArm': this.audio.play('armChirp', { gain: 0.55, reverb: 0 }); this.audio.play('click', { gain: 0.4, reverb: 0, rate: 0.9 }); break;
-      case 'c4Arm': this.audio.play('beep', { gain: 0.45, reverb: 0 }); this.audio.play('click', { gain: 0.45, reverb: 0, rate: 0.7 }); break;
-      case 'twist': this.audio.play('click', { gain: 0.5, reverb: 0, rate: 0.75 + Math.random() * 0.1 }); break;
+      case 'stickyArm': this.audio.play('armChirp', { gain: 0.55, reverb: 0 }); break;
+      case 'peel': this.audio.play('peel', { gain: 0.7, reverb: 0, vary: 0.06 }); break;
+      case 'c4Arm': this.audio.play('beep', { gain: 0.45, reverb: 0 }); this.audio.play('clack', { gain: 0.25, reverb: 0, rate: 1.3 }); break;
+      case 'twist': this.audio.play('twist', { gain: 0.55, reverb: 0, vary: 0.08 }); break;
       case 'snapArm': this.audio.play('armChirp', { gain: 0.5, reverb: 0, rate: 0.8 }); break;
-      case 'decoyTap': this.audio.play('click', { gain: 0.45, reverb: 0, rate: 1.3 }); this.audio.play('beep', { gain: 0.2, reverb: 0, rate: 1.6 }); break;
-      case 'coverFlip': this.audio.play('click', { gain: 0.6, reverb: 0, rate: 0.6 }); break;
+      case 'decoyArm': this.audio.play('beep', { gain: 0.35, reverb: 0, rate: 1.3 }); break;
+      case 'decoyTap': this.audio.play('beep', { gain: 0.25, reverb: 0, rate: 1.6 }); break;
+      case 'coverFlip': this.audio.play('coverFlip', { gain: 0.7, reverb: 0, vary: 0.05 }); break;
+      case 'detDraw': this.audio.play('cloth', { gain: 0.45, reverb: 0 }); break;
       case 'detonate': this.detonateMine(); break;
+      case 'swishHeavy':
+        this.audio.play('swish', { gain: 0.6, reverb: 0.03, vary: 0.08 });
+        this.audio.play('effort', { gain: 0.22, reverb: 0, vary: 0.05 });
+        break;
+      case 'swishLight': this.audio.play('swishLight', { gain: 0.5, reverb: 0.03, vary: 0.08 }); break;
+      case 'knifeDraw': this.audio.play('knifeDraw', { gain: 0.55, reverb: 0, vary: 0.05 }); break;
+      case 'knifeFlick': this.audio.play('knifeThrow', { gain: 0.6, reverb: 0.02, vary: 0.06 }); break;
+      case 'knifeToss': this.audio.play('swishLight', { gain: 0.18, reverb: 0, rate: 1.6 }); break;
+      case 'knifeCatch': this.audio.play('knifeCatch', { gain: 0.5, reverb: 0, vary: 0.08 }); break;
+      case 'knifePickup': this.audio.play('knifePickup', { gain: 0.6, reverb: 0 }); break;
+      case 'knifeSheath': this.audio.play('knifeDraw', { gain: 0.35, reverb: 0, rate: 1.25 }); break;
       case 'plantDip':
         // you drop to a knee to set it down
         this.rig.onSlideStart();
-        this.audio.play('cloth', { gain: 0.6, reverb: 0 });
+        this.audio.play('place', { gain: 0.6, reverb: 0, vary: 0.05 });
         break;
       case 'heavyLift':
         this.rig.onLand(5);
-        this.audio.play('imp_metal_light', { gain: 0.35, rate: 0.7, reverb: 0 });
+        this.audio.play('place', { gain: 0.5, reverb: 0 });
         this.audio.play('breathOut', { gain: 0.35, reverb: 0 });
         break;
       case 'shove':
@@ -3925,8 +4140,9 @@ export class Game {
         const at = this.groundAhead(0.85);
         const c = this.deployables.placeClaymore(this.avatar, at, this.player.yaw);
         this.equipNet?.('clay', { p: [c.pos.x, c.pos.y, c.pos.z], y: this.player.yaw, id: c.id });
-        this.audio.play('imp_dirt', { pos: c.pos, gain: 0.5, ref: 2, reverb: 0.1 });
-        this.audio.play('beep', { pos: c.pos, gain: 0.4, ref: 2, rate: 0.9, reverb: 0 });
+        this.audio.play('bounce_mud', { pos: c.pos, gain: 0.6, ref: 2, reverb: 0.1 });
+        this.audio.play('claymoreClick', { pos: c.pos, gain: 0.55, ref: 2, reverb: 0, at: 0.08 });
+        this.audio.play('beep', { pos: c.pos, gain: 0.4, ref: 2, rate: 0.9, reverb: 0, at: 0.25 });
         break;
       }
       case 'trophyOut': {
@@ -3939,6 +4155,17 @@ export class Game {
         break;
       }
     }
+  }
+  private spoonProto: THREE.Mesh | null = null;
+  /** the spoon of a thrown grenade springs off and tumbles to the ground */
+  private dropSpoon() {
+    this.spoonProto ??= new THREE.Mesh(new THREE.BoxGeometry(0.012, 0.062, 0.004), new THREE.MeshStandardMaterial({ color: 0x8a8d90, roughness: 0.35, metalness: 0.9 }));
+    const fwd = new THREE.Vector3(0, 0, -1).applyQuaternion(this.camera.quaternion);
+    const right = new THREE.Vector3(1, 0, 0).applyQuaternion(this.camera.quaternion);
+    const side = this.throwKind === 'frag' || this.throwKind === 'sticky' ? 0.18 : -0.18;
+    const p = this.camera.position.clone().addScaledVector(fwd, 0.45).addScaledVector(right, side).add(new THREE.Vector3(0, -0.05, 0));
+    const v = right.clone().multiplyScalar(Math.sign(side) * 1.2).add(new THREE.Vector3(0, 2.2, 0)).addScaledVector(fwd, 1.5).add(this.player.vel);
+    this.fx.debris(this.spoonProto, p, this.camera.quaternion, v, new THREE.Vector3(25, 8, 14), 'spoon');
   }
   /** A spot on the ground in front of the player (pulled back from walls). */
   private groundAhead(dist: number) {
@@ -3977,6 +4204,8 @@ export class Game {
     let n = 0;
     for (const c of this.match.players) {
       if (!c.alive || c.team === owner.team || c.position().distanceTo(p) > R) continue;
+      // smoke scatters the scan: anyone behind a thick cloud stays hidden
+      if (this.smoke.blocks(p.clone().setY(p.y + 0.3), c.chest(new THREE.Vector3()))) continue;
       this.revealed.set(c.id, this.time + 3.2);
       n++;
       if (c === this.avatar) {
@@ -4105,11 +4334,8 @@ export class Game {
       this.nvg.disengage();
       this.audio.play(this.audio.has('nvgOff') ? 'nvgOff' : 'click', { gain: 0.7, bus: 'ui', reverb: 0 });
     }
-    if (name === 'pin') {
-      if (this.throwKind === 'frag') this.cookStart = this.time;
-      this.audio.play('pin', { gain: 0.6, reverb: 0.03 });
-    }
-    if (name === 'stimCap') this.audio.play('click', { gain: 0.5, reverb: 0, rate: 0.8 });
+    if (name === 'pin') this.audio.play('pin', { gain: 0.65, reverb: 0.03, vary: 0.05 });
+    if (name === 'stimCap') this.audio.play('stimCap', { gain: 0.6, reverb: 0, vary: 0.06 });
     if (name === 'stockOut') {
       this.audio.play('bipod', { gain: 0.42, rate: 1.75, reverb: 0 });
       this.audio.play('click', { gain: 0.5, rate: 0.9, reverb: 0 });
@@ -4117,13 +4343,26 @@ export class Game {
     if (name === 'stockIn') this.audio.play('legs', { gain: 0.35, rate: 1.2, reverb: 0 });
     this.equipEvent(name);
     if (name === 'stimInject') {
+      // the jab, the pneumatic hiss of the dose going in, a shudder through the view, then the
+      // heart picks up
       this.audio.play('stimInject', { gain: 0.9, reverb: 0.03 });
-      this.audio.play('stimHiss', { gain: 0.6, reverb: 0 });
-      this.audio.play('breathIn', { gain: 0.6, reverb: 0, rate: 0.9 });
+      this.audio.play('stimHiss', { gain: 0.75, reverb: 0, at: 0.04 });
+      this.audio.play('breathIn', { gain: 0.6, reverb: 0, rate: 0.9, at: 0.3 });
+      for (let i = 0; i < 5; i++) this.audio.play('heartbeat', { gain: 0.75 - i * 0.12, bus: 'ui', reverb: 0, at: 0.55 + i * 0.52, rate: 1.05 });
       this.stimT = 10;
       this.playerVoice('stim');
-      this.rig.addTrauma(0.15);
+      this.rig.addTrauma(0.38);
+      this.suppression = Math.min(1, this.suppression + 0.45);
+      this.flashFx = Math.min(0.5, this.flashFx + 0.12);
       this.ui.announce('STIM', 'HEALTH + SPEED BOOST 10 s', 'good');
+    }
+    if (name === 'injectorToss') {
+      // the empty injector is flicked away to the left and clatters on the ground
+      const fwd = new THREE.Vector3(0, 0, -1).applyQuaternion(this.camera.quaternion);
+      const right = new THREE.Vector3(1, 0, 0).applyQuaternion(this.camera.quaternion);
+      const p = this.camera.position.clone().addScaledVector(fwd, 0.35).addScaledVector(right, -0.25).add(new THREE.Vector3(0, -0.35, 0));
+      const prop = heldProp(heldCode('stim'));
+      if (prop) this.fx.debris(prop, p, this.camera.quaternion, right.clone().multiplyScalar(-2.2).add(new THREE.Vector3(0, 1.2, 0)).add(this.player.vel), new THREE.Vector3(9, 3, 12), 'injector');
     }
     if (name === 'uavPress') {
       if (this.streaks.use(this.avatar, 'uav', this.time)) this.audio.play('uavPing', { gain: 0.5, bus: 'ui', reverb: 0 });
@@ -4132,6 +4371,17 @@ export class Game {
     if (name === 'release') {
       this.throwPlayerGrenade();
       if (this.throwKind !== 'tknife') this.playerVoice(this.throwKind, 0.9);
+      this.arc?.hide();
+    }
+    if (name === 'cookStart') {
+      // spoon off, fuse lit: from here the clock runs
+      this.cookStart = this.time;
+      this.audio.play('spoon', { gain: 0.6, reverb: 0.05, vary: 0.06 });
+      this.audio.play('fuseLight', { gain: 0.4, reverb: 0 });
+    }
+    if (name === 'spoon') {
+      this.audio.play('spoon', { gain: 0.5, reverb: 0.05, vary: 0.06 });
+      this.dropSpoon();
     }
     if (name === 'swish') this.audio.play('swish', { gain: 0.55, reverb: 0.03, vary: 0.08 });
     if (name === 'meleeHit') this.meleeHit();
