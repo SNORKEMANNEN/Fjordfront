@@ -339,8 +339,11 @@ class GradePass extends Pass {
             float h = dot(texture2D(tDiffuse, uv + vec2(px.x, 0.0)).rgb + texture2D(tDiffuse, uv - vec2(px.x, 0.0)).rgb
                         + texture2D(tDiffuse, uv + vec2(0.0, px.y)).rgb + texture2D(tDiffuse, uv - vec2(0.0, px.y)).rgb, vec3(0.125, 0.1, 0.025)) * uExposure;
             L = L * 0.8 + h * 0.2 + max(h - L, 0.0) * 0.35;
+            // the night sky glows far less than lit ground through a real tube: keep it dark so
+            // silhouettes on the skyline read
+            if (uHasDepth > 0.5 && texture2D(tDepth, uv).x >= 0.99999) L *= 0.3;
             // starlight floor: even unlit ground shows a little structure through the tube
-            L += 0.0009 + raw.g * 0.002;
+            L += 0.0006 + raw.g * 0.0015;
             // IR illuminator on the goggles: a soft cone around the view centre lighting near surfaces
             if (uNVGIllum > 0.0) {
               vec2 cq = dc * vec2(uRes.x / uRes.y, 1.0);
@@ -360,9 +363,10 @@ class GradePass extends Pass {
             }
             // intensifier with automatic brightness control (soft saturation)
             float I = 1.0 - exp(-L * uNVGGain);
-            I = I / (1.0 + I * 0.15) * 1.15;
-            // tube contrast: deep shadows stay dark, lit surfaces and lights pop
-            I = pow(I, 1.32) * 1.1;
+            I = I / (1.0 + I * 0.25) * 1.12;
+            // tube contrast: deep shadows stay dark, lit surfaces and lights pop (steeper toe so the
+            // image has blacks and mid-tones instead of a flat bright green)
+            I = pow(I, 1.7) * 0.95;
             // scintillation: sparkling noise, strongest in the dark parts of the image
             float n1 = rand(floor(uv * uRes * 0.7) + fract(uTime * 37.0) * 91.0) - 0.5;
             float n2 = rand(uv * uRes + fract(uTime * 53.0) * 17.0) - 0.5;

@@ -290,6 +290,54 @@ URL options: `?quality=low|medium|high|ultra`, `?weather=clear|overcast|rain|sno
 - **Rifle:** support hand moved so it no longer shows through the optic window.
 - **Pistol:** hold reworked.
 
+## Update 33: clear skies, weathered world, better goggles
+
+A batch of graphics work aimed at looking better without costing much frame time. Most of it lives in shaders that were already running, or is baked once.
+
+### Weather: clear
+- **New "Clear" weather:** no clouds at all, a deep blue sky and a high summer sun (about 36° at noon instead of 16°). The light is vivid, with turquoise water and saturated greens. It was inspired by Lofoten summer photos. No fog banks or storms roll in on a clear day.
+- The old "clear" (broken clouds) is now called **Fair**. Random weather picks both. Settings → Graphics → Weather, or `/weather clear|fair|overcast|rain|snow` in multiplayer.
+
+### Night vision
+- **No longer washed out.** The tube's automatic gain topped out at 72, which saturated the whole image to pale green. It now tops out at 24 with a steeper contrast curve, so there are real blacks and readable mid-tones. The night sky stays dark through the tube, so silhouettes on the skyline read.
+
+### Guns
+- **Edge wear on every gun:** where the surface curves (bevels, rounded corners) the finish is rubbed through to lighter, shinier base material, in patches. Metal shows bare steel; polymer and wood go lighter and smoother.
+- **Detail:** anodised micro-noise on metal and stipple on polymer and rubber grips.
+- **Finish variation per weapon:** each gun has its own slight shade, sheen and amount of wear. It's stored per vertex, so every gun still shares the same materials and draw calls.
+- Extruded parts get an extra bevel segment for rounder edges.
+
+### Buildings and props
+- **Trim:** windows sit in the wall with a lined reveal and a drip cap. Eaves have rafter tails underneath. Houses get gutters and a downpipe down to the ground. All of it merges into the existing batches, so there are no extra draw calls.
+- **Hero props** at points of interest: a red tractor at Låven, a coastal gun on its ring mount at Kystfortet, a churchyard at Kirka, a fire pit with log benches at Hyttefeltet, lobster pots at Brygga, a fuel pump at Havna and a timber trailer at Skogen.
+- **Interior variety:**
+  - **Rorbu cabins:** a wood stove with its pipe, a table and stools, and oilskins on pegs.
+  - **Houses upstairs:** a study, a kids' room with a bunk bed, or a box room.
+- **More cover, some of it destructible:** stacks of wooden crates near every landmark. They stop bullets (mostly) and splinter apart section by section under fire or blasts.
+
+### Surfaces
+- **Baked ambient occlusion** (`src/world/BakedAO.ts`): every static mesh gets per-vertex occlusion from the solid boxes and ground around it: corners, under furniture, wall-floor seams, the foot of walls. It's baked in small time slices after the map loads (about 830k vertices, about 1.5 s of work spread over the first seconds of play), so the screen-space AO pass can stay at half resolution.
+- **Weathering** (one patch on the existing world shader, `src/fx/Snow.ts`):
+  - **Moss** on north faces and north-facing roof slopes, heavier near the ground.
+  - **Grime** splashed at the base of exterior walls.
+  - **Rain wetness:** soaks in over about 40 s of rain and dries over about 2 min. Surfaces darken and turn glossy and puddles form on flat ground, but only where the sky can reach. Soil and grass just darken.
+  - **Winter frost** on metal.
+- **Interior ambient probes:** a top-down map of lamp warmth and window daylight per building. Indoor surfaces take the room's light: warm by the lamps at night, cooler daylight near windows. Rooms are no longer uniformly lit.
+- **Terrain:** fine triplanar detail normals up close on slopes and cliffs, so rock reads as fractured stone at arm's length.
+
+### Light and life
+- **Lamps with character:**
+  - Some fluorescent tubes stutter now and then; some old bulbs are tired.
+  - Warm interior bulbs vary in colour.
+  - Bunkers have a red rotating emergency beacon over the door.
+- **Indoor muzzle flash:** firing inside lights up the room's walls for a moment.
+- **Footprints:** boot prints in snow and wet sand, from you and every bot near you, fading after a minute.
+- **Breath vapour** on cold maps (winter, snow, cold nights), from soldiers near you and from your own mouth. Faster and bigger when running.
+
+### Tested
+- `tools/gfxshots.cjs` was used for before/after shots: night vision, the clear-weather vista and water, a house dry and fully wet, gun wear, winter footprints and a lit interior at night.
+- `tools/eqtest.cjs` and the bot gun probe pass with no errors.
+
 ## Update 32: MP7 handling rebuilt
 
 The MP7's inspect and both reloads were rebuilt from scratch in a new module, `src/weapons/Mp7Anims.ts`, and keyed by hand for this game. They replace the shared PDW clip and the generic SMG inspect. The rebuild follows how the real gun works: the magazine lives in the pistol grip, so the firing hand never lets go, and the gun has a T-shaped charging handle at the rear. Nothing is taken from another game's animation.

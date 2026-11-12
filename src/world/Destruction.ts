@@ -176,8 +176,17 @@ export class Destruction {
       for (let k = 0; k < n; k++) {
         const a = x0 + (len * k) / n, bx = x0 + (len * (k + 1)) / n, sl = bx - a;
         const centre = new THREE.Vector3((a + bx) / 2, 0.5, z).applyMatrix4(d.m);
-        const sec: Section = { pos: centre, hp: FENCE_HP, collider: null, ranges: [], dead: false, dir: new THREE.Vector3(1, 0, 0).applyQuaternion(q), style, len: sl, q };
-        if (style === 'picket') {
+        const sec: Section = { pos: centre, hp: style === 'crates' ? FENCE_HP * 2.6 : FENCE_HP, collider: null, ranges: [], dead: false, dir: new THREE.Vector3(1, 0, 0).applyQuaternion(q), style, len: sl, q };
+        if (style === 'crates') {
+          // (Update 33) stacked wooden crates: real cover that splinters apart under fire
+          const cw = sl / 2 - 0.04;
+          const seed = Math.abs(Math.sin((centre.x * 12.9898 + centre.z * 78.233) * 43758.5453)) % 1;
+          for (const [cx, base, h] of [[a + sl * 0.25, 0, 0.82], [a + sl * 0.75, 0, 0.82], [a + sl * (seed < 0.5 ? 0.3 : 0.7), 0.82, 0.62]] as const) {
+            add('crate', metricBox(base ? cw * 0.85 : cw, h, base ? 0.62 : 0.8), new THREE.Matrix4().multiplyMatrices(d.m, local(cx, base + h / 2, z).multiply(new THREE.Matrix4().makeRotationY(base ? (seed - 0.5) * 0.4 : 0))), sec);
+            // slats on the faces
+            add('woodRaw', metricBox(base ? cw * 0.85 + 0.02 : cw + 0.02, 0.06, (base ? 0.62 : 0.8) + 0.02), new THREE.Matrix4().multiplyMatrices(d.m, local(cx, base + h * 0.5, z)), sec);
+          }
+        } else if (style === 'picket') {
           for (let i = a; i < bx - 0.06; i += 0.14) add('trim', metricBox(0.08, 0.9 + 0.08 * ((i * 7) % 1), 0.04), new THREE.Matrix4().multiplyMatrices(d.m, local(i + 0.04, (0.9 + 0.08 * ((i * 7) % 1)) / 2, z + 0.02)), sec);
           add('trim', metricBox(sl, 0.07, 0.05), new THREE.Matrix4().multiplyMatrices(d.m, local((a + bx) / 2, 0.585, z - 0.025)), sec);
         } else {
@@ -186,10 +195,10 @@ export class Destruction {
           for (const y of [0.495, 0.995]) add('woodRaw', metricBox(sl, 0.09, 0.06), new THREE.Matrix4().multiplyMatrices(d.m, local((a + bx) / 2, y, z)), sec);
         }
         const cq = q.clone();
-        const half = new THREE.Vector3(sl / 2, style === 'picket' ? 0.47 : 0.6, 0.05);
+        const half = style === 'crates' ? new THREE.Vector3(sl / 2, 0.72, 0.4) : new THREE.Vector3(sl / 2, style === 'picket' ? 0.47 : 0.6, 0.05);
         const cp = new THREE.Vector3((a + bx) / 2, half.y, z).applyMatrix4(d.m);
         sec.collider = this.physics.addBox(cp, half, cq, {
-          surface: 'wood', penetrable: 1,
+          surface: 'wood', penetrable: style === 'crates' ? 0.5 : 1,
           onHit: (p, dir, pw) => this.hitSection(sec, 9 * (pw ?? 1), dir, p),
         });
         this.sections.push(sec);
@@ -228,7 +237,7 @@ export class Destruction {
     s.collider = null;
     // planks / pickets fly in the direction of the force, splinters puff
     const proto = s.style === 'picket' ? this.picketProto : this.plankProto;
-    const n = s.style === 'picket' ? 4 : 3;
+    const n = s.style === 'picket' ? 4 : s.style === 'crates' ? 6 : 3;
     for (let i = 0; i < n; i++) {
       const at = s.pos.clone().addScaledVector(s.dir, (Math.random() - 0.5) * s.len).setY(s.pos.y + (Math.random() - 0.3) * 0.4);
       const v = dir.clone().setY(0).normalize().multiplyScalar(2 + Math.random() * 3).setY(1.5 + Math.random() * 2);

@@ -795,7 +795,7 @@ export class UI {
         ${toggle('dof', 'Aim depth of field')}
         ${slider('grassDensity', 'Grass density (next match)', 0.2, 1.5, 0.1)}
         ${select('mapVariant', 'Map variant', [['random', 'Random per match'], ['autumn', 'Autumn'], ['winter', 'Winter (snow-covered)']])}
-        ${select('weather', 'Weather', [['auto', 'Random'], ['clear', 'Broken clouds'], ['overcast', 'Overcast'], ['rain', 'Rain'], ['snow', 'Snow showers']])}
+        ${select('weather', 'Weather', [['auto', 'Random'], ['clear', 'Clear (sunny, no clouds)'], ['fair', 'Broken clouds'], ['overcast', 'Overcast'], ['rain', 'Rain'], ['snow', 'Snow showers']])}
         ${select('timeOfDay', 'Time of day', [['dynamic', 'Dynamic (time passes)'], ['dawn', 'Morning'], ['day', 'Midday'], ['golden', 'Golden hour'], ['blue', 'Blue hour'], ['night', 'Night — northern lights']])}
         ${toggle('godRays', 'Sun shafts (god rays)')}
         ${toggle('showFps', 'Show FPS')}

@@ -323,6 +323,7 @@ export class Terrain {
     const L = this.mats;
     const grass = L.surface('grass'), rock = L.surface('rock'), forest = L.surface('forest'), gravel = L.surface('gravel');
     const m = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 1, metalness: 0 });
+    m.userData.wx = ['terrain'];
     const uniforms = {
       tGrassA: { value: grass.albedo }, tGrassN: { value: grass.normal },
       tRockA: { value: rock.albedo }, tRockN: { value: rock.normal },
@@ -434,6 +435,21 @@ export class Terrain {
             vec3 nX = rNx.xyz * 2.0 - 1.0, nY = rNy.xyz * 2.0 - 1.0, nZ = rNz.xyz * 2.0 - 1.0;
             vec3 rockWorld = (vec3(0.0, nX.y, nX.x) * bw.x + vec3(nY.x, 0.0, nY.y) * bw.y + vec3(nZ.x, nZ.y, 0.0) * bw.z);
             vec3 nW = N + vec3(nPl.x, 0.0, nPl.y) * (1.0 - far * 0.7) + rockWorld * wr * 1.4;
+          #ifndef TERRAIN_LOW
+            // fine triplanar detail normals up close on slopes and rock (Update 33): cliffs read as
+            // fractured stone at arm's length instead of a smooth stretched texture
+            {
+              float nearK = (1.0 - smoothstep(22.0, 55.0, camDist)) * max(wr, smoothstep(0.12, 0.3, slope));
+              if (nearK > 0.01) {
+                float dt = 1.3;
+                vec3 dX = texture2D(tRockN, wp.zy / dt).xyz * 2.0 - 1.0;
+                vec3 dY = texture2D(tRockN, wp.xz / dt + 0.37).xyz * 2.0 - 1.0;
+                vec3 dZ = texture2D(tRockN, wp.xy / dt + 0.71).xyz * 2.0 - 1.0;
+                vec3 det = vec3(0.0, dX.y, dX.x) * bw.x + vec3(dY.x, 0.0, dY.y) * bw.y + vec3(dZ.x, dZ.y, 0.0) * bw.z;
+                nW += det * nearK * 0.9;
+              }
+            }
+          #endif
             tNrm = normalize(nW);
           }`,
         )

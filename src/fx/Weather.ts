@@ -159,7 +159,7 @@ export class Weather {
     this.t += dt;
     // ---- wind: wandering direction, weather-dependent strength, gusts
     this.windAng += (Math.sin(this.t * 0.013) * 0.02 + (Math.random() - 0.5) * 0.01) * dt * 3;
-    const base = weather === 'clear' ? 2.5 : weather === 'overcast' ? 4.5 : weather === 'rain' ? 6.5 : 7;
+    const base = weather === 'clear' ? 1.2 : weather === 'fair' ? 2.5 : weather === 'overcast' ? 4.5 : weather === 'rain' ? 6.5 : 7;
     this.gust += ((Math.sin(this.t * 0.37) * 0.5 + Math.sin(this.t * 0.11 + 2) * 0.5) * 0.35 - this.gust) * Math.min(1, dt);
     this.windSpeed = Math.max(0.5, base * (1 + this.gust) * (1 + this.storm * 1.7));
     this.wind.set(Math.cos(this.windAng) * this.windSpeed, 0, Math.sin(this.windAng) * this.windSpeed);
@@ -176,7 +176,7 @@ export class Weather {
     this.bankT -= dt;
     if (!bk.active && this.bankT <= 0) {
       this.bankT = 180 + Math.random() * 200;
-      if (Math.random() < (weather === 'clear' ? 0.35 : 0.75)) this.rollFog();
+      if (weather !== 'clear' && Math.random() < (weather === 'fair' ? 0.35 : 0.75)) this.rollFog();
     }
     this.inBank = 0;
     if (bk.active) {
@@ -212,7 +212,7 @@ export class Weather {
     for (let i = 0; i < this.fogSheets.length; i++) {
       const f = this.fogSheets[i];
       f.position.x += Math.sin(this.t * 0.05 + i) * dt * 0.8;
-      (f.material as THREE.MeshBasicMaterial).opacity = weather === 'clear' ? 0.18 : 0.4;
+      (f.material as THREE.MeshBasicMaterial).opacity = weather === 'clear' || weather === 'fair' ? 0.18 : 0.4;
       f.position.x += this.wind.x * dt * 0.05;
       f.position.z += this.wind.z * dt * 0.05;
     }

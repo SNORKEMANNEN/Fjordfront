@@ -34,7 +34,17 @@ export class GeoBuilder {
     this.destructibles.push({ kind, m: this.m.clone().multiply(local), data });
   }
 
-  constructor(public physics: Physics, public mats: Record<string, THREE.Material>) {}
+  /**
+   * Solid boxes for the baked ambient occlusion (Update 33): world matrix of a unit box scaled to
+   * the size, inverted, plus a world AABB. Recorded for every visual box.
+   */
+  occ: { inv: THREE.Matrix4; min: THREE.Vector3; max: THREE.Vector3 }[] = [];
+  /** every builder that made static world geometry (for the AO bake) */
+  static registry: GeoBuilder[] = [];
+
+  constructor(public physics: Physics, public mats: Record<string, THREE.Material>) {
+    GeoBuilder.registry.push(this);
+  }
 
   get m() {
     return this.stack[this.stack.length - 1];
@@ -72,7 +82,15 @@ export class GeoBuilder {
     const local = new THREE.Matrix4();
     if (rot) local.makeRotationFromEuler(rot);
     local.setPosition(cx, cy, cz);
-    if (mat) this.addGeo(mat, metricBox(w, h, d), local);
+    if (mat) {
+      this.addGeo(mat, metricBox(w, h, d), local);
+      // occluder for the AO bake (skip paper-thin decals: rugs, pictures, lines)
+      if (Math.min(w, h, d) > 0.025 && !mat.startsWith('glass')) {
+        const world = this.m.clone().multiply(local).multiply(new THREE.Matrix4().makeScale(w, h, d));
+        const box = new THREE.Box3(new THREE.Vector3(-0.5, -0.5, -0.5), new THREE.Vector3(0.5, 0.5, 0.5)).applyMatrix4(world);
+        this.occ.push({ inv: world.clone().invert(), min: box.min, max: box.max });
+      }
+    }
     if (collide) return this.collider(local, w / 2, h / 2, d / 2, collide, extra);
     return null;
   }

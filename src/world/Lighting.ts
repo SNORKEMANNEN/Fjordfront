@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 
-export interface Anchor { p: THREE.Vector3; color: number; intensity: number; dist: number; night: boolean; broken?: boolean }
+/** flicker: 'fluoro' tube that stutters now and then, 'old' tired bulb, 'beacon' rotating emergency light (Update 33) */
+export interface Anchor { p: THREE.Vector3; color: number; intensity: number; dist: number; night: boolean; broken?: boolean; flicker?: 'fluoro' | 'old' | 'beacon'; phase?: number }
 
 /**
  * A small pool of point lights is re-assigned to the light fixtures nearest the camera,
@@ -11,6 +12,7 @@ export class LightPool {
   private lights: THREE.PointLight[] = [];
   private anchors: Anchor[] = [];
   private timer = 0;
+  private t = 0;
   private assigned: (Anchor | null)[] = [];
 
   constructor(parent: THREE.Object3D, n = 6) {
@@ -39,7 +41,25 @@ export class LightPool {
     this.timer = 0;
   }
 
+  /** brightness multiplier for a flickering fixture */
+  private flick(a: Anchor) {
+    const t = this.t, ph = a.phase ?? 0;
+    if (a.flicker === 'fluoro') {
+      // steady, then every so often a burst of stuttering
+      const burst = Math.sin(t * 0.31 + ph) * Math.sin(t * 1.07 + ph * 3.1);
+      return burst > 0.9 ? (Math.sin(t * 57 + ph) > 0.2 ? 1 : 0.12) : 1;
+    }
+    if (a.flicker === 'old') {
+      const w = 0.92 + 0.08 * Math.sin(t * 7.3 + ph) * Math.sin(t * 3.1 + ph * 2);
+      const dip = Math.sin(t * 0.53 + ph) > 0.97 ? 0.35 : 1;
+      return w * dip;
+    }
+    if (a.flicker === 'beacon') return 0.12 + 0.88 * Math.pow(Math.max(0, Math.sin(t * 3.6 + ph)), 5);
+    return 1;
+  }
+
   update(dt: number, cam: THREE.Vector3, nightAmt: number, dayDim: number) {
+    this.t += dt;
     this.timer -= dt;
     if (this.timer <= 0) {
       this.timer = 0.35;
@@ -62,7 +82,8 @@ export class LightPool {
       l.color.setHex(a.color);
       l.distance = a.dist;
       const want = a.intensity * (a.night ? nightAmt : 0.55 + nightAmt * 0.6 + (1 - dayDim) * 0.3);
-      l.intensity += (want - l.intensity) * Math.min(1, dt * 6);
+      if (a.flicker) l.intensity = want * this.flick(a);
+      else l.intensity += (want - l.intensity) * Math.min(1, dt * 6);
     }
   }
 }

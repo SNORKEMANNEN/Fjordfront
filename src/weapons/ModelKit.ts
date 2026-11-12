@@ -9,6 +9,70 @@ import { RoundedBoxGeometry } from 'three/examples/jsm/geometries/RoundedBoxGeom
  */
 export type P2 = [number, number];
 
+/**
+ * Per-weapon finish (Update 33): set before a weapon is built; every PartBuilder mesh gets it as
+ * an `aFinish` vertex attribute (tint, roughness offset, wear amount, each -1..1 / 0..1) so all
+ * guns share their materials (no extra draws) but each has its own anodising shade and wear.
+ */
+let FINISH: [number, number, number] = [0, 0, 0.5];
+export function setFinish(id: string) {
+  let h = 2166136261;
+  for (let i = 0; i < id.length; i++) h = Math.imul(h ^ id.charCodeAt(i), 16777619);
+  const r = (k: number) => (((h >>> (k * 8)) & 255) / 255);
+  FINISH = [r(0) * 2 - 1, r(1) * 2 - 1, 0.3 + r(2) * 0.7];
+}
+
+/**
+ * Edge wear, micro detail and finish for the weapon materials (Update 33), as a shader patch:
+ *  - worn edges: where the surface curves (bevels, rounded corners — found from the screen-space
+ *    change of the normal) the coating is rubbed through to lighter, shinier base material, in
+ *    patches; metal parts show bare steel
+ *  - anodised micro-noise on metal (fine roughness variation), stipple on polymer grips
+ *  - the per-weapon finish (tint / roughness) from `aFinish`
+ */
+export function patchWeaponMaterial(m: THREE.Material, kind: 'metal' | 'polymer' | 'rubber' | 'wood') {
+  const sm = m as THREE.MeshStandardMaterial;
+  if (!sm.isMeshStandardMaterial || sm.userData.wear) return;
+  sm.userData.wear = kind;
+  const prev = sm.onBeforeCompile;
+  const prevKey = sm.customProgramCacheKey;
+  const base = prevKey === THREE.Material.prototype.customProgramCacheKey ? prev.toString() : null;
+  sm.customProgramCacheKey = () => (base ?? prevKey.call(sm)) + '|wear-' + kind;
+  sm.onBeforeCompile = (sh, r) => {
+    prev.call(sm, sh, r);
+    sh.vertexShader = sh.vertexShader
+      .replace('#include <common>', '#include <common>\nattribute vec3 aFinish; varying vec3 vFinish; varying vec3 vObjP;')
+      .replace('#include <begin_vertex>', '#include <begin_vertex>\nvFinish = aFinish; vObjP = position;');
+    sh.fragmentShader = sh.fragmentShader
+      .replace('#include <common>', `#include <common>
+        varying vec3 vFinish; varying vec3 vObjP;
+        float wH(vec3 p){ return fract(sin(dot(p, vec3(127.1, 311.7, 74.7))) * 43758.5453); }
+        float wN(vec3 p){ vec3 i = floor(p), f = fract(p); f = f*f*(3.0-2.0*f);
+          return mix(mix(mix(wH(i), wH(i+vec3(1,0,0)), f.x), mix(wH(i+vec3(0,1,0)), wH(i+vec3(1,1,0)), f.x), f.y),
+                     mix(mix(wH(i+vec3(0,0,1)), wH(i+vec3(1,0,1)), f.x), mix(wH(i+vec3(0,1,1)), wH(i+vec3(1,1,1)), f.x), f.y), f.z); }`)
+      .replace('#include <metalnessmap_fragment>', `#include <metalnessmap_fragment>
+        {
+          // finish
+          diffuseColor.rgb *= 1.0 + vFinish.x * 0.1;
+          roughnessFactor = clamp(roughnessFactor + vFinish.y * 0.08, 0.04, 1.0);
+          // micro detail
+          float mn = wN(vObjP * 900.0);
+          ${kind === 'metal' ? 'roughnessFactor *= 0.88 + 0.24 * mn;' : ''}
+          ${kind === 'polymer' || kind === 'rubber' ? 'float st = smoothstep(0.55, 0.8, wN(vObjP * 1400.0)); diffuseColor.rgb *= 0.9 + 0.2 * st; roughnessFactor = mix(roughnessFactor, 1.0, st * 0.35);' : ''}
+          // worn edges (curvature from the screen-space change of the normal)
+          float curv = clamp(length(fwidth(vNormal)) * 6.0 - 0.15, 0.0, 1.0);
+          float patchy = smoothstep(0.35, 0.75, wN(vObjP * 160.0) * 0.7 + wN(vObjP * 520.0) * 0.3);
+          float wear = curv * patchy * (0.35 + 0.65 * vFinish.z);
+          ${kind === 'metal'
+            ? 'diffuseColor.rgb = mix(diffuseColor.rgb, vec3(0.55, 0.56, 0.57), wear * 0.7); roughnessFactor = mix(roughnessFactor, 0.28, wear); metalnessFactor = mix(metalnessFactor, 1.0, wear);'
+            : kind === 'wood'
+              ? 'diffuseColor.rgb = mix(diffuseColor.rgb, diffuseColor.rgb * 1.5, wear * 0.6); roughnessFactor = mix(roughnessFactor, 0.35, wear);'
+              : 'diffuseColor.rgb = mix(diffuseColor.rgb, diffuseColor.rgb * 1.7 + 0.03, wear * 0.55); roughnessFactor = mix(roughnessFactor, 0.45, wear);'}
+        }`);
+  };
+  sm.needsUpdate = true;
+}
+
 export class PartBuilder {
   private geos = new Map<string, THREE.BufferGeometry[]>();
 
@@ -33,6 +97,10 @@ export class PartBuilder {
         c.setAttribute('position', g.getAttribute('position'));
         c.setAttribute('normal', g.getAttribute('normal'));
         c.setAttribute('uv', g.getAttribute('uv'));
+        const n = c.getAttribute('position').count;
+        const f = new Float32Array(n * 3);
+        for (let i = 0; i < n; i++) f.set(FINISH, i * 3);
+        c.setAttribute('aFinish', new THREE.BufferAttribute(f, 3));
         return c;
       });
       const merged = mergeGeometries(clean, false);
@@ -81,7 +149,7 @@ export function extrude(shape: THREE.Shape, width: number, bevel = 0.0015, wc = 
     bevelEnabled: b > 0,
     bevelThickness: b,
     bevelSize: b,
-    bevelSegments: 2,
+    bevelSegments: 3,
     curveSegments: curveSegs,
   });
   g.translate(0, 0, -(width - b * 2) / 2 + wc);

@@ -1801,7 +1801,7 @@ export class NetGame {
       }
       case 'weather': {
         const w = (args[0] ?? '').toLowerCase();
-        if (!['clear', 'overcast', 'rain', 'snow'].includes(w)) return reply('Usage: /weather &lt;clear|overcast|rain|snow&gt;');
+        if (!['clear', 'fair', 'overcast', 'rain', 'snow'].includes(w)) return reply('Usage: /weather &lt;clear|fair|overcast|rain|snow&gt;');
         g.env.setWeather(w);
         g.weather.reset(g.winter, w);
         this.envT = 0;

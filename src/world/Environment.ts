@@ -5,7 +5,8 @@ import { HeightFog, installHeightFog } from '../render/HeightFog';
 import { Settings } from '../game/Settings';
 import { clamp, lerp, smoothstep } from '../core/math';
 
-export type Weather = 'clear' | 'overcast' | 'rain' | 'snow';
+/** 'clear' = cloudless, high summer sun (Update 33); 'fair' = broken clouds (the old clear) */
+export type Weather = 'clear' | 'fair' | 'overcast' | 'rain' | 'snow';
 export type TimePreset = 'dynamic' | 'dawn' | 'day' | 'golden' | 'blue' | 'night';
 
 const PRESET_HOUR: Record<Exclude<TimePreset, 'dynamic'>, number> = { dawn: 9.0, day: 12.6, golden: 16.25, blue: 17.35, night: 23.2 };
@@ -85,6 +86,15 @@ export class Environment {
       fog: true,
       alpha: 1,
     });
+    // (Update 33) a reflectance control: on a clear summer day the shallows read turquoise
+    // instead of a white mirror of the horizon
+    {
+      const wm = this.water.material as THREE.ShaderMaterial;
+      wm.uniforms.uReflK = { value: 1 };
+      wm.fragmentShader = wm.fragmentShader
+        .replace('uniform vec3 waterColor;', 'uniform vec3 waterColor;\nuniform float uReflK;')
+        .replace('float reflectance = rf0 + ( 1.0 - rf0 ) * pow( ( 1.0 - theta ), 5.0 );', 'float reflectance = ( rf0 + ( 1.0 - rf0 ) * pow( ( 1.0 - theta ), 5.0 ) ) * uReflK;');
+    }
     this.water.rotation.x = -Math.PI / 2;
     this.water.position.y = 0;
     // planar reflection re-renders the scene: refresh it every third frame
@@ -102,7 +112,7 @@ export class Environment {
     this.pmrem = new THREE.PMREMGenerator(renderer);
     this.setTime(Settings.data.timeOfDay ?? 'dynamic');
     const w = Settings.data.weather;
-    this.setWeather(w === 'auto' ? (Math.random() < 0.3 ? 'rain' : Math.random() < 0.5 ? 'overcast' : 'clear') : w);
+    this.setWeather(w === 'auto' ? (Math.random() < 0.3 ? 'rain' : Math.random() < 0.5 ? 'overcast' : Math.random() < 0.5 ? 'fair' : 'clear') : w);
   }
 
   applyShadowRes() {
@@ -136,16 +146,17 @@ export class Environment {
   setWeather(w: Weather) {
     this.weather = w;
     const u = this.sky.uniforms;
-    u.uCover.value = w === 'clear' ? 0.4 : w === 'overcast' ? 0.62 : w === 'snow' ? 0.8 : 0.86;
+    u.uCover.value = w === 'clear' ? 0 : w === 'fair' ? 0.4 : w === 'overcast' ? 0.62 : w === 'snow' ? 0.8 : 0.86;
     const wu = (this.water.material as THREE.ShaderMaterial).uniforms;
-    wu.distortionScale.value = w === 'rain' ? 3.5 : w === 'snow' ? 2.8 : 2.2;
+    wu.distortionScale.value = w === 'rain' ? 3.5 : w === 'snow' ? 2.8 : w === 'clear' ? 1.4 : 2.2;
     this.applyLighting(true);
   }
 
   /** Sun position for the current hour: elevation peaks ~16° at 12:45, azimuth 180° (south) at noon. */
   private solar() {
     const h = this.hour;
-    const el = 30.5 * Math.cos((2 * Math.PI * (h - 12.75)) / 24) - 14.5;
+    // a cloudless day is a summer day: the sun rides much higher (~36° at noon)
+    const el = 30.5 * Math.cos((2 * Math.PI * (h - 12.75)) / 24) - 14.5 + (this.weather === 'clear' ? 20 * Math.max(0, Math.cos((2 * Math.PI * (h - 12.75)) / 24)) : 0);
     const az = 180 + (h - 12.75) * 15;
     return { el, az };
   }
@@ -165,8 +176,10 @@ export class Environment {
     const golden = (this.golden = smoothstep(13, 3, el) * smoothstep(-4, 1.5, el));
     const night = (this.night = 1 - smoothstep(-9, -2, el));
     // snow showers light like a bright overcast; the winter map is colder all round
-    const w = this.weather === 'snow' ? 'overcast' : this.weather;
+    const w = this.weather === 'snow' ? 'overcast' : this.weather === 'fair' ? 'clear' : this.weather;
     const snowy = this.weather === 'snow';
+    // cloudless summer day: deep blue zenith, bright turquoise water, vivid colour (Update 33)
+    const sunny = this.weather === 'clear' && !this.winter ? 1 : this.weather === 'clear' ? 0.6 : 0;
     const wDim = w === 'clear' ? 1 : w === 'overcast' ? (snowy ? 0.55 : 0.62) : 0.32;
     const wGold = w === 'clear' ? 1 : w === 'overcast' ? 0.55 : 0.15;
 
@@ -177,6 +190,10 @@ export class Environment {
     // pitch-dark nights: a barely-there sky, the land lit only by lamps and windows (goggles: N)
     const nightZen = C(0.0015, 0.0025, 0.007), nightHor = C(0.005, 0.007, 0.013);
     const u = this.sky.uniforms;
+    if (sunny) {
+      dayZen.lerp(C(0.015, 0.1, 0.56), sunny);
+      dayHor.lerp(C(0.26, 0.52, 0.9), sunny);
+    }
     let zen = lerpC(dayZen, goldZen, golden), hor = lerpC(dayHor, goldHor, golden);
     zen = lerpC(zen, nightZen, night);
     hor = lerpC(hor, nightHor, night);
@@ -195,7 +212,7 @@ export class Environment {
     const sunCol = lerpC(this.winter ? C(0.95, 0.95, 1.0) : C(1.0, 0.93, 0.82), C(1.0, 0.58, 0.3), golden * wGold);
     this.sunColor.copy(sunCol);
     u.uSunColor.value.copy(sunCol).multiplyScalar(day * (0.5 + 0.5 * wDim));
-    const sunI = (0.6 + 3.0 * smoothstep(0, 14, el)) * day * wDim + golden * 0.6 * wGold;
+    const sunI = ((0.6 + 3.0 * smoothstep(0, 14, el)) * day * wDim + golden * 0.6 * wGold) * (1 + 0.18 * sunny);
     if (night > 0.5) {
       this.lightDir.copy(this.moonDir);
       this.sun.color.setRGB(0.55, 0.66, 0.95);
@@ -212,36 +229,50 @@ export class Environment {
     this.hemi.color.copy(skyAmb);
     this.hemi.groundColor.copy(lerpC(this.winter ? C(0.62, 0.64, 0.68) : C(0.29, 0.29, 0.24), C(0.05, 0.05, 0.06), night));
     this.hemi.intensity = lerp(w === 'clear' ? 0.4 : w === 'overcast' ? 0.5 : 0.6, 0.06, night);
+    if (sunny) {
+      // a clear blue sky fills the shadows with blue; the green land bounces light up
+      this.hemi.color.lerp(C(0.55, 0.72, 1.0), 0.5 * sunny * (1 - night));
+      if (!this.winter) this.hemi.groundColor.lerp(C(0.3, 0.38, 0.2), 0.5 * sunny * (1 - night));
+      this.hemi.intensity *= 1 + 0.25 * sunny;
+    }
 
     // ---- fog ----
     const dayFog = w === 'clear' ? C(0.56, 0.63, 0.7) : w === 'overcast' ? C(0.52, 0.56, 0.59) : C(0.4, 0.43, 0.45);
+    if (sunny) dayFog.lerp(C(0.42, 0.6, 0.86), sunny);
     let fogCol = lerpC(dayFog, C(0.6, 0.43, 0.33).lerp(dayFog, 1 - wGold), golden);
     fogCol = lerpC(fogCol, C(0.004, 0.005, 0.008), night);
     fogCol.lerp(C(0.22, 0.22, 0.3), blue * 0.5);
     if (snowy || this.winter) fogCol.lerp(C(0.72, 0.76, 0.82).multiplyScalar(lerp(1, 0.06, night)), snowy ? 0.55 : 0.25);
     this.fog.color.copy(fogCol);
     u.uFogColor.value.copy(fogCol).multiplyScalar(1.05);
-    this.baseFog = (w === 'clear' ? 0.0012 : w === 'overcast' ? (snowy ? 0.0038 : 0.0022) : 0.0042) * (1 - golden * 0.25 + night * 0.3);
+    this.baseFog = (w === 'clear' ? 0.0012 : w === 'overcast' ? (snowy ? 0.0038 : 0.0022) : 0.0042) * (1 - golden * 0.25 + night * 0.3) * (1 - 0.5 * sunny);
     this.fog.density = Math.min(0.09, this.baseFog * this.fogBoost);
     this.fog.falloff = w === 'rain' ? 0.022 : 0.03;
     this.fog.sunAz = az;
     this.fog.sunEl = el;
-    this.fog.scatter = day * (0.5 + 0.5 * wDim) * (1 + golden * 0.8);
+    this.fog.scatter = day * (0.5 + 0.5 * wDim) * (1 + golden * 0.8) * (1 - 0.6 * sunny);
     this.fog.sync();
 
     // ---- water ----
     const wu = (this.water.material as THREE.ShaderMaterial).uniforms;
     wu.sunDirection.value.copy(night > 0.5 ? this.moonDir : this.sunDir);
     wu.sunColor.value.copy(night > 0.5 ? C(0.5, 0.6, 0.85).multiplyScalar(0.4) : sunCol.clone().multiplyScalar((w === 'rain' ? 0.25 : w === 'overcast' ? 0.6 : 1) * day));
-    wu.waterColor.value.copy(lerpC(this.winter ? C(0.02, 0.07, 0.09) : C(0.043, 0.165, 0.173), C(0.004, 0.012, 0.02), night));
+    wu.uReflK.value = 1 - 0.45 * sunny;
+    if (sunny) wu.sunColor.value.multiplyScalar(1 - 0.35 * sunny);
+    wu.waterColor.value.copy(lerpC(this.winter ? C(0.02, 0.07, 0.09) : C(0.043, 0.165, 0.173).lerp(C(0.0, 0.4, 0.44), sunny), C(0.004, 0.012, 0.02), night));
 
     // ---- grading & effects ----
     this.exposure = lerp(1, 1.1, night) * lerp(1, 0.95, golden);
     this.rays = (w === 'clear' ? 1 : w === 'overcast' ? 0.45 : 0) * day * (0.35 + golden * 0.9);
-    this.cloudShadow = (w === 'clear' ? 0.55 : w === 'overcast' ? 0.35 : 0) * day;
+    this.cloudShadow = (this.weather === 'clear' ? 0 : w === 'clear' ? 0.55 : w === 'overcast' ? 0.35 : 0) * day;
 
     this.gradeTint.setRGB(1, 1, 1);
     this.gradeSat = 1;
+    if (sunny) {
+      // vivid: a touch more saturation and warmth in daylight
+      this.gradeSat = 1 + 0.32 * sunny * day;
+      this.gradeTint.lerp(C(1.03, 1.0, 0.97), sunny * day);
+    }
     if (this.blueHour > 0) this.applyBlueHour(az);
     // (re-baking the sky probe is a frame spike: only every 2.5° of sun travel, ~30 s in dynamic time)
     if (forceEnv || Math.abs(el - this.lastEnvElev) > 2.5) this.updateEnvMap();

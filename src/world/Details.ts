@@ -31,6 +31,7 @@ export class Details {
     this.harbour();
     this.farmland();
     this.poiProps();
+    this.heroProps();
     this.combatZones();
     // keep trees from growing through the props
     for (const p of this.placed) {
@@ -477,6 +478,130 @@ export class Details {
         this.mark(7.5, z + 3, 2.4);
       }
     }
+  }
+
+  /**
+   * One or two hero props per point of interest (Update 33) — big, readable things you navigate
+   * by and fight around — plus destructible crate-stack cover around the flag areas.
+   */
+  private heroProps() {
+    const L = (name: string) => LANDMARKS.find((l) => l.name === name);
+    const one = (name: string, r: number, r0: number, r1: number, fn: () => void) => {
+      const l = L(name);
+      if (!l) return;
+      for (let t = 0; t < 40; t++) {
+        const a = this.rng.range(0, Math.PI * 2), d = this.rng.range(r0, r1);
+        const x = l.x + Math.cos(a) * d, z = l.z + Math.sin(a) * d;
+        if (!this.ok(x, z, r, 1.5, 3)) continue;
+        this.at(x, z, Math.atan2(l.x - x, l.z - z) + this.rng.range(-0.6, 0.6), fn);
+        this.mark(x, z, r);
+        return;
+      }
+    };
+    one('Låven', 3.2, 8, 24, () => this.tractor());
+    one('Kystfortet', 3.6, 8, 26, () => this.coastalGun());
+    one('Kirka', 3.4, 6, 16, () => this.graveyard());
+    one('Hyttefeltet', 2.6, 4, 24, () => this.firepit());
+    one('Brygga', 2.4, 6, 30, () => this.lobsterPots());
+    one('Havna', 2.4, 10, 50, () => this.fuelPump());
+    one('Skogen', 3.4, 6, 28, () => this.logLoader());
+    // destructible crate walls near every landmark centre (cover that does not last forever)
+    for (const l of LANDMARKS) {
+      const n = Math.round(2 + l.r / 18);
+      let placed = 0;
+      for (let t = 0; t < n * 8 && placed < n; t++) {
+        const a = this.rng.range(0, Math.PI * 2), d = this.rng.range(l.r * 0.2, l.r * 0.75);
+        const x = l.x + Math.cos(a) * d, z = l.z + Math.sin(a) * d;
+        if (!this.ok(x, z, 2.2, 1.4, 3)) continue;
+        this.at(x, z, a + Math.PI / 2, () => this.b.destructible('fence', new THREE.Matrix4(), { x0: -1.6, x1: 1.6, z: 0, style: 'crates' }));
+        this.mark(x, z, 2.2);
+        placed++;
+      }
+    }
+  }
+  /** an old red farm tractor */
+  private tractor() {
+    const b = this.b;
+    b.box('redSteel', -0.55, 0.55, -1.4, 0.55, 1.25, 0.6, 'metal'); // bonnet + engine
+    b.box('redSteel', -0.75, 0.6, 0.6, 0.75, 1.0, 1.5, 'metal'); // chassis under the seat
+    b.box('steel', -0.08, 1.25, -1.1, 0.08, 1.9, -0.95); // exhaust
+    b.box('tyre', -0.25, 1.0, 0.85, 0.25, 1.35, 1.2); // seat
+    b.box('steel', -0.04, 1.35, 0.4, 0.04, 1.75, 0.48); // steering column
+    b.cyl('tyre', 0, 1.75, 0.44, 0.2, 0.04, 14);
+    // fenders and wheels (big at the back)
+    for (const sx of [-1, 1]) {
+      this.lyingCyl('tyre', 0.72, 0.42, sx * 0.98, 0.72, 1.05, 'fabric');
+      this.lyingCyl('yellowSteel', 0.36, 0.44, sx * 0.98, 0.72, 1.05, null);
+      this.lyingCyl('tyre', 0.42, 0.26, sx * 0.72, 0.42, -1.05, 'fabric');
+      this.lyingCyl('yellowSteel', 0.2, 0.28, sx * 0.72, 0.42, -1.05, null);
+      b.obox('redSteel', [sx * 0.98, 1.48, 1.05], [0.5, 0.06, 1.4], new THREE.Euler(0, 0, 0));
+    }
+    b.box('steel', -0.6, 0.35, 1.55, 0.6, 0.55, 1.75); // hitch
+  }
+  /** a coastal artillery piece on its concrete ring mount */
+  private coastalGun() {
+    const b = this.b;
+    b.cyl('concrete', 0, -0.4, 0, 2.6, 1.1, 20, 'concrete');
+    b.cyl('steel', 0, 0.7, 0, 1.1, 0.35, 16, 'metal');
+    b.box('steel', -0.8, 1.05, -0.9, 0.8, 2.0, 1.0, 'metal'); // cradle / shield
+    b.box('steel', -1.0, 1.05, -1.05, 1.0, 2.3, -0.9, 'metal'); // front shield plate
+    this.lyingCyl('steel', 0.16, 4.6, 0, 1.7, -3.2, 'metal', 'z'); // barrel
+    this.lyingCyl('steel', 0.22, 0.9, 0, 1.7, -1.4, null, 'z'); // breech ring
+    this.lyingCyl('steel', 0.2, 0.3, 0, 1.7, -5.4, null, 'z'); // muzzle
+    for (const sx of [-1, 1]) b.box('rust', sx * 0.5 - 0.06, 1.05, 0.9, sx * 0.5 + 0.06, 1.5, 1.6); // trail
+  }
+  /** a little churchyard: headstones, a cross and a low stone wall */
+  private graveyard() {
+    const b = this.b;
+    for (let r = 0; r < 3; r++) for (let i = 0; i < 4; i++) {
+      const x = -1.8 + i * 1.2 + this.rng.range(-0.1, 0.1), z = -1.6 + r * 1.5;
+      const h = this.rng.range(0.55, 0.9);
+      b.box('concreteWhite', x - 0.3, 0, z - 0.07, x + 0.3, h, z + 0.07, 'concrete', undefined, new THREE.Euler(this.rng.range(-0.06, 0.06), 0, this.rng.range(-0.05, 0.05)));
+    }
+    b.box('steel', 2.6, 0, -0.06, 2.72, 1.6, 0.06, 'metal');
+    b.box('steel', 2.36, 1.05, -0.06, 2.96, 1.15, 0.06);
+    b.box('stone', -2.6, 0, 2.6, 3.0, 0.7, 3.0, 'rock');
+  }
+  /** cabin fire pit ringed by log benches */
+  private firepit() {
+    const b = this.b;
+    b.cyl('stone', 0, 0, 0, 0.75, 0.3, 12, 'rock');
+    b.cyl('chimney', 0, 0.28, 0, 0.55, 0.03, 12);
+    for (let i = 0; i < 3; i++) {
+      const a = (i / 3) * Math.PI * 2 + 0.3;
+      b.push([Math.cos(a) * 1.9, 0, Math.sin(a) * 1.9], -a);
+      this.lyingCyl('bark', 0.22, 1.8, 0, 0.22, 0, 'wood', 'z');
+      b.pop();
+    }
+  }
+  /** a stack of lobster pots and a tangle of rope by the quay */
+  private lobsterPots() {
+    const b = this.b;
+    for (let i = 0; i < 6; i++) {
+      const x = (i % 3) * 0.75 - 0.75, y = Math.floor(i / 3) * 0.5;
+      b.box('net', x - 0.35, y, -0.3, x + 0.35, y + 0.45, 0.3, i < 3 ? 'fabric' : null);
+      b.box('rope', x - 0.36, y + 0.43, -0.31, x + 0.36, y + 0.47, 0.31);
+    }
+    this.buoysSmall();
+  }
+  /** a harbour fuel pump with its hose and drums */
+  private fuelPump() {
+    const b = this.b;
+    b.box('concrete', -0.9, 0, -0.6, 0.9, 0.2, 0.6, 'concrete');
+    b.box('redSteel', -0.35, 0.2, -0.3, 0.35, 1.7, 0.3, 'metal');
+    b.box('white', -0.3, 1.2, -0.31, 0.3, 1.55, -0.3);
+    b.box('steel', 0.35, 0.9, -0.05, 0.42, 1.3, 0.05);
+    this.lyingCyl('tyre', 0.03, 1.1, 0.75, 0.6, 0, null, 'z');
+    this.barrels(2);
+  }
+  /** a timber trailer half-loaded with logs and its crane arm */
+  private logLoader() {
+    const b = this.b;
+    b.box('yellowSteel', -1.1, 0.6, -2.6, 1.1, 0.8, 2.6, 'metal');
+    for (const z of [-2.0, 0, 2.0]) for (const sx of [-1, 1]) b.box('steel', sx * 1.05 - 0.05, 0.8, z - 0.05, sx * 1.05 + 0.05, 2.0, z + 0.05);
+    for (let r = 0; r < 2; r++) for (let i = 0; i < 4 - r; i++) this.lyingCyl('bark', 0.24, 5.0, -0.72 + i * 0.48 + r * 0.24, 1.04 + r * 0.42, 0, i === 0 && r === 0 ? 'wood' : null, 'z');
+    for (const z of [-1.8, 1.8]) for (const sx of [-1, 1]) this.lyingCyl('tyre', 0.45, 0.35, sx * 1.15, 0.45, z, 'fabric');
+    b.obox('yellowSteel', [0.9, 2.4, 2.4], [0.18, 2.6, 0.18], new THREE.Euler(0.6, 0, -0.3));
   }
 
   private combatZones() {

@@ -15,7 +15,7 @@ import { World } from '../world/World';
 import { PlayerController } from '../player/PlayerController';
 import { CameraRig } from '../player/CameraRig';
 import { Settings } from './Settings';
-import { SPAWNS, PLAY_HALF, landmarkAt, coastX, LANDMARKS, TUNNEL, TUNNEL_EXIT, tunnelShafts } from '../world/MapLayout';
+import { SPAWNS, PLAY_HALF, landmarkAt, coastX, LANDMARKS, TUNNEL, TUNNEL_EXIT, tunnelShafts, BUILDINGS } from '../world/MapLayout';
 import { Viewmodel, ActionType } from '../weapons/Viewmodel';
 import { WeaponSystem, ShotRequest } from '../weapons/WeaponSystem';
 import { makeWeaponMaterials, WeaponMats, WEAPON_BUILDERS, WeaponId } from '../weapons/WeaponModels';
@@ -66,10 +66,12 @@ import { NETF } from '../net/NetFlags';
 import { Radar, Markers, RadarBlip } from '../ui/Radar';
 import { T as MOVE_T, T_DEFAULTS } from '../player/PlayerController';
 import { Weather } from '../fx/Weather';
-import { patchSnow, bakeSnowCover } from '../fx/Snow';
+import { patchSnow, bakeSnowCover, WX } from '../fx/Snow';
 import { Doors, Door, Mover } from '../world/Doors';
 import { clamp, damp, RNG } from '../core/math';
 import { SmokeVolume } from '../fx/SmokeVolume';
+import { BakedAO, bakeProbeMap } from '../world/BakedAO';
+import { Footprints } from '../fx/Footprints';
 import { BlastFx } from '../fx/BlastFx';
 import { ArcPreview } from '../fx/ArcPreview';
 import { heldCode } from '../character/SoldierAnim';
@@ -207,6 +209,11 @@ export class Game {
   streaks!: Killstreaks;
   frags = 2;
   private cookStart = -1;
+  /** Update 33: baked per-vertex AO (runs in time slices after load) */
+  bakedAO: BakedAO | null = null;
+  footprints!: Footprints;
+  /** smoothed rain wetness 0..1 */
+  private wetness = 0;
   /** Update 31 equipment: smoke volume, blast layers, the throw-arc preview */
   smoke!: SmokeVolume;
   blastFx!: BlastFx;
@@ -273,7 +280,7 @@ export class Game {
   private scheduleWeatherEvent() {
     const forced = new URLSearchParams(location.search).get('wxevent');
     const roll = Math.random();
-    this.wxEvent = { kind: forced === 'fog' || forced === 'storm' ? forced : roll < 0.4 ? 'fog' : roll < 0.75 ? 'storm' : '', at: forced ? 5 : 80 + Math.random() * 160, t: 0, fog: 0, called: false, cleared: false, prevWeather: '' };
+    this.wxEvent = { kind: forced === 'fog' || forced === 'storm' ? forced : this.env?.weather === 'clear' ? '' : roll < 0.4 ? 'fog' : roll < 0.75 ? 'storm' : '', at: forced ? 5 : 80 + Math.random() * 160, t: 0, fog: 0, called: false, cleared: false, prevWeather: '' };
   }
   private updateWeatherEvent(dt: number) {
     const e = this.wxEvent;
@@ -603,7 +610,10 @@ export class Game {
         this.rig.onMantle(hgt);
         this.audio.play('mantle', { gain: 0.7, reverb: 0.05 });
       },
-      onFootstep: (s) => this.footstepSound(this.player.pos, s, true),
+      onFootstep: (s) => {
+        this.footstepSound(this.player.pos, s, true);
+        this.footprint(this.player.pos, this.player.yaw, -1);
+      },
       onStance: () => this.audio.play('cloth', { gain: 0.5, reverb: 0 }),
       onTacSprint: () => this.audio.play('tac', { gain: 0.7, reverb: 0 }),
       onDive: () => {
@@ -631,6 +641,7 @@ export class Game {
     this.fx = new Effects(this.scene, this.mats.baker);
     this.smoke = new SmokeVolume(this.scene, this.physics, this.mats.baker);
     this.blastFx = new BlastFx(this.scene, this.physics, this.fx, this.mats.baker);
+    this.footprints = new Footprints(this.scene, this.mats.baker);
     this.fx.groundHeight = (x, z) => this.groundHeightAt(x, z);
     this.fx.onShellBounce = (p, kind) => {
       if (kind === 'mag' || kind === 'magSmall') this.audio.play('imp_plate_light', { pos: p, gain: kind === 'mag' ? 0.8 : 0.6, ref: 2, reverb: 0.1, rate: kind === 'mag' ? 0.9 : 1.15 });
@@ -801,6 +812,10 @@ export class Game {
     await this.mats.baker.flush((k) => this.ui.setLoading(0.72 + k * 0.12, 'Painting surfaces'));
     await step(0.84, 'Letting the snow settle');
     patchSnow(this.scene);
+    // interior ambient probes + the progressive per-vertex AO bake (Update 33)
+    WX.uProbeMap.value = bakeProbeMap(BUILDINGS, this.world.buildings.fixtures, this.world.buildings.windows);
+    WX.uProbeBox.value.set(-260, -260, 520, 1);
+    this.bakedAO = new BakedAO((x, z) => this.terrain.heightAt(x, z));
     bakeSnowCover(r, this.scene, [this.env.sky.mesh, this.env.water, this.world.veg.grass, ...this.weather.objects(), ...this.glints]);
     await step(0.86, 'Compiling shaders');
     await this.warmShaders((k) => this.ui.setLoading(0.86 + k * 0.13, 'Compiling shaders'));
@@ -1086,7 +1101,10 @@ export class Game {
           nav: this.nav,
           combatants: () => this.match.players,
           fire: (s, o, d, def, muzzle) => this.onBotShot(s as Bot, o, d, def, muzzle),
-          footstep: (p, sp) => this.footstepSound(p, Math.min(1, sp / 6), false),
+          footstep: (p, sp, b) => {
+            this.footstepSound(p, Math.min(1, sp / 6), false);
+            this.footprint(p, (b as Bot).yaw ?? 0, b.id);
+          },
           objectiveFor: (t, _from, b) => this.objectiveFor(t, b),
           animInterval: (b) => this.animInterval(b),
           viewDist: () => 160 / (1 + this.wxEvent.fog * 3.5 + this.weather.storm * 3 + this.weather.inBank * 2),
@@ -1294,7 +1312,7 @@ export class Game {
     const hour = env?.hour ?? 12;
     const hh = Math.floor(hour), mm = Math.floor((hour - hh) * 60);
     const w = env?.weather ?? 'clear';
-    const wind = w === 'snow' || w === 'rain' ? 'NV 9 m/s' : w === 'overcast' ? 'SV 6 m/s' : 'V 3 m/s';
+    const wind = w === 'snow' || w === 'rain' ? 'NV 9 m/s' : w === 'overcast' ? 'SV 6 m/s' : w === 'clear' ? 'V 1 m/s' : 'V 3 m/s';
     const sea = w === 'snow' || w === 'rain' ? '3 · moderat' : w === 'overcast' ? '2 · lett' : '1 · rolig';
     this.ui.setBrief(chart, { wind, sea, time: `${String(hh).padStart(2, '0')}:${String(mm).padStart(2, '0')}`, season: this.winter ? 'Vinter' : 'Høst' });
     return true;
@@ -1320,6 +1338,7 @@ export class Game {
     this.explosives.clear();
     this.smoke?.clear();
     this.blastFx?.clear();
+    this.footprints?.clear();
     this.arc?.hide();
     this.audio.stopEmitter('fuseHand');
     if (this.stuckEl) this.stuckWarn(false);
@@ -1352,9 +1371,9 @@ export class Game {
     SoldierStyle.setWinter(winter);
     this.world.veg.grass.visible = !winter;
     const r = this.rng.next();
-    let wx: 'clear' | 'overcast' | 'rain' | 'snow' = w === 'auto'
-      ? blue ? (r < 0.6 ? 'clear' : r < 0.85 ? 'snow' : 'overcast')
-      : winter ? (r < 0.5 ? 'snow' : r < 0.75 ? 'overcast' : 'clear') : r < 0.25 ? 'rain' : r < 0.37 ? 'snow' : r < 0.67 ? 'overcast' : 'clear'
+    let wx: 'clear' | 'fair' | 'overcast' | 'rain' | 'snow' = w === 'auto'
+      ? blue ? (r < 0.6 ? 'fair' : r < 0.85 ? 'snow' : 'overcast')
+      : winter ? (r < 0.5 ? 'snow' : r < 0.75 ? 'overcast' : 'clear') : r < 0.22 ? 'rain' : r < 0.32 ? 'snow' : r < 0.55 ? 'overcast' : r < 0.78 ? 'fair' : 'clear'
       : w;
     if (winter && wx === 'rain') wx = 'snow';
     this.env.setWeather(wx);
@@ -1680,6 +1699,9 @@ export class Game {
     this.explosives.update(dt);
     this.updateSmoke(dt);
     this.blastFx.update(dt);
+    this.updateWeathering(dt);
+    this.footprints.update(dt);
+    this.breathVapour(dt);
     this.runTimers();
     if (this.vm.detonatorOut && (!this.avatar.alive || !this.myC4().length || this.weapons.reloading || this.weapons.switching || this.player.ladder || this.player.mantle || this.player.tactical || this.vm.action?.type === 'nvg')) this.vm.detonatorOut = false;
     this.deployables.update(dt, this.camera.position);
@@ -3230,6 +3252,47 @@ export class Game {
     }
     this.stuckEl.classList.toggle('on', on);
   }
+  /**
+   * Breath vapour on cold maps (Update 33): a soft puff from every soldier near the camera every
+   * few seconds — quicker and bigger when they are running — and from your own mouth.
+   */
+  private breathT = new Map<number, number>();
+  private breathVapour(dt: number) {
+    const cold = this.winter || this.weather.snowCover > 0.3 || (this.env.night > 0.6 && this.env.weather !== 'clear');
+    if (!cold) return;
+    const puff = (key: number, head: THREE.Vector3, fwd: THREE.Vector3, run: number) => {
+      const t = (this.breathT.get(key) ?? Math.random() * 3) - dt * (1 + run * 1.6);
+      if (t > 0) {
+        this.breathT.set(key, t);
+        return;
+      }
+      this.breathT.set(key, 2.6 + Math.random() * 1.2);
+      const p = head.clone().addScaledVector(fwd, 0.18);
+      for (let i = 0; i < 2; i++) this.fx.smokePuff(p, fwd.clone().multiplyScalar(0.35 + run * 0.3).add(new THREE.Vector3((Math.random() - 0.5) * 0.08, 0.05, (Math.random() - 0.5) * 0.08)).add(this.weather.wind.clone().multiplyScalar(0.03)), [0.86, 0.88, 0.9], 0.1 + run * 0.05, 1.1 + Math.random() * 0.4);
+    };
+    for (const b of this.bots) {
+      if (!b.alive || b.legsOnly) continue;
+      const head = b.eye(new THREE.Vector3());
+      if (head.distanceToSquared(this.camera.position) > 25 * 25) continue;
+      puff(b.id, head.setY(head.y - 0.08), new THREE.Vector3(-Math.sin(b.yaw), -0.15, -Math.cos(b.yaw)), Math.min(1, b.moveSpeed / 6));
+    }
+    if (this.avatar.alive && !this.nvg.active) {
+      // your own breath, just below the view
+      const f = new THREE.Vector3(0, -0.35, -1).applyQuaternion(this.camera.quaternion).normalize();
+      puff(-1, this.camera.position.clone().add(new THREE.Vector3(0, -0.12, 0)), f, this.player.sprinting ? 1 : 0);
+    }
+  }
+
+  /** baked AO slices, rain wetness (soaks in over ~40 s, dries over ~2 min), winter frost, probes */
+  private updateWeathering(dt: number) {
+    if (this.bakedAO && !this.bakedAO.done) this.bakedAO.step(this.state === 'playing' ? 2.5 : 8);
+    const raining = this.env.weather === 'rain' || this.weather.storm > 0.3 && !this.winter;
+    this.wetness = clamp(this.wetness + (raining ? dt / 40 : -dt / 120), 0, 1);
+    WX.uWet.value = this.wetness;
+    WX.uFrost.value = this.winter ? 0.75 + 0.25 * this.env.night : this.env.weather === 'snow' ? 0.4 : 0;
+    WX.uProbeNight.value = clamp(this.env.night, 0, 1);
+  }
+
   /** smoke volume: wind, rain, light; each canister's hiss fades over its life */
   private updateSmoke(dt: number) {
     const sm = this.smoke;
@@ -3688,7 +3751,7 @@ export class Game {
     this.lastShotT = this.time;
     this.firedSinceSpawn = true;
     const muzzle = this.screenToWorld(req.muzzleScreen, 0.9);
-    this.fx.muzzleWorld(muzzle, req.dirs[0], !!d.sound.suppressed, d.cls === 'Shotgun' ? 1.4 : 1);
+    this.fx.muzzleWorld(muzzle, req.dirs[0], !!d.sound.suppressed, d.cls === 'Shotgun' ? 1.4 : 1, this.indoor);
     this.gunshot(d, null, 0, false);
     if (d.modes[0] !== 'pump' && d.modes[0] !== 'bolt' && d.id !== 'rv357' && d.action !== 'break') this.ejectCasing(req, d);
     for (let i = 0; i < req.dirs.length; i++) this.ballistics.fire(this.avatar, req.origin, req.dirs[i], d, muzzle, req.tracer && (i === 0 || i % 3 === 0));
@@ -4405,6 +4468,18 @@ export class Game {
       const right = new THREE.Vector3(1, 0, 0).applyQuaternion(this.camera.quaternion);
       this.fx.shell(ej, right.multiplyScalar(1.8).add(new THREE.Vector3(0, 1.8, 0)), d.cls === 'Shotgun' ? 'shotgun' : 'big');
     }
+  }
+
+  /** boot prints in snow and wet sand (Update 33) — only on open ground, near the camera */
+  private footprint(p: THREE.Vector3, yaw: number, id: number) {
+    if (!this.footprints || p.distanceToSquared(this.camera.position) > 60 * 60) return;
+    const surf = this.terrain.surfaceAt(p.x, p.z);
+    const gy = this.terrain.heightAt(p.x, p.z);
+    if (Math.abs(p.y - gy) > 0.35) return; // on a floor / bridge / rock, not the ground
+    const snowy = surf === 'snow' || this.weather.snowCover > 0.35;
+    const sand = surf === 'sand' && (this.wetness > 0.15 || gy < 1.6);
+    if (!snowy && !sand) return;
+    this.footprints.step(id, new THREE.Vector3(p.x, gy, p.z), yaw, this.terrain.normalAt(p.x, p.z), !snowy);
   }
 
   footstepSound(p: THREE.Vector3, speed: number, local: boolean) {

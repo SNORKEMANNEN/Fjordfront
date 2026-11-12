@@ -18,13 +18,121 @@ export const SNOW = {
   uSnowBox: { value: new THREE.Vector4(-260, -260, 520, 0) },
 };
 
+/**
+ * Weathering (Update 33), in the same patch: moss on north faces and roofs, grime at the base of
+ * walls, rain wetness + puddles where the sky can reach, winter frost on metal, the baked per-vertex
+ * occlusion (`aWeather.x`, see BakedAO) and the interior ambient probes (warm by the lamps at
+ * night, cool daylight near windows).
+ * Material flags (material.userData.wx): 'moss' | 'grime' | 'metal' (any combination).
+ */
+export const WX = {
+  uWet: { value: 0 },
+  uFrost: { value: 0 },
+  uProbeMap: { value: null as THREE.Texture | null },
+  /** x0, z0, size, enabled */
+  uProbeBox: { value: new THREE.Vector4(-260, -260, 520, 0) },
+  uProbeNight: { value: 0 },
+};
+
 const COMMON = /* glsl */ `
+uniform float uWet; uniform float uFrost; uniform sampler2D uProbeMap; uniform vec4 uProbeBox; uniform float uProbeNight;
+varying vec2 vWeather;
 uniform float uSnow;
 uniform sampler2D uSnowMap;
 uniform vec4 uSnowBox;
 float snH(vec2 p){ return fract(sin(dot(p, vec2(41.31, 289.17))) * 43758.5453); }
 float snN(vec2 p){ vec2 i = floor(p), f = fract(p); f = f*f*(3.0-2.0*f);
   return mix(mix(snH(i), snH(i+vec2(1,0)), f.x), mix(snH(i+vec2(0,1)), snH(i+vec2(1,1)), f.x), f.y); }
+// 1 = open to the sky at p, 0 = something solid well above it (from the snow cover height map)
+float wxSky(vec3 p){
+  if (uSnowBox.w < 0.5) return 1.0;
+  vec2 suv = vec2((p.x - uSnowBox.x) / uSnowBox.z, 1.0 - (p.z - uSnowBox.y) / uSnowBox.z);
+  if (suv.x <= 0.0 || suv.x >= 1.0 || suv.y <= 0.0 || suv.y >= 1.0) return 1.0;
+  float top = texture2D(uSnowMap, suv).r;
+  return smoothstep(top - 1.4, top - 0.35, p.y);
+}
+`;
+
+const APPLY_WX = /* glsl */ `
+#ifdef USE_FOG
+{
+  vec3 wxp = vFogWorldPos;
+  vec3 wxn = normalize((vec4(normal, 0.0) * viewMatrix).xyz);
+  float wxz = snN(wxp.xz * 0.9 + wxp.y * 0.7);
+  // exposure of this face: sample the sky a little out along its normal (eaves, porches count)
+  float wxs = wxSky(wxp + wxn * 0.8);
+  #ifdef WX_GRIME
+  {
+    float g = vWeather.y * (1.0 - abs(wxn.y)) * wxs;
+    float gm = g * smoothstep(0.25, 0.85, wxz + g * 0.7 - 0.25);
+    diffuseColor.rgb = mix(diffuseColor.rgb, diffuseColor.rgb * vec3(0.58, 0.55, 0.5), gm * 0.85);
+    roughnessFactor = mix(roughnessFactor, 1.0, gm * 0.4);
+  }
+  #endif
+  #ifdef WX_MOSS
+  {
+    float north = smoothstep(0.05, 0.75, -wxn.z);
+    float up = smoothstep(0.3, 0.85, wxn.y);
+    float patchy = smoothstep(0.48, 0.72, snN(wxp.xz * 0.55 + wxp.y * 0.35) * 0.7 + wxz * 0.3);
+    float m = patchy * (north * (0.3 + 0.7 * vWeather.y) + up * north * 0.8) * wxs;
+    diffuseColor.rgb = mix(diffuseColor.rgb, vec3(0.13, 0.19, 0.07) * (0.75 + 0.5 * wxz), clamp(m, 0.0, 1.0) * 0.72);
+    roughnessFactor = mix(roughnessFactor, 0.95, clamp(m, 0.0, 1.0) * 0.5);
+  }
+  #endif
+  if (uWet > 0.001) {
+    float w = uWet * wxSky(wxp + vec3(0.0, 0.2, 0.0));
+    float porous = 1.0 - metalnessFactor;
+  #ifdef WX_TERRAIN
+    // soil and grass soak it up: darker, only a faint sheen (puddles are rarer)
+    diffuseColor.rgb *= mix(1.0, 0.72, w);
+    roughnessFactor = mix(roughnessFactor, 0.55, w * 0.6);
+    w *= 0.45;
+  #else
+    diffuseColor.rgb *= mix(1.0, 0.6, w * porous);
+    roughnessFactor = mix(roughnessFactor, 0.16, w * 0.85);
+  #endif
+    // puddles: flat ground, in the dips of a broad noise
+    float flatG = smoothstep(0.965, 0.995, wxn.y);
+    float pm = smoothstep(0.6, 0.7, snN(wxp.xz * 0.33) * 0.75 + snN(wxp.xz * 1.4) * 0.25);
+    float pud = flatG * pm * w;
+    diffuseColor.rgb = mix(diffuseColor.rgb, diffuseColor.rgb * 0.5, pud);
+    roughnessFactor = mix(roughnessFactor, 0.02, pud);
+    metalnessFactor = mix(metalnessFactor, 0.0, pud);
+  }
+  #ifdef WX_METAL
+  if (uFrost > 0.001) {
+    float f = uFrost * wxs * smoothstep(0.32, 0.72, snN(wxp.xz * 3.1 + wxp.y * 2.3) * 0.7 + wxz * 0.3);
+    diffuseColor.rgb = mix(diffuseColor.rgb, vec3(0.8, 0.86, 0.93), f * 0.6);
+    roughnessFactor = mix(roughnessFactor, 0.7, f);
+    metalnessFactor = mix(metalnessFactor, 0.05, f);
+  }
+  #endif
+}
+#endif
+`;
+
+const APPLY_AO = /* glsl */ `
+#ifdef USE_FOG
+{
+  float occ = vWeather.x;
+  reflectedLight.indirectDiffuse *= 1.0 - occ * 0.8;
+  reflectedLight.indirectSpecular *= 1.0 - occ * 0.6;
+  reflectedLight.directDiffuse *= 1.0 - occ * 0.2;
+  // interiors: the ambient takes the room's colour (lamps at night, window light by day)
+  if (uProbeBox.w > 0.5) {
+    float inside = 1.0 - wxSky(vFogWorldPos + vec3(0.0, 0.3, 0.0));
+    if (inside > 0.01) {
+      vec2 puv = vec2((vFogWorldPos.x - uProbeBox.x) / uProbeBox.z, 1.0 - (vFogWorldPos.z - uProbeBox.y) / uProbeBox.z);
+      vec4 pr = texture2D(uProbeMap, puv);
+      inside *= pr.a; // only inside building footprints (not under trees)
+      vec3 dayT = mix(vec3(0.68, 0.76, 0.92), vec3(1.1, 1.05, 0.98), pr.g);
+      vec3 nightT = vec3(1.0, 0.8, 0.56) * (0.55 + 1.9 * pr.r);
+      vec3 tint = mix(dayT, nightT, uProbeNight);
+      reflectedLight.indirectDiffuse *= mix(vec3(1.0), tint, inside);
+    }
+  }
+}
+#endif
 `;
 
 const APPLY = /* glsl */ `
@@ -74,13 +182,26 @@ export function patchMaterial(m: THREE.Material) {
   // source for EVERY material: plain materials and ones with their own shader hook (the terrain)
   // would then share one compiled program. Key on the original hook's source instead.
   const base = prevKey === THREE.Material.prototype.customProgramCacheKey ? prev.toString() : null;
-  sm.customProgramCacheKey = () => (base ?? prevKey.call(sm)) + '|snow';
+  const wx: string[] = (sm.userData.wx as string[] | undefined) ?? [];
+  sm.customProgramCacheKey = () => (base ?? prevKey.call(sm)) + '|snow|' + wx.join(',');
   sm.onBeforeCompile = (sh, r) => {
     prev.call(sm, sh, r);
     sh.uniforms.uSnow = SNOW.uSnow;
     sh.uniforms.uSnowMap = SNOW.uSnowMap;
     sh.uniforms.uSnowBox = SNOW.uSnowBox;
-    sh.fragmentShader = sh.fragmentShader.replace('#include <common>', '#include <common>\n' + COMMON).replace('#include <emissivemap_fragment>', APPLY + '\n#include <emissivemap_fragment>');
+    sh.uniforms.uWet = WX.uWet;
+    sh.uniforms.uFrost = WX.uFrost;
+    sh.uniforms.uProbeMap = WX.uProbeMap;
+    sh.uniforms.uProbeBox = WX.uProbeBox;
+    sh.uniforms.uProbeNight = WX.uProbeNight;
+    for (const f of wx) sh.defines = { ...(sh.defines ?? {}), ['WX_' + f.toUpperCase()]: '' };
+    sh.vertexShader = sh.vertexShader
+      .replace('#include <common>', '#include <common>\nattribute vec2 aWeather;\nvarying vec2 vWeather;')
+      .replace('#include <begin_vertex>', '#include <begin_vertex>\nvWeather = aWeather;');
+    sh.fragmentShader = sh.fragmentShader
+      .replace('#include <common>', '#include <common>\n' + COMMON)
+      .replace('#include <emissivemap_fragment>', APPLY + APPLY_WX + '\n#include <emissivemap_fragment>')
+      .replace('#include <aomap_fragment>', APPLY_AO + '\n#include <aomap_fragment>');
   };
   sm.needsUpdate = true;
 }

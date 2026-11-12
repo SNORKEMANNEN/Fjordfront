@@ -131,7 +131,8 @@ export class NightVision {
       this.vis = this.power = this.flash = 0;
     }
     // ---- automatic gain: lots at night, compressed in daylight ----
-    const want = THREE.MathUtils.lerp(72, 2.6, Math.pow(THREE.MathUtils.clamp(env.day, 0, 1), 0.6));
+    // (Update 33: was 72 at night, which saturated the tube — everything washed out pale green)
+    const want = THREE.MathUtils.lerp(24, 2.2, Math.pow(THREE.MathUtils.clamp(env.day, 0, 1), 0.6));
     this.gain += (want - this.gain) * (1 - Math.exp(-dt * 2.5));
     // ---- IR illuminator on the goggles ----
     const on = this.active ? Math.min(1, this.power) : 0;

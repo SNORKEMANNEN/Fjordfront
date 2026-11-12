@@ -48,6 +48,8 @@ export class World {
     this.shootable = new ShootableLights(this.group, this.pool);
     for (const f of this.buildings.fixtures) {
       const a = this.pool.add(f.p, f.color, f.intensity, f.dist, false);
+      a.flicker = f.flicker;
+      a.phase = (f.p.x * 1.7 + f.p.z * 2.3) % 6.28;
       if (f.m && f.min && f.max) this.shootable.add(f.m, f.min, f.max, a, false);
     }
     this.infra.lampAnchors.forEach((p, i) => {
@@ -88,7 +90,7 @@ export class World {
         cu.uCloudAmt.value = env.cloudShadow;
       }
       if (env.day > 0.05 && env.elevation > 0.5) this.shafts.rebuild(env.sunDir);
-      this.shafts.update(dt, env.rays * (env.weather === 'clear' ? 1 : 0.4), env.sunColor);
+      this.shafts.update(dt, env.rays * (env.weather === 'clear' || env.weather === 'fair' ? 1 : 0.4), env.sunColor);
     }
   }
 }

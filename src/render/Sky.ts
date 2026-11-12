@@ -42,6 +42,7 @@ export class Sky {
         uniform vec3 uZenith; uniform vec3 uHorizon; uniform vec3 uFogColor;
         varying vec3 vDir;
         float cloudDensity(vec2 p){
+          if (uCover < 0.02) return 0.0;
           vec2 w = vec2(uTime * 0.004, uTime * 0.0015);
           float base = fbm2(p * 0.55 + w);
           float detail = fbm2(p * 2.3 - w * 2.0);

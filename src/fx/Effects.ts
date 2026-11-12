@@ -234,11 +234,12 @@ export class Effects {
     scene.add(this.worldFlashLight);
   }
 
-  muzzleWorld(p: THREE.Vector3, dir: THREE.Vector3, suppressed: boolean, scale = 1) {
+  muzzleWorld(p: THREE.Vector3, dir: THREE.Vector3, suppressed: boolean, scale = 1, indoor = 0) {
     if (!suppressed) {
       this.worldFlashLight.position.copy(p).addScaledVector(dir, 0.3);
-      this.worldFlashLight.intensity = 5 * scale;
-      this.worldFlashLight.distance = 6;
+      // indoors the flash lights up the walls of the room (Update 33)
+      this.worldFlashLight.intensity = (5 + 22 * indoor) * scale;
+      this.worldFlashLight.distance = 6 + 5 * indoor;
       this.worldFlashT = 0.05;
     }
     // a faint wisp drifting from the muzzle (one puff; two for the big guns)

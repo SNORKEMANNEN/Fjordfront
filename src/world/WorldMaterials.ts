@@ -86,6 +86,14 @@ export function makeWorldMaterials(L: MaterialLib): Record<string, THREE.Materia
     lamp: new THREE.MeshBasicMaterial({ color: new THREE.Color(4, 3, 1.8), toneMapped: false }),
     sodium: new THREE.MeshBasicMaterial({ color: new THREE.Color(5, 2.6, 0.7), toneMapped: false }),
   };
+  // weathering flags (Update 33, see Snow.ts): moss / grime / frost on metal
+  const flag = (keys: string[], f: string[]) => {
+    for (const k of keys) if (m[k]) m[k].userData.wx = [...((m[k].userData.wx as string[] | undefined) ?? []), ...f];
+  };
+  flag(['stone', 'concrete', 'concreteWhite', 'chimney', 'boulder', 'roof'], ['moss', 'grime']);
+  flag(['red', 'white', 'ochre', 'dkgrey', 'trim', 'planks', 'woodRaw', 'door', 'corrBlue', 'corrWhite', 'tankWhite', 'sandbag', 'crate', 'pallet'], ['grime']);
+  flag(['roofMetal', 'steel', 'steelGrate', 'yellowSteel', 'redSteel', 'rust', 'corrBlue', 'corrWhite', 'contRed', 'contBlue', 'contGreen', 'contOrange', 'contGrey', 'contWhite', 'tankWhite', 'carBurnt',
+    'carRed', 'carBlue', 'carWhite', 'carGrey', 'carGreen', 'carBlack', 'signBlue'], ['metal']);
   m.default = m.concrete;
   return m;
 }

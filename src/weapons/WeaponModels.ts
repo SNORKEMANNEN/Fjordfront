@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import { addLaser } from './Laser';
-import { PartBuilder, profile, cyl, lathe, rbox, picatinny, pin, bez, socket, P2 } from './ModelKit';
+import { PartBuilder, profile, cyl, lathe, rbox, picatinny, pin, bez, socket, P2, setFinish, patchWeaponMaterial } from './ModelKit';
 import { MaterialLib, patchSurfaceMaterial } from '../render/Materials';
 
 export interface WeaponModel {
@@ -36,6 +36,15 @@ export function makeWeaponMaterials(L: MaterialLib): WeaponMats {
   patchSurfaceMaterial(blackPoly, 1 / 0.3);
   const odGreen = new THREE.MeshStandardMaterial({ color: 0x4a4d3a, roughness: 0.6, metalness: 0.1, normalMap: poly.normal });
   patchSurfaceMaterial(odGreen, 1 / 0.12);
+  // edge wear, micro detail, per-weapon finish (Update 33)
+  for (const mm of [metal, steel, tanMetal]) patchWeaponMaterial(mm, 'metal');
+  for (const mm of [polymer, tan, blackPoly, odGreen]) patchWeaponMaterial(mm, 'polymer');
+  const rubber = new THREE.MeshStandardMaterial({ color: 0x161616, roughness: 0.92, metalness: 0 });
+  patchWeaponMaterial(rubber, 'rubber');
+  const walnut = new THREE.MeshStandardMaterial({ color: 0x4a2a17, roughness: 0.48, metalness: 0.0, normalMap: poly.normal, envMapIntensity: 0.9 });
+  patchWeaponMaterial(walnut, 'wood');
+  const blued = new THREE.MeshStandardMaterial({ color: 0x1c2026, roughness: 0.32, metalness: 0.9, normalMap: gm.normal, envMapIntensity: 1.3 });
+  patchWeaponMaterial(blued, 'metal');
   return {
     default: metal,
     metal,
@@ -48,9 +57,9 @@ export function makeWeaponMaterials(L: MaterialLib): WeaponMats {
     dark: new THREE.MeshStandardMaterial({ color: 0x050505, roughness: 0.9, metalness: 0.2 }),
     brass: new THREE.MeshStandardMaterial({ color: 0xc29a4e, roughness: 0.28, metalness: 1.0 }),
     copper: new THREE.MeshStandardMaterial({ color: 0xb06a3c, roughness: 0.3, metalness: 1.0 }),
-    rubber: new THREE.MeshStandardMaterial({ color: 0x161616, roughness: 0.92, metalness: 0 }),
-    walnut: new THREE.MeshStandardMaterial({ color: 0x4a2a17, roughness: 0.48, metalness: 0.0, normalMap: poly.normal, envMapIntensity: 0.9 }),
-    blued: new THREE.MeshStandardMaterial({ color: 0x1c2026, roughness: 0.32, metalness: 0.9, normalMap: gm.normal, envMapIntensity: 1.3 }),
+    rubber,
+    walnut,
+    blued,
     stainless: new THREE.MeshStandardMaterial({ color: 0xb9bdc2, roughness: 0.3, metalness: 1.0, normalMap: gm.normal, envMapIntensity: 1.4 }),
     sightOrange: new THREE.MeshBasicMaterial({ color: new THREE.Color(1.8, 0.55, 0.08), toneMapped: false }),
     shell: new THREE.MeshStandardMaterial({ color: 0x8a1b14, roughness: 0.45, metalness: 0 }),
@@ -2383,7 +2392,10 @@ function cachedBuild(id: keyof typeof RAW_BUILDERS, mats: WeaponMats): WeaponMod
   let m = templates.get(mats);
   if (!m) templates.set(mats, (m = new Map()));
   let t = m.get(id);
-  if (!t) m.set(id, (t = RAW_BUILDERS[id](mats)));
+  if (!t) {
+    setFinish(id);
+    m.set(id, (t = RAW_BUILDERS[id](mats)));
+  }
   return cloneModel(t);
 }
 export const WEAPON_BUILDERS = Object.fromEntries(

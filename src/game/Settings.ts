@@ -37,7 +37,7 @@ export interface SettingsData {
   motionBlur: boolean;
   dof: boolean;
   grassDensity: number;
-  weather: 'auto' | 'clear' | 'overcast' | 'rain' | 'snow';
+  weather: 'auto' | 'clear' | 'fair' | 'overcast' | 'rain' | 'snow';
   /** map variant: autumn, winter (snow-covered), or random per match */
   mapVariant: 'autumn' | 'winter' | 'random';
   timeOfDay: 'dynamic' | 'dawn' | 'day' | 'golden' | 'blue' | 'night';

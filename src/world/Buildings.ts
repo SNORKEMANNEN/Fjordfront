@@ -21,7 +21,7 @@ export class Buildings {
   /** light fixtures; `cover` is the emissive part's box (fixture-local min/max under matrix m) for shooting it out */
   /** chimney tops (world) for the ambient smoke */
   chimneys: THREE.Vector3[] = [];
-  fixtures: { p: THREE.Vector3; color: number; intensity: number; dist: number; m?: THREE.Matrix4; min?: THREE.Vector3; max?: THREE.Vector3 }[] = [];
+  fixtures: { p: THREE.Vector3; color: number; intensity: number; dist: number; m?: THREE.Matrix4; min?: THREE.Vector3; max?: THREE.Vector3; flicker?: 'fluoro' | 'old' | 'beacon' }[] = [];
   glass: GlassPanes;
   /** Footprints (world space AABB of each building) for vegetation/placement exclusion. */
   footprints: THREE.Box3[] = [];
@@ -94,7 +94,18 @@ export class Buildings {
     const zz = (a: number, c: number) => [Math.min(zo + a * outward, zo + c * outward), Math.max(zo + a * outward, zo + c * outward)];
     const [za, zb] = zz(0, td);
     b.box('trim', x - w / 2 - tw, y1, za, x + w / 2 + tw, y1 + tw * 1.4, zb); // head
+    // drip cap over the head (throws rain clear of the window)
+    const [dza, dzb] = zz(0, td + 0.05);
+    b.box('trim', x - w / 2 - tw - 0.03, y1 + tw * 1.4, dza, x + w / 2 + tw + 0.03, y1 + tw * 1.4 + 0.035, dzb);
     b.box('trim', x - w / 2 - tw, y0 - tw, za, x + w / 2 + tw, y0, zb + outward * 0.04); // sill
+    // reveal: the opening lined through the wall's depth, so windows sit in the wall, not on it
+    {
+      const [ra, rb] = [Math.min(z, z - outward * 0.15), Math.max(z, z - outward * 0.15)];
+      b.box('trim', x - w / 2 - 0.02, y0, ra, x - w / 2, y1, rb);
+      b.box('trim', x + w / 2, y0, ra, x + w / 2 + 0.02, y1, rb);
+      b.box('trim', x - w / 2, y1 - 0.02, ra, x + w / 2, y1, rb);
+      b.box('trim', x - w / 2, y0, ra, x + w / 2, y0 + 0.02, rb);
+    }
     b.box('trim', x - w / 2 - tw, y0, za, x - w / 2, y1, zb);
     b.box('trim', x + w / 2, y0, za, x + w / 2 + tw, y1, zb);
     // the cross bars are separate, breakable instances (someone diving through takes them out)
@@ -119,6 +130,20 @@ export class Buildings {
 
   /** Ceiling lamp: cord, shade and an emissive bulb; registers a light anchor. */
   private fixture(x: number, ceil: number, z: number, kind: 'pendant' | 'strip' | 'bay' | 'bare' = 'pendant') {
+    const b = this.b;
+    const n0 = this.fixtures.length;
+    this.fixtureInner(x, ceil, z, kind);
+    // (Update 33) a little life: some tubes stutter, some old bulbs are tired; warm shades vary
+    const f = this.fixtures[n0];
+    if (f) {
+      const hsh = Math.abs(Math.sin(f.p.x * 12.9898 + f.p.z * 78.233) * 43758.5453) % 1;
+      if (kind === 'strip' && hsh < 0.3) f.flicker = 'fluoro';
+      else if ((kind === 'bare' && hsh < 0.45) || (kind === 'pendant' && hsh < 0.1)) f.flicker = 'old';
+      if (kind === 'pendant' || kind === 'bare') f.color = [0xffc58a, 0xffd6a8, 0xffb070, 0xffcf96][Math.floor(hsh * 4)];
+    }
+    void b;
+  }
+  private fixtureInner(x: number, ceil: number, z: number, kind: 'pendant' | 'strip' | 'bay' | 'bare') {
     const b = this.b;
     if (kind === 'pendant') {
       b.box('steel', x - 0.006, ceil - 0.55, z - 0.006, x + 0.006, ceil, z + 0.006);
@@ -157,6 +182,22 @@ export class Buildings {
         for (const sx of [1, -1]) b.obox('trim', [sx * (w / 2 + oh), cy - 0.04, cz], [0.06, 0.24, len], new THREE.Euler(s * pitch, 0, 0));
         const eaveY = top + rise - half * Math.tan(pitch) + 0.02;
         b.obox('trim', [0, eaveY - 0.04, s * (half + 0.01)], [w + oh * 2 + 0.06, 0.2, 0.05], new THREE.Euler(0, 0, 0));
+        // rafter tails under the overhang
+        if (oh > 0.25) {
+          const n = Math.max(2, Math.round((w + oh) / 0.6));
+          for (let i = 0; i <= n; i++) {
+            const x = -w / 2 - oh * 0.5 + ((w + oh) * i) / n;
+            const zc = s * (d / 2 + oh / 2);
+            const yc = top + rise - (d / 2 + oh / 2) * Math.tan(pitch) - 0.06;
+            b.obox('trim', [x, yc, zc], [0.06, 0.1, oh + 0.02], new THREE.Euler(s * pitch, 0, 0));
+          }
+        }
+        // gutter along the eave and a downpipe at one end, down the wall to the ground
+        b.obox('roofMetal', [0, eaveY - 0.13, s * (half + 0.07)], [w + oh * 2, 0.09, 0.11], new THREE.Euler(0, 0, 0));
+        const px = (s > 0 ? 1 : -1) * (w / 2 - 0.2);
+        b.obox('roofMetal', [px, eaveY - 0.24, s * (half + 0.07 + d / 2 + 0.07) / 2], [0.08, 0.08, half - d / 2 + 0.04], new THREE.Euler(0, 0, 0));
+        b.cyl('roofMetal', px, -0.2, s * (d / 2 + 0.07), 0.04, eaveY - 0.08, 8);
+        b.cyl('roofMetal', px, -0.2, s * (d / 2 + 0.07), 0.055, 0.25, 8);
       }
     }
     b.obox('roofMetal', [0, top + rise + 0.12, 0], [w + oh * 2, 0.08, 0.3], new THREE.Euler(0, 0, 0)); // ridge cap
@@ -365,6 +406,36 @@ export class Buildings {
       b.box('wood', ix1 - 0.6, F + FH, iz1 - 1.7, ix1, F + FH + 1.9, iz1 - 0.6, 'wood');
       b.box('wood', ix1 - 2.6, F + FH, iz0 + 0.1, ix1 - 2.15, F + FH + 0.5, iz0 + 0.55, 'wood');
       b.cyl('ceramic', ix1 - 2.38, F + FH + 0.5, iz0 + 0.32, 0.06, 0.18, 10);
+      // (Update 33) every house's upstairs is a different room along the front wall
+      const v = rng.int(0, 2);
+      const fx0 = stairX1 + 0.3, fz = iz1;
+      if (v === 0) {
+        // study: desk under the window, chair, lamp, a stack of papers
+        b.box('wood', fx0, F + FH + 0.72, fz - 0.6, fx0 + 1.3, F + FH + 0.76, fz - 0.02, 'wood');
+        for (const lx of [0.04, 1.26]) b.box('wood', fx0 + lx - 0.03, F + FH, fz - 0.58, fx0 + lx + 0.03, F + FH + 0.72, fz - 0.04);
+        b.box('fabric', fx0 + 0.45, F + FH + 0.42, fz - 1.1, fx0 + 0.9, F + FH + 0.48, fz - 0.65, 'fabric');
+        b.box('fabric', fx0 + 0.45, F + FH + 0.48, fz - 1.12, fx0 + 0.9, F + FH + 0.95, fz - 1.06);
+        b.cyl('steel', fx0 + 1.1, F + FH + 0.76, fz - 0.3, 0.012, 0.4, 6);
+        b.cyl('lampShade', fx0 + 1.1, F + FH + 1.12, fz - 0.3, 0.09, 0.12, 10, null, 0.05);
+        b.box('white', fx0 + 0.2, F + FH + 0.76, fz - 0.45, fx0 + 0.5, F + FH + 0.8, fz - 0.2);
+      } else if (v === 1) {
+        // kids' room: a bunk bed along the front wall
+        const bx1 = Math.min(fx0 + 2.0, ix1 - 0.7);
+        for (const y of [0.35, 1.45]) {
+          b.box('wood', fx0, F + FH + y, fz - 0.95, bx1, F + FH + y + 0.08, fz - 0.05, 'wood');
+          b.box('fabric', fx0 + 0.05, F + FH + y + 0.08, fz - 0.9, bx1 - 0.05, F + FH + y + 0.22, fz - 0.1);
+        }
+        for (const lx of [fx0, bx1 - 0.06]) for (const lz of [fz - 0.95, fz - 0.11]) b.box('wood', lx, F + FH, lz, lx + 0.06, F + FH + 1.85, lz + 0.06);
+        b.box('rug', fx0, F + FH, fz - 2.0, bx1, F + FH + 0.012, fz - 1.1, 'fabric', { tag: 'rug' });
+      } else {
+        // box room: stacked moving boxes and an old trunk
+        for (let k = 0; k < 4; k++) {
+          const x = fx0 + 0.1 + (k % 2) * 0.62, y = Math.floor(k / 2) * 0.48;
+          b.box('crate', x, F + FH + y, fz - 0.62, x + 0.58, F + FH + y + 0.46, fz - 0.08, k < 2 ? 'wood' : null);
+        }
+        b.box('door', fx0 + 1.4, F + FH, fz - 0.6, fx0 + 2.2, F + FH + 0.5, fz - 0.1, 'wood');
+        b.box('steel', fx0 + 1.4, F + FH + 0.5, fz - 0.61, fx0 + 2.2, F + FH + 0.53, fz - 0.09);
+      }
     }
     // ---- ground floor furnishing (against the walls; the centre and the door/stair paths stay clear)
     const sofaX0 = floors > 1 ? stairX1 + 0.15 : ix0 + 0.1;
@@ -482,6 +553,25 @@ export class Buildings {
     // fishing gear inside the cabin
     b.box('net', w / 2 - 1.2, 0, -d / 2 + 0.3, w / 2 - 0.3, 0.5, -d / 2 + 1.4, 'fabric', { penetrable: 2 });
     b.cyl('buoy', w / 2 - 0.6, 0.5, -d / 2 + 0.8, 0.22, 0.4, 12);
+    // (Update 33) a lived-in cabin: wood stove and its pipe, a table with stools, oilskins on pegs
+    {
+      const sx = -w / 2 + T + 0.35, sz = -d / 2 + T + 0.35;
+      b.box('tyre', sx - 0.28, 0, sz - 0.25, sx + 0.28, 0.75, sz + 0.25, 'metal');
+      b.box('steel', sx - 0.3, 0.75, sz - 0.27, sx + 0.3, 0.79, sz + 0.27);
+      b.cyl('tyre', sx, 0.79, sz, 0.07, FH - 0.84, 8);
+      if (rng.chance(0.8)) {
+        const tx = w / 2 - T - 0.9, tz = d / 2 - T - 0.9;
+        b.box('wood', tx - 0.45, 0.72, tz - 0.35, tx + 0.45, 0.76, tz + 0.35, 'wood');
+        for (const [lx, lz] of [[-0.4, -0.3], [0.4, -0.3], [-0.4, 0.3], [0.4, 0.3]]) b.box('wood', tx + lx - 0.025, 0, tz + lz - 0.025, tx + lx + 0.025, 0.72, tz + lz + 0.025);
+        for (const ox of [-0.62, 0.62]) b.cyl('wood', tx + ox, 0, tz, 0.16, 0.45, 10, 'wood');
+        b.cyl('ceramic', tx + 0.1, 0.76, tz, 0.045, 0.1, 10);
+      }
+      for (let k = 0; k < rng.int(1, 2); k++) {
+        const z0 = d / 2 - T - 1.6 - k * 0.55;
+        b.box('yellowSteel', w / 2 - T - 0.09, 0.85, z0 - 0.22, w / 2 - T - 0.03, 1.75, z0 + 0.22);
+        b.box('steel', w / 2 - T - 0.05, 1.75, z0 - 0.02, w / 2 - T, 1.85, z0 + 0.02);
+      }
+    }
     this.link(0, 0, d / 2 + 1.5, 0, 0, 0);
     this.link(0, 0, 0, 0, 0, -d / 2 - 1.5);
   }
@@ -786,6 +876,13 @@ export class Buildings {
     b.push([0, 0, -d / 2 + T / 2], Math.PI);
     b.wall('concrete', -w / 2, w / 2, 0, T, fl, H, [{ x: -(w / 2 - 1.8), w: 1.3, y0: fl, y1: fl + 2.1 }], 'concrete');
     b.pop();
+    // (Update 33) a red rotating emergency beacon over the door
+    {
+      const bx = w / 2 - 1.8, by = fl + 2.3, bz = -d / 2 - 0.08;
+      b.box('steel', bx - 0.09, by - 0.04, bz - 0.14, bx + 0.09, by, bz);
+      b.cyl('tail', bx, by, bz - 0.07, 0.06, 0.12, 10);
+      this.fixtures.push({ p: new THREE.Vector3(bx, by + 0.1, bz - 0.4).applyMatrix4(b.m), color: 0xff2a14, intensity: 7, dist: 10, flicker: 'beacon' });
+    }
     for (const s of [1, -1]) {
       b.push([s * (w / 2 - T / 2), 0, 0], (s * Math.PI) / 2);
       b.wall('concrete', -d / 2 + T, d / 2 - T, 0, T, fl, H, [], 'concrete');
