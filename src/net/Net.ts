@@ -200,6 +200,18 @@ export class Net {
         this.wireState(c, c.peer);
         return;
       }
+      if (c.label === 'probe') {
+        // a room-browser ping: echo and hang up
+        c.on('data', (d) => {
+          try {
+            c.send(d);
+          } catch {
+            /* closed */
+          }
+          setTimeout(() => c.close(), 200);
+        });
+        return;
+      }
       if (c.label === 'lobby') {
         // a lobby registry query / announcement (only when this host is the registry)
         this.onLobby?.(c);
@@ -385,7 +397,7 @@ export async function testIce(timeoutMs = 4000) {
  * host announces its room to it every few seconds, and the browser asks it for the list. If the
  * registry host leaves, the next host to announce claims the id.
  */
-export interface RoomInfo { code: string; name: string; players: number; max: number; map: string; t?: number }
+export interface RoomInfo { code: string; name: string; players: number; max: number; map: string; region?: string; t?: number }
 export class LobbyRegistry {
   private reg: Peer | null = null;
   private rooms = new Map<string, RoomInfo>();
@@ -489,5 +501,61 @@ function query(use: (c: DataConnection) => void, timeout: number): Promise<true 
     });
     p.on('error', () => end(null));
     setTimeout(() => end(null), timeout);
+  });
+}
+
+/** the host's broad region for the room browser (time-zone area, e.g. "Europe · Oslo") */
+export function myRegion() {
+  try {
+    const tz = Intl.DateTimeFormat().resolvedOptions().timeZone || '';
+    const [area, city] = tz.split('/');
+    return city ? `${area} · ${city.replace(/_/g, ' ')}` : area || '—';
+  } catch {
+    return '—';
+  }
+}
+
+/**
+ * Room-browser ping: one short-lived peer opens a tiny data channel to each listed host, sends a
+ * timestamp and times the echo (null if the host does not answer within the timeout).
+ */
+export function probeRooms(codes: string[], timeoutMs = 5000): Promise<Map<string, number | null>> {
+  return new Promise((res) => {
+    const out = new Map<string, number | null>(codes.map((c) => [c, null]));
+    if (!codes.length) return res(out);
+    const p = new Peer(peerOptions());
+    let left = codes.length;
+    const finish = () => {
+      res(out);
+      setTimeout(() => p.destroy(), 300);
+    };
+    const timer = setTimeout(finish, timeoutMs);
+    const one = () => {
+      if (--left <= 0) {
+        clearTimeout(timer);
+        finish();
+      }
+    };
+    p.on('open', () => {
+      for (const code of codes) {
+        let done = false;
+        const c = p.connect(PREFIX + code, { reliable: true, serialization: 'json', label: 'probe' });
+        c.on('open', () => c.send({ at: performance.now() }));
+        c.on('data', (d: any) => {
+          if (done) return;
+          done = true;
+          out.set(code, Math.round(performance.now() - (d?.at ?? performance.now())));
+          c.close();
+          one();
+        });
+        c.on('error', () => {
+          if (!done) {
+            done = true;
+            one();
+          }
+        });
+      }
+    });
+    p.on('error', () => undefined);
   });
 }

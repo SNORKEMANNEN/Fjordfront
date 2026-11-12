@@ -46,6 +46,7 @@ export class Match {
     this.spawns?.reset();
     for (const p of this.players) {
       p.kills = p.deaths = p.score = p.assists = 0;
+      (p as { captures?: number }).captures = 0;
     }
   }
 

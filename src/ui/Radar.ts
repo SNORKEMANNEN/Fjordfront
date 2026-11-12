@@ -1,132 +1,84 @@
 import { Terrain } from '../world/Terrain';
-import { ROADS, BUILDINGS, PLAY_HALF } from '../world/MapLayout';
+import { PLAY_HALF } from '../world/MapLayout';
+import { chartRaster, B, INK, FONT, View, drawRoads, drawBuildings, inkObjective, inkLine, inkCircle, inkArrow } from './Chart';
 
 export interface RadarBlip { x: number; z: number; kind: 'ally' | 'enemy' | 'spotted' | 'ping' | 'flag' | 'heli' | 'heliFoe'; alpha: number; label?: string; color?: string }
 
-/** Rotating radar minimap (CoD-style): allies always, enemies when they fire unsuppressed or are spotted. */
+/**
+ * Rotating minimap, drawn as a cut-out of the paper chart: the same raster as the tactical map,
+ * a bearing ring around the edge (it turns with you, north marked in red), allies as blue ink
+ * arrows, enemies in red ink when they fire unsuppressed or are spotted, flags as inked rings.
+ */
 export class Radar {
   el: HTMLCanvasElement;
   private ctx: CanvasRenderingContext2D;
   private map: HTMLCanvasElement;
-  private half = 200;
   private range = 85; // metres from centre to edge
 
   constructor(parent: HTMLElement, terrain: Terrain) {
     this.el = document.createElement('canvas');
     this.el.className = 'radar';
-    this.el.width = this.el.height = 360;
+    this.el.width = this.el.height = 372;
     parent.appendChild(this.el);
     this.ctx = this.el.getContext('2d')!;
-    this.map = this.buildMap(terrain);
-  }
-
-  private buildMap(terrain: Terrain) {
-    const S = 512, H = this.half;
+    // the chart raster (roads and buildings baked onto a copy once)
+    const r = chartRaster(terrain).canvas;
     const c = document.createElement('canvas');
-    c.width = c.height = S;
+    c.width = c.height = r.width;
     const x = c.getContext('2d')!;
-    const img = x.createImageData(S, S);
-    for (let j = 0; j < S; j++) {
-      for (let i = 0; i < S; i++) {
-        const wx = -H + (i / S) * 2 * H, wz = -H + (j / S) * 2 * H;
-        const h = terrain.heightAt(wx, wz);
-        const k = (j * S + i) * 4;
-        if (h < 0) {
-          const d = Math.min(1, -h / 12);
-          img.data[k] = 22 - d * 10; img.data[k + 1] = 40 - d * 14; img.data[k + 2] = 52 - d * 12;
-        } else {
-          const hx = terrain.heightAt(wx + 1.5, wz) - h, hz = terrain.heightAt(wx, wz + 1.5) - h;
-          const shade = Math.max(0.55, Math.min(1.25, 1 - hx * 0.35 - hz * 0.25));
-          const [f, g] = terrain.splatAt(wx, wz);
-          let r = 72, gg = 84, b = 64;
-          r = r * (1 - f * 0.4); gg = gg * (1 - f * 0.25); b = b * (1 - f * 0.4);
-          r += g * 30; gg += g * 22; b += g * 22;
-          const elev = Math.min(1, h / 40);
-          img.data[k] = r * shade + elev * 25; img.data[k + 1] = gg * shade + elev * 22; img.data[k + 2] = b * shade + elev * 20;
-        }
-        img.data[k + 3] = 255;
-      }
-    }
-    x.putImageData(img, 0, 0);
-    const toPx = (v: number) => ((v + H) / (2 * H)) * S;
-    x.lineCap = 'round';
-    for (const r of ROADS) {
-      x.strokeStyle = r.kind === 'asphalt' ? 'rgba(200,200,190,0.75)' : 'rgba(170,160,140,0.55)';
-      x.lineWidth = Math.max(1.5, (r.width / (2 * H)) * S);
-      x.beginPath();
-      r.pts.forEach(([px, pz], n) => (n ? x.lineTo(toPx(px), toPx(pz)) : x.moveTo(toPx(px), toPx(pz))));
-      x.stroke();
-    }
-    for (const b of BUILDINGS) {
-      const w = b.w ?? ({ church: 19, warehouse: 40, containers: 30, crane: 12, tanks: 26, hjell: 10, bunker: 9, gunpit: 10, barracks: 16, mast: 4 } as Record<string, number>)[b.kind] ?? 8;
-      const d = b.d ?? ({ church: 9, warehouse: 22, containers: 20, crane: 9, tanks: 10, hjell: 3, bunker: 7, gunpit: 10, barracks: 8, mast: 4 } as Record<string, number>)[b.kind] ?? 7;
-      x.save();
-      x.translate(toPx(b.x), toPx(b.z));
-      x.rotate(-b.rot);
-      x.fillStyle = b.kind === 'containers' ? 'rgba(120,110,95,0.85)' : 'rgba(30,32,34,0.9)';
-      x.strokeStyle = 'rgba(220,220,210,0.35)';
-      x.lineWidth = 1;
-      const pw = (w / (2 * H)) * S, pd = (d / (2 * H)) * S;
-      x.fillRect(-pw / 2, -pd / 2, pw, pd);
-      x.strokeRect(-pw / 2, -pd / 2, pw, pd);
-      x.restore();
-    }
-    // play-area boundary
-    x.strokeStyle = 'rgba(255,80,60,0.5)';
-    x.setLineDash([6, 6]);
-    x.strokeRect(toPx(-PLAY_HALF), toPx(-PLAY_HALF), toPx(PLAY_HALF) - toPx(-PLAY_HALF), toPx(PLAY_HALF) - toPx(-PLAY_HALF));
-    return c;
+    x.drawImage(r, 0, 0);
+    const ppm = r.width / (2 * B);
+    const v: View = { ppm, sx: (wx) => (wx + B) * ppm, sy: (wz) => (wz + B) * ppm };
+    drawRoads(x, v, 0.6);
+    drawBuildings(x, v);
+    x.strokeStyle = INK.red;
+    x.lineWidth = 2;
+    x.setLineDash([8, 6]);
+    x.strokeRect(v.sx(-PLAY_HALF), v.sy(-PLAY_HALF), 2 * PLAY_HALF * ppm, 2 * PLAY_HALF * ppm);
+    this.map = c;
   }
 
   draw(px: number, pz: number, yaw: number, blips: RadarBlip[]) {
-    const c = this.ctx, W = this.el.width, R = W / 2;
-    const scale = R / this.range; // px per metre
-    const mapScale = (2 * this.half) / this.map.width; // metres per map px
+    const c = this.ctx, W = this.el.width, R = W / 2, Ri = R - 16;
+    const scale = Ri / this.range; // px per metre
+    const mapScale = (2 * B) / this.map.width; // metres per map px
     c.clearRect(0, 0, W, W);
+    // paper disc
     c.save();
     c.beginPath();
-    c.arc(R, R, R - 2, 0, Math.PI * 2);
+    c.arc(R, R, Ri, 0, Math.PI * 2);
     c.clip();
-    c.fillStyle = '#0c1214';
+    c.fillStyle = INK.paper;
     c.fillRect(0, 0, W, W);
     c.translate(R, R);
     c.rotate(yaw);
-    c.globalAlpha = 0.92;
-    const mpx = ((px + this.half) / (2 * this.half)) * this.map.width, mpz = ((pz + this.half) / (2 * this.half)) * this.map.width;
+    const mpx = ((px + B) / (2 * B)) * this.map.width, mpz = ((pz + B) / (2 * B)) * this.map.width;
     c.drawImage(this.map, -mpx * mapScale * scale, -mpz * mapScale * scale, this.map.width * mapScale * scale, this.map.height * mapScale * scale);
-    c.globalAlpha = 1;
     // range rings
-    c.strokeStyle = 'rgba(255,255,255,0.08)';
-    for (const r of [0.33, 0.66]) {
+    c.strokeStyle = 'rgba(20,33,61,0.16)';
+    c.lineWidth = 1;
+    for (const k of [0.33, 0.66]) {
       c.beginPath();
-      c.arc(0, 0, R * r, 0, Math.PI * 2);
+      c.arc(0, 0, Ri * k, 0, Math.PI * 2);
       c.stroke();
     }
+    let seed = 0;
     for (const b of blips) {
       const dx = (b.x - px) * scale, dz = (b.z - pz) * scale;
       const dist = Math.hypot(dx, dz);
       let x = dx, z = dz;
-      if (dist > R - 10) {
-        x = (dx / dist) * (R - 10);
-        z = (dz / dist) * (R - 10);
+      if (dist > Ri - 12) {
+        x = (dx / dist) * (Ri - 12);
+        z = (dz / dist) * (Ri - 12);
       }
       c.globalAlpha = b.alpha;
+      seed++;
       if (b.kind === 'flag') {
         c.save();
         c.translate(x, z);
         c.rotate(-yaw);
-        c.strokeStyle = b.color ?? '#ddd';
-        c.lineWidth = 3;
-        c.fillStyle = 'rgba(10,14,18,0.6)';
-        c.beginPath();
-        c.arc(0, 0, 13, 0, Math.PI * 2);
-        c.fill();
-        c.stroke();
-        c.fillStyle = b.color ?? '#ddd';
-        c.font = 'bold 16px Barlow Condensed, sans-serif';
-        c.textAlign = 'center';
-        c.textBaseline = 'middle';
-        c.fillText(b.label ?? '', 0, 1);
+        const col = /5aa8ff/i.test(b.color ?? '') ? INK.friend : /ff4a3a/i.test(b.color ?? '') ? INK.foe : INK.ink2;
+        inkObjective(c, 0, 0, 14, b.label ?? '', col, null, 0, seed * 7);
         c.restore();
         continue;
       }
@@ -134,59 +86,82 @@ export class Radar {
         c.save();
         c.translate(x, z);
         c.rotate(-yaw);
-        c.fillStyle = b.kind === 'heli' ? '#5aa8ff' : '#ff4a3a';
-        c.fillRect(-11, -2, 22, 4);
-        c.fillRect(-2, -11, 4, 22);
+        c.strokeStyle = b.kind === 'heli' ? INK.friend : INK.foe;
+        c.lineWidth = 3;
         c.beginPath();
-        c.arc(0, 0, 5, 0, Math.PI * 2);
-        c.fill();
+        c.moveTo(-12, 0); c.lineTo(12, 0); c.moveTo(0, -12); c.lineTo(0, 12);
+        c.stroke();
+        c.beginPath(); c.arc(0, 0, 5, 0, Math.PI * 2); c.stroke();
         c.restore();
         continue;
       }
       if (b.kind === 'ally') {
-        c.fillStyle = '#5aa8ff';
+        c.fillStyle = INK.friend;
+        c.strokeStyle = INK.ink;
+        c.lineWidth = 1.5;
         c.beginPath();
         c.arc(x, z, 7, 0, Math.PI * 2);
         c.fill();
+        c.stroke();
       } else if (b.kind === 'spotted') {
-        c.fillStyle = '#ff4a3a';
         c.save();
         c.translate(x, z);
-        c.rotate(Math.PI / 4 - yaw);
-        c.fillRect(-7, -7, 14, 14);
+        c.rotate(-yaw);
+        c.strokeStyle = INK.foe;
+        inkLine(c, [[-7, -7], [7, 7]], seed, 3.2);
+        inkLine(c, [[7, -7], [-7, 7]], seed + 1, 3.2);
         c.restore();
       } else {
-        c.fillStyle = '#ff4a3a';
+        c.fillStyle = INK.foe;
         c.beginPath();
-        c.arc(x, z, 8, 0, Math.PI * 2);
+        c.arc(x, z, 7.5, 0, Math.PI * 2);
         c.fill();
-        c.strokeStyle = 'rgba(255,74,58,0.5)';
-        c.beginPath();
-        c.arc(x, z, 8 + (1 - b.alpha) * 16, 0, Math.PI * 2);
-        c.stroke();
+        c.strokeStyle = INK.foe;
+        inkCircle(c, x, z, 8 + (1 - b.alpha) * 16, seed, 1.6);
       }
     }
     c.globalAlpha = 1;
     c.restore();
-    // player arrow and view cone (fixed, pointing up)
-    c.fillStyle = 'rgba(232,197,71,0.12)';
+    // view wedge + you (fixed, pointing up)
+    c.fillStyle = 'rgba(215,38,46,0.12)';
     c.beginPath();
     c.moveTo(R, R);
-    c.arc(R, R, R, -Math.PI / 2 - 0.55, -Math.PI / 2 + 0.55);
+    c.arc(R, R, Ri, -Math.PI / 2 - 0.55, -Math.PI / 2 + 0.55);
     c.fill();
-    c.fillStyle = '#e8c547';
+    inkArrow(c, R, R, 0, 13, INK.red);
+    // bearing ring (turns with the map; N in red)
+    c.save();
+    c.translate(R, R);
+    c.fillStyle = 'rgba(20,33,61,0.86)';
     c.beginPath();
-    c.moveTo(R, R - 13);
-    c.lineTo(R + 9, R + 9);
-    c.lineTo(R, R + 4);
-    c.lineTo(R - 9, R + 9);
-    c.closePath();
-    c.fill();
-    c.strokeStyle = 'rgba(232,197,71,0.5)';
-    c.lineWidth = 2;
-    c.beginPath();
-    c.arc(R, R, R - 2, 0, Math.PI * 2);
-    c.stroke();
+    c.arc(0, 0, R - 1, 0, Math.PI * 2);
+    c.arc(0, 0, Ri, 0, Math.PI * 2, true);
+    c.fill('evenodd');
+    c.rotate(yaw);
+    c.strokeStyle = 'rgba(237,230,214,0.7)';
+    c.lineWidth = 1.2;
+    for (let d = 0; d < 360; d += 10) {
+      const a = (d * Math.PI) / 180;
+      const l = d % 90 === 0 ? 0 : d % 30 === 0 ? 5 : 3;
+      if (!l) continue;
+      c.beginPath();
+      c.moveTo(Math.sin(a) * Ri, -Math.cos(a) * Ri);
+      c.lineTo(Math.sin(a) * (Ri + l), -Math.cos(a) * (Ri + l));
+      c.stroke();
+    }
+    c.font = `800 15px ${FONT.display}`;
+    c.textAlign = 'center';
+    c.textBaseline = 'middle';
+    for (const [lab, d] of [['N', 0], ['Ø', 90], ['S', 180], ['V', 270]] as [string, number][]) {
+      const a = (d * Math.PI) / 180;
+      c.save();
+      c.translate(Math.sin(a) * (R - 9), -Math.cos(a) * (R - 9));
+      c.rotate(-yaw);
+      c.fillStyle = d === 0 ? '#FF5A52' : INK.paper;
+      c.fillText(lab, 0, 1);
+      c.restore();
+    }
+    c.restore();
   }
 }
 

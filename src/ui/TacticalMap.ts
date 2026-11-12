@@ -1,6 +1,7 @@
 import { Terrain } from '../world/Terrain';
-import { ROADS, BUILDINGS, LANDMARKS, PLAY_HALF, TUNNEL, TUNNEL_EXIT, tunnelShafts, tunnelCapHeight, LADDERS, landmarkAt, BuildingDef } from '../world/MapLayout';
+import { PLAY_HALF, TUNNEL, TUNNEL_EXIT, tunnelShafts, LADDERS, landmarkAt } from '../world/MapLayout';
 import type { Input } from '../core/Input';
+import { chartRaster, B, INK, FONT, View, drawRoads, drawBuildings, drawSoundings, drawLandmarkLabels, compassRose, scaleBar, inkObjective, inkDiamond, inkFlag, inkArrow, inkLine, inkCircle } from './Chart';
 
 /**
  * Full-screen tactical map [M], in the spirit of the big battle-royale maps: the whole play area
@@ -34,16 +35,7 @@ export interface MapState {
   mode: string;
 }
 
-const B = PLAY_HALF + 14; // raster covers [-B, B]
 const COLS = 'ABCDEFGH';
-const FOOT: Partial<Record<string, [number, number]>> = {
-  church: [18, 8], shop: [12, 7], warehouse: [40, 22], office: [10, 7], bunker: [10, 8], gunpit: [10, 10],
-  barracks: [14, 6], mast: [4, 4], barn: [14, 9], naust: [5, 7], crane: [12, 12], tanks: [20, 10],
-  hjell: [10, 2], containers: [32, 22], rorbu: [6, 5], lighthouse: [7, 7], tower: [3.6, 3.6], radome: [9, 9],
-};
-function footprint(b: BuildingDef): [number, number] {
-  return [b.w ?? FOOT[b.kind]?.[0] ?? 8, b.d ?? FOOT[b.kind]?.[1] ?? 7];
-}
 function gridRef(x: number, z: number) {
   const c = Math.floor(((x + PLAY_HALF) / (2 * PLAY_HALF)) * 8), r = Math.floor(((z + PLAY_HALF) / (2 * PLAY_HALF)) * 8);
   if (c < 0 || c > 7 || r < 0 || r > 7) return '--';
@@ -182,60 +174,13 @@ export class TacticalMap {
 
   // ------------------------------------------------------------------ raster (terrain shading, contours, water)
   private buildRaster() {
-    const S = 1024, t = this.terrain;
-    const cv = document.createElement('canvas');
-    cv.width = cv.height = S;
-    const x = cv.getContext('2d')!;
-    const img = x.createImageData(S, S);
-    const hs = new Float32Array(S * S);
-    const capW = TUNNEL.width / 2 + TUNNEL_EXIT.carve + 1;
-    for (let j = 0; j < S; j++) for (let i = 0; i < S; i++) {
-      const x = -B + ((i + 0.5) / S) * 2 * B, z = -B + ((j + 0.5) / S) * 2 * B;
-      // over the tunnel the map shows the ridge, not the carved floor under it
-      const capped = Math.abs(x - TUNNEL.x) < capW && z > TUNNEL.z0 - 1 && z < TUNNEL.z1 + 1;
-      hs[j * S + i] = capped ? tunnelCapHeight(x, z) : t.heightAt(x, z);
-    }
-    const m = (2 * B) / S;
-    for (let j = 0; j < S; j++) {
-      for (let i = 0; i < S; i++) {
-        const k = j * S + i, o = k * 4;
-        const h = hs[k];
-        const wx = -B + ((i + 0.5) / S) * 2 * B, wz = -B + ((j + 0.5) / S) * 2 * B;
-        let r: number, g: number, b: number;
-        if (h < 0) {
-          const d = Math.min(1, -h / 14);
-          r = 26 - d * 12; g = 50 - d * 18; b = 66 - d * 16;
-          // shallow rim
-          if (h > -0.8) { r += 14; g += 18; b += 16; }
-        } else {
-          const hx = hs[j * S + Math.min(S - 1, i + 1)] - hs[j * S + Math.max(0, i - 1)];
-          const hz = hs[Math.min(S - 1, j + 1) * S + i] - hs[Math.max(0, j - 1) * S + i];
-          // light from the north-west
-          const shade = Math.max(0.5, Math.min(1.35, 1 - (hx * 0.9 + hz * 0.7) / (2 * m) * 0.42));
-          const [f, gr, dirt] = t.splatAt(wx, wz);
-          r = 86; g = 98; b = 72;
-          r = r * (1 - f * 0.42); g = g * (1 - f * 0.22); b = b * (1 - f * 0.4);
-          r += gr * 34 + dirt * 22; g += gr * 26 + dirt * 14; b += gr * 26 + dirt * 6;
-          const elev = Math.min(1, h / 45);
-          r = r * shade + elev * 34; g = g * shade + elev * 30; b = b * shade + elev * 30;
-          // contours every 5 m (index every 25 m)
-          const c0 = Math.floor(h / 5), cR = Math.floor(hs[j * S + Math.min(S - 1, i + 1)] / 5), cD = Math.floor(hs[Math.min(S - 1, j + 1) * S + i] / 5);
-          if (c0 !== cR || c0 !== cD) {
-            const idx = Math.max(c0, cR, cD) % 5 === 0;
-            const k2 = idx ? 0.72 : 0.86;
-            r *= k2; g *= k2; b *= k2;
-          }
-          // coastline
-          if (h < 0.35) { r = r * 0.6 + 60; g = g * 0.6 + 64; b = b * 0.6 + 56; }
-        }
-        img.data[o] = r; img.data[o + 1] = g; img.data[o + 2] = b; img.data[o + 3] = 255;
-      }
-    }
-    x.putImageData(img, 0, 0);
-    return cv;
+    return chartRaster(this.terrain).canvas;
+  }
+  private get view(): View {
+    return { sx: (x) => this.sx(x), sy: (z) => this.sy(z), ppm: this.ppm };
   }
 
-  // ------------------------------------------------------------------ drawing
+  // ------------------------------------------------------------------ drawing (Sjøkart)
   draw(s: MapState, dt: number) {
     this.last = s;
     if (!this.open) return;
@@ -246,30 +191,43 @@ export class TacticalMap {
     this.resize();
     const c = this.c, W = this.W, H = this.H, ppm = this.ppm;
     c.setTransform(this.dpr, 0, 0, this.dpr, 0, 0);
-    c.fillStyle = '#0b1114';
+    c.fillStyle = INK.paper;
     c.fillRect(0, 0, W, H);
-    // terrain raster
     if (this.raster) {
       c.imageSmoothingEnabled = true;
       c.drawImage(this.raster, this.sx(-B), this.sy(-B), 2 * B * ppm, 2 * B * ppm);
     }
-    // out of bounds
+    // outside the combat area: hatched, the boundary as a red dashed line
     const x0 = this.sx(-PLAY_HALF), y0 = this.sy(-PLAY_HALF), x1 = this.sx(PLAY_HALF), y1 = this.sy(PLAY_HALF);
-    c.fillStyle = 'rgba(8,10,12,0.55)';
+    c.save();
     c.beginPath();
     c.rect(0, 0, W, H);
     c.rect(x1, y0, x0 - x1, y1 - y0);
-    c.fill('evenodd');
-    c.strokeStyle = 'rgba(255,90,70,0.75)';
+    c.clip('evenodd');
+    c.fillStyle = 'rgba(20,33,61,0.16)';
+    c.fillRect(0, 0, W, H);
+    c.strokeStyle = 'rgba(20,33,61,0.18)';
+    c.lineWidth = 1;
+    c.beginPath();
+    for (let k = -H; k < W; k += 9) {
+      c.moveTo(k, 0);
+      c.lineTo(k + H, H);
+    }
+    c.stroke();
+    c.restore();
+    c.strokeStyle = INK.red;
     c.lineWidth = 2;
-    c.setLineDash([10, 7]);
+    c.setLineDash([10, 6]);
     c.strokeRect(x0, y0, x1 - x0, y1 - y0);
     c.setLineDash([]);
+    const v = this.view;
+    drawSoundings(c, v, W, H, Math.max(46, 64 / Math.sqrt(this.zoom)));
     this.drawGrid(x0, y0, x1, y1);
-    this.drawRoads();
-    this.drawBuildings();
+    drawRoads(c, v, this.zoom);
+    this.drawTunnel();
+    drawBuildings(c, v);
     this.drawFeatures();
-    this.drawLabels(s);
+    drawLandmarkLabels(c, v, this.zoom, landmarkAt(s.px, s.pz), s.flags.map((f) => ({ x: this.sx(f.x), y: this.sy(f.z) })));
     this.drawFlags(s);
     this.drawIntel(s);
     this.drawPlayer(s);
@@ -277,9 +235,10 @@ export class TacticalMap {
     this.drawCursor(s);
   }
 
+  /** lettered graticule; the chart's neat-line border with alternating ticks */
   private drawGrid(x0: number, y0: number, x1: number, y1: number) {
     const c = this.c;
-    c.strokeStyle = 'rgba(255,255,255,0.11)';
+    c.strokeStyle = 'rgba(20,33,61,0.16)';
     c.lineWidth = 1;
     c.beginPath();
     for (let i = 1; i < 8; i++) {
@@ -288,57 +247,38 @@ export class TacticalMap {
       c.moveTo(x0, gy); c.lineTo(x1, gy);
     }
     c.stroke();
-    c.font = '600 13px Barlow Condensed, sans-serif';
+    c.font = `600 12px ${FONT.mono}`;
     c.textAlign = 'center';
     c.textBaseline = 'middle';
-    const ty = Math.max(y0 + 12, 74), lx = Math.max(x0 + 12, 14);
+    const ty = Math.max(y0 + 12, 86), lx = Math.max(x0 + 14, 16);
     for (let i = 0; i < 8; i++) {
       const gx = x0 + ((x1 - x0) * (i + 0.5)) / 8, gy = y0 + ((y1 - y0) * (i + 0.5)) / 8;
-      this.halo(COLS[i], gx, Math.min(ty, y1 - 10), 'rgba(255,255,255,0.55)');
-      this.halo(String(i + 1), Math.min(lx, x1 - 10), gy, 'rgba(255,255,255,0.55)');
+      this.halo(COLS[i], gx, Math.min(ty, y1 - 10), INK.ink2);
+      this.halo(String(i + 1), Math.min(lx, x1 - 10), gy, INK.ink2);
     }
   }
 
+  /** text with a paper halo so it reads over contours */
   private halo(text: string, x: number, y: number, color: string, w = 3) {
     const c = this.c;
     c.lineWidth = w;
-    c.strokeStyle = 'rgba(0,0,0,0.65)';
+    c.strokeStyle = 'rgba(237,230,214,0.9)';
     c.strokeText(text, x, y);
     c.fillStyle = color;
     c.fillText(text, x, y);
   }
 
-  private drawRoads() {
-    const c = this.c, ppm = this.ppm;
-    c.lineCap = 'round';
-    c.lineJoin = 'round';
-    for (const pass of [0, 1]) {
-      for (const r of ROADS) {
-        const w = Math.max(r.kind === 'dirt' ? 1.2 : 2, r.width * ppm);
-        if (pass === 0) {
-          c.strokeStyle = 'rgba(20,22,22,0.55)';
-          c.lineWidth = w + 2;
-        } else {
-          c.strokeStyle = r.kind === 'asphalt' ? 'rgba(214,212,200,0.92)' : r.kind === 'gravel' ? 'rgba(196,178,140,0.85)' : 'rgba(170,140,100,0.8)';
-          c.lineWidth = w;
-          if (r.kind === 'dirt') c.setLineDash([Math.max(3, 4 * this.zoom), Math.max(2, 2.5 * this.zoom)]);
-        }
-        c.beginPath();
-        r.pts.forEach(([x, z], i) => (i ? c.lineTo(this.sx(x), this.sy(z)) : c.moveTo(this.sx(x), this.sy(z))));
-        c.stroke();
-        c.setLineDash([]);
-      }
-    }
-    // the tunnel runs under the ridge: draw its bore as a dashed outline over the road
+  /** the road tunnel runs under the ridge: its bore dashed over the road */
+  private drawTunnel() {
+    const c = this.c;
     const W = TUNNEL.width / 2;
     const tx0 = this.sx(TUNNEL.x - W), tx1 = this.sx(TUNNEL.x + W), tz0 = this.sy(TUNNEL.z0), tz1 = this.sy(TUNNEL.z1);
-    c.fillStyle = 'rgba(30,32,34,0.75)';
+    c.fillStyle = 'rgba(237,230,214,0.75)';
     c.fillRect(tx0, tz0, tx1 - tx0, tz1 - tz0);
-    c.strokeStyle = 'rgba(230,230,220,0.85)';
-    c.lineWidth = 1.5;
+    c.strokeStyle = INK.ink;
+    c.lineWidth = 1.4;
     c.setLineDash([5, 4]);
     c.strokeRect(tx0, tz0, tx1 - tx0, tz1 - tz0);
-    // service galleries
     for (const sx of [-1, 1]) {
       const g0 = this.sx(TUNNEL.x + sx * (W + TUNNEL_EXIT.gx0)), g1 = this.sx(TUNNEL.x + sx * (W + TUNNEL_EXIT.gx1));
       c.strokeRect(Math.min(g0, g1), this.sy(TUNNEL_EXIT.doors[0] - 1.2), Math.abs(g1 - g0), this.sy(TUNNEL_EXIT.doors[1] + 1.2) - this.sy(TUNNEL_EXIT.doors[0] - 1.2));
@@ -346,28 +286,10 @@ export class TacticalMap {
     c.setLineDash([]);
   }
 
-  private drawBuildings() {
-    const c = this.c, ppm = this.ppm;
-    for (const b of BUILDINGS) {
-      const [w, d] = footprint(b);
-      c.save();
-      c.translate(this.sx(b.x), this.sy(b.z));
-      c.rotate(-b.rot);
-      const pw = Math.max(3, w * ppm), pd = Math.max(3, d * ppm);
-      c.fillStyle = b.kind === 'containers' ? 'rgba(126,112,92,0.95)' : b.kind === 'tower' || b.kind === 'mast' ? 'rgba(70,74,78,0.95)' : 'rgba(34,37,40,0.95)';
-      c.fillRect(-pw / 2, -pd / 2, pw, pd);
-      c.strokeStyle = 'rgba(232,230,220,0.55)';
-      c.lineWidth = 1;
-      c.strokeRect(-pw / 2, -pd / 2, pw, pd);
-      c.restore();
-    }
-  }
-
   private drawFeatures() {
     const c = this.c, z = this.zoom;
-    // ziplines
     if (z > 1.2) {
-      c.strokeStyle = 'rgba(210,220,230,0.75)';
+      c.strokeStyle = INK.ink2;
       c.lineWidth = 1.2;
       c.setLineDash([2, 3]);
       c.beginPath();
@@ -377,13 +299,12 @@ export class TacticalMap {
       }
       c.stroke();
       c.setLineDash([]);
-      c.fillStyle = 'rgba(210,220,230,0.9)';
+      c.fillStyle = INK.ink;
       for (const l of this.ziplines) for (const p of [l.a, l.b]) { c.beginPath(); c.arc(this.sx(p.x), this.sy(p.z), 2.2, 0, Math.PI * 2); c.fill(); }
     }
-    // ladders
     if (z > 1.9) {
-      c.strokeStyle = 'rgba(240,190,40,0.95)';
-      c.lineWidth = 1.4;
+      c.strokeStyle = INK.ink;
+      c.lineWidth = 1.3;
       for (const l of LADDERS) {
         const x = this.sx(l.x), y = this.sy(l.z);
         c.beginPath();
@@ -394,11 +315,11 @@ export class TacticalMap {
         c.stroke();
       }
     }
-    // tunnel emergency exits: doors in the bore, hatches on the crest
+    // tunnel emergency exits / hatches: green boxes with an arrow (as on real escape signage)
     const ex = (x: number, y: number, label: string) => {
-      c.fillStyle = '#1f9a52';
+      c.fillStyle = '#3E8E5A';
       c.fillRect(x - 6, y - 6, 12, 12);
-      c.strokeStyle = 'rgba(255,255,255,0.9)';
+      c.strokeStyle = INK.ink;
       c.lineWidth = 1.2;
       c.strokeRect(x - 6, y - 6, 12, 12);
       c.fillStyle = '#fff';
@@ -406,10 +327,10 @@ export class TacticalMap {
       c.moveTo(x - 3, y - 2.5); c.lineTo(x + 3.5, y); c.lineTo(x - 3, y + 2.5);
       c.fill();
       if (z > 2.2) {
-        c.font = '600 11px Barlow Condensed, sans-serif';
+        c.font = `600 10px ${FONT.cond}`;
         c.textAlign = 'left';
         c.textBaseline = 'middle';
-        this.halo(label, x + 9, y, '#7dffb0');
+        this.halo(label, x + 9, y, '#2E6B44');
       }
     };
     if (z > 1.3) {
@@ -418,70 +339,45 @@ export class TacticalMap {
     }
   }
 
-  private drawLabels(s: MapState) {
-    const c = this.c, z = this.zoom;
-    c.textAlign = 'center';
-    c.textBaseline = 'middle';
-    for (const l of LANDMARKS) {
-      const big = l.r >= 35;
-      if (!big && z < 0.95) continue;
-      const size = Math.round(Math.min(30, (big ? 15 : 12.5) * Math.pow(z, 0.42)));
-      c.font = `700 ${size}px Barlow Condensed, sans-serif`;
-      (c as any).letterSpacing = `${Math.round(size * 0.14)}px`;
-      const here = landmarkAt(s.px, s.pz) === l.name;
-      const lx = this.sx(l.x);
-      let ly = this.sy(l.z);
-      // keep the name clear of a flag sitting on the same spot
-      for (const f of s.flags) if (Math.abs(this.sx(f.x) - lx) < 60 && Math.abs(this.sy(f.z) - ly) < 22) ly = this.sy(f.z) - 28;
-      this.halo(l.name.toUpperCase(), lx, ly, here ? '#ffe27a' : 'rgba(255,255,255,0.94)', 4);
-    }
-    (c as any).letterSpacing = '0px';
+  private flagColor(css: string) {
+    // the HUD hands friend / foe / neutral colours: map them to chart inks
+    return /5aa8ff|57a9e6|friend/i.test(css) ? INK.friend : /ff4a3a|f0453c|ff6a5a|foe/i.test(css) ? INK.foe : INK.ink2;
   }
 
   private drawFlags(s: MapState) {
-    const c = this.c, ppm = this.ppm;
-    for (const f of s.flags) {
+    const ppm = this.ppm;
+    s.flags.forEach((f, i) => {
       const x = this.sx(f.x), y = this.sy(f.z);
-      const r = Math.max(13, f.r * ppm);
-      c.fillStyle = 'rgba(10,14,18,0.35)';
-      c.beginPath(); c.arc(x, y, r, 0, Math.PI * 2); c.fill();
-      c.strokeStyle = f.color;
-      c.lineWidth = 2;
-      c.beginPath(); c.arc(x, y, r, 0, Math.PI * 2); c.stroke();
-      if (f.capColor && f.progress > 0) {
-        c.strokeStyle = f.capColor;
-        c.lineWidth = 4;
-        c.beginPath(); c.arc(x, y, r, -Math.PI / 2, -Math.PI / 2 + f.progress * Math.PI * 2); c.stroke();
-      }
-      const bs = 13;
-      c.fillStyle = 'rgba(10,14,18,0.85)';
-      c.fillRect(x - bs, y - bs, bs * 2, bs * 2);
-      c.strokeStyle = f.contested ? (Math.sin(this.t * 10) > 0 ? '#ffffff' : f.color) : f.color;
-      c.lineWidth = 2;
-      c.strokeRect(x - bs, y - bs, bs * 2, bs * 2);
-      c.font = '700 18px Barlow Condensed, sans-serif';
-      c.textAlign = 'center';
-      c.textBaseline = 'middle';
-      c.fillStyle = f.color;
-      c.fillText(f.letter, x, y + 1);
-    }
+      const r = Math.max(14, f.r * ppm);
+      const col = this.flagColor(f.color);
+      // the capture zone: a faint inked ring
+      this.c.save();
+      this.c.globalAlpha = 0.5;
+      this.c.strokeStyle = col;
+      this.c.setLineDash([4, 4]);
+      this.c.lineWidth = 1.2;
+      this.c.beginPath();
+      this.c.arc(x, y, r, 0, Math.PI * 2);
+      this.c.stroke();
+      this.c.restore();
+      inkObjective(this.c, x, y, 15, f.letter, col, f.capColor ? this.flagColor(f.capColor) : null, f.progress, i * 13 + 5, f.contested && Math.sin(this.t * 10) > 0);
+    });
   }
 
   private drawIntel(s: MapState) {
     const c = this.c, ppm = this.ppm;
     // the radius inside which you hear (and see) enemy gunfire
-    c.strokeStyle = 'rgba(255,120,90,0.22)';
+    c.strokeStyle = 'rgba(215,38,46,0.28)';
     c.lineWidth = 1;
-    c.setLineDash([4, 6]);
+    c.setLineDash([3, 6]);
     c.beginPath(); c.arc(this.sx(s.px), this.sy(s.pz), FIRE_REVEAL_RADIUS * ppm, 0, Math.PI * 2); c.stroke();
     c.setLineDash([]);
-    // UAV sweep
     if (s.uav > 0) {
-      const a = (this.t % 2) / 2 * Math.PI * 2 - Math.PI / 2;
+      const a = ((this.t % 2) / 2) * Math.PI * 2 - Math.PI / 2;
       const R = Math.hypot(this.W, this.H);
       const g = c.createRadialGradient(this.sx(0), this.sy(0), 0, this.sx(0), this.sy(0), R);
-      g.addColorStop(0, 'rgba(255,80,60,0.10)');
-      g.addColorStop(1, 'rgba(255,80,60,0.0)');
+      g.addColorStop(0, 'rgba(215,38,46,0.12)');
+      g.addColorStop(1, 'rgba(215,38,46,0)');
       c.fillStyle = g;
       c.beginPath();
       c.moveTo(this.sx(0), this.sy(0));
@@ -489,241 +385,216 @@ export class TacticalMap {
       c.closePath();
       c.fill();
     }
-    // pings and waypoint
-    for (const p of s.pings) {
+    // pings: inked diamonds with the distance; the waypoint: an inked pennant and a course line
+    s.pings.forEach((p, i) => {
       const x = this.sx(p.x), y = this.sy(p.z);
-      const k = 1 + 0.25 * Math.sin(this.t * 6);
-      c.save();
-      c.translate(x, y);
-      c.rotate(Math.PI / 4);
-      c.strokeStyle = '#ffd25a';
-      c.fillStyle = 'rgba(255,210,90,0.25)';
-      c.lineWidth = 2;
-      c.fillRect(-6 * k, -6 * k, 12 * k, 12 * k);
-      c.strokeRect(-6 * k, -6 * k, 12 * k, 12 * k);
-      c.restore();
-      c.font = '600 12px Barlow Condensed, sans-serif';
+      inkDiamond(c, x, y, 8 + Math.sin(this.t * 6) * 1, i * 7 + 1, INK.gold);
+      c.font = `500 11px ${FONT.mono}`;
       c.textAlign = 'center';
       c.textBaseline = 'top';
-      this.halo(`${Math.round(Math.hypot(p.x - s.px, p.z - s.pz))} m`, x, y + 11, '#ffd25a');
-    }
+      this.halo(`${Math.round(Math.hypot(p.x - s.px, p.z - s.pz))} m`, x, y + 11, INK.gold);
+    });
     if (s.waypoint) {
       const x = this.sx(s.waypoint.x), y = this.sy(s.waypoint.z);
-      c.fillStyle = '#ffd25a';
-      c.strokeStyle = 'rgba(0,0,0,0.6)';
-      c.lineWidth = 2;
-      c.beginPath();
-      c.moveTo(x, y);
-      c.lineTo(x - 8, y - 14);
-      c.arc(x, y - 17, 8, Math.PI * 0.83, Math.PI * 0.17);
-      c.closePath();
-      c.stroke();
-      c.fill();
-      c.fillStyle = '#1a1a10';
-      c.beginPath(); c.arc(x, y - 17, 3, 0, Math.PI * 2); c.fill();
-      c.font = '700 12px Barlow Condensed, sans-serif';
-      c.textAlign = 'center';
-      c.textBaseline = 'bottom';
-      this.halo(`WAYPOINT ${Math.round(Math.hypot(s.waypoint.x - s.px, s.waypoint.z - s.pz))} m`, x, y - 28, '#ffd25a');
-      // a line from you to it
-      c.strokeStyle = 'rgba(255,210,90,0.35)';
+      c.strokeStyle = 'rgba(20,33,61,0.55)';
       c.lineWidth = 1.5;
-      c.setLineDash([6, 6]);
+      c.setLineDash([7, 5]);
       c.beginPath(); c.moveTo(this.sx(s.px), this.sy(s.pz)); c.lineTo(x, y); c.stroke();
       c.setLineDash([]);
+      inkFlag(c, x, y, INK.red, 41);
+      c.font = `600 11px ${FONT.cond}`;
+      c.textAlign = 'center';
+      c.textBaseline = 'bottom';
+      (c as any).letterSpacing = '1.5px';
+      this.halo(`WAYPOINT · ${Math.round(Math.hypot(s.waypoint.x - s.px, s.waypoint.z - s.pz))} m`, x + 4, y - 26, INK.red);
+      (c as any).letterSpacing = '0px';
     }
-    // helicopters
     for (const h of s.helis) {
       const x = this.sx(h.x), y = this.sy(h.z);
-      c.fillStyle = h.friendly ? '#5aa8ff' : '#ff4a3a';
-      c.fillRect(x - 11, y - 2, 22, 4);
-      c.fillRect(x - 2, y - 11, 4, 22);
-      c.beginPath(); c.arc(x, y, 5, 0, Math.PI * 2); c.fill();
+      c.strokeStyle = h.friendly ? INK.friend : INK.foe;
+      c.lineWidth = 2.4;
+      c.beginPath();
+      c.moveTo(x - 11, y); c.lineTo(x + 11, y);
+      c.moveTo(x, y - 11); c.lineTo(x, y + 11);
+      c.stroke();
+      c.beginPath(); c.arc(x, y, 4.5, 0, Math.PI * 2); c.stroke();
     }
-    // enemies
-    for (const e of s.enemies) {
+    // enemies: red ink — a cross for spotted, a dot with a ring for gunfire / UAV
+    s.enemies.forEach((e, i) => {
       const x = this.sx(e.x), y = this.sy(e.z);
       c.globalAlpha = Math.max(0, Math.min(1, e.alpha));
+      c.strokeStyle = INK.foe;
+      c.fillStyle = INK.foe;
       if (e.kind === 'spotted') {
-        c.save();
-        c.translate(x, y);
-        c.rotate(Math.PI / 4);
-        c.fillStyle = '#ff4a3a';
-        c.strokeStyle = 'rgba(0,0,0,0.6)';
-        c.lineWidth = 1.5;
-        c.fillRect(-5.5, -5.5, 11, 11);
-        c.strokeRect(-5.5, -5.5, 11, 11);
-        c.restore();
+        inkLine(c, [[x - 6, y - 6], [x + 6, y + 6]], i * 3, 2.4);
+        inkLine(c, [[x + 6, y - 6], [x - 6, y + 6]], i * 3 + 1, 2.4);
       } else {
-        c.fillStyle = '#ff4a3a';
-        c.beginPath(); c.arc(x, y, 5.5, 0, Math.PI * 2); c.fill();
-        c.strokeStyle = 'rgba(255,74,58,0.55)';
-        c.lineWidth = 1.5;
-        c.beginPath(); c.arc(x, y, 5.5 + (1 - e.alpha) * 14, 0, Math.PI * 2); c.stroke();
+        c.beginPath(); c.arc(x, y, 4.5, 0, Math.PI * 2); c.fill();
+        inkCircle(c, x, y, 5 + (1 - e.alpha) * 14, i * 5, 1.4);
       }
-    }
+    });
     c.globalAlpha = 1;
-    // squad
-    c.font = '600 12px Barlow Condensed, sans-serif';
+    // squad: blue inked arrowheads
+    c.font = `600 11px ${FONT.cond}`;
     c.textAlign = 'left';
     c.textBaseline = 'middle';
     for (const a of s.allies) {
       const x = this.sx(a.x), y = this.sy(a.z);
-      c.save();
-      c.translate(x, y);
-      c.rotate(-a.yaw);
-      c.fillStyle = '#5aa8ff';
-      c.strokeStyle = 'rgba(0,0,0,0.6)';
-      c.lineWidth = 1.5;
-      c.beginPath();
-      c.moveTo(0, -7); c.lineTo(5, 5); c.lineTo(0, 2.5); c.lineTo(-5, 5);
-      c.closePath();
-      c.stroke();
-      c.fill();
-      c.restore();
-      if (this.zoom > 2.2) this.halo(a.name.toUpperCase(), x + 8, y, '#9ccbff');
+      inkArrow(c, x, y, a.yaw, 7, INK.friend);
+      if (this.zoom > 2.2) this.halo(a.name.toUpperCase(), x + 9, y, INK.sea);
     }
   }
 
   private drawPlayer(s: MapState) {
     const c = this.c;
     const x = this.sx(s.px), y = this.sy(s.pz);
+    // view cone as a pencil wedge
     c.save();
     c.translate(x, y);
     c.rotate(-s.yaw);
-    const g = c.createRadialGradient(0, 0, 0, 0, 0, 70);
-    g.addColorStop(0, 'rgba(255,226,122,0.35)');
-    g.addColorStop(1, 'rgba(255,226,122,0)');
-    c.fillStyle = g;
+    c.fillStyle = 'rgba(215,38,46,0.12)';
+    c.strokeStyle = 'rgba(215,38,46,0.45)';
+    c.lineWidth = 1;
     c.beginPath();
     c.moveTo(0, 0);
     c.arc(0, 0, 70, -Math.PI / 2 - 0.5, -Math.PI / 2 + 0.5);
     c.closePath();
     c.fill();
-    c.fillStyle = s.alive ? '#ffe27a' : '#8a8a80';
-    c.strokeStyle = 'rgba(0,0,0,0.7)';
-    c.lineWidth = 2;
-    c.beginPath();
-    c.moveTo(0, -11); c.lineTo(8, 8); c.lineTo(0, 4); c.lineTo(-8, 8);
-    c.closePath();
     c.stroke();
-    c.fill();
     c.restore();
+    inkArrow(c, x, y, s.yaw, 11, s.alive ? INK.red : '#8A8A80');
   }
 
+  /** chart furniture: title cartouche, score, legend, compass rose, scale bar */
   private drawPanel(s: MapState) {
     const c = this.c, W = this.W, H = this.H;
-    // top bar
-    const grd = c.createLinearGradient(0, 0, 0, 64);
-    grd.addColorStop(0, 'rgba(6,9,11,0.92)');
-    grd.addColorStop(1, 'rgba(6,9,11,0)');
-    c.fillStyle = grd;
-    c.fillRect(0, 0, W, 64);
-    c.textBaseline = 'middle';
+    // title cartouche (top left)
+    const cw = 330;
+    c.fillStyle = 'rgba(246,241,230,0.94)';
+    c.fillRect(18, 16, cw, 62);
+    c.strokeStyle = INK.ink;
+    c.lineWidth = 1.5;
+    c.strokeRect(18, 16, cw, 62);
+    c.lineWidth = 0.6;
+    c.strokeRect(21, 19, cw - 6, 56);
+    c.textBaseline = 'alphabetic';
     c.textAlign = 'left';
-    c.font = '700 22px Barlow Condensed, sans-serif';
-    (c as any).letterSpacing = '4px';
-    c.fillStyle = '#ffffff';
-    c.fillText('TACTICAL MAP', 28, 26);
-    c.font = '600 15px Barlow Condensed, sans-serif';
-    (c as any).letterSpacing = '2px';
-    c.fillStyle = '#ffe27a';
-    c.fillText(`${landmarkAt(s.px, s.pz).toUpperCase()}  ·  ${gridRef(s.px, s.pz)}`, 30, 48);
-    // score / mode / time
-    c.textAlign = 'center';
-    c.font = '700 20px Barlow Condensed, sans-serif';
-    const mine = s.team, foe = 1 - s.team;
-    c.fillStyle = '#5aa8ff';
-    c.fillText(`${s.teamNames[mine].toUpperCase()}  ${s.scores[mine]}`, W / 2 - 110, 26);
-    c.fillStyle = '#ffffff';
-    c.fillText(s.timeLeft, W / 2, 26);
-    c.fillStyle = '#ff6a5a';
-    c.fillText(`${s.scores[foe]}  ${s.teamNames[foe].toUpperCase()}`, W / 2 + 110, 26);
-    c.font = '600 13px Barlow Condensed, sans-serif';
-    c.fillStyle = 'rgba(255,255,255,0.6)';
-    c.fillText(s.mode.toUpperCase(), W / 2, 48);
-    // intel status (right; drops to a second line on narrow screens)
+    c.fillStyle = INK.ink;
+    c.font = `800 26px ${FONT.display}`;
+    (c as any).letterSpacing = '3px';
+    c.fillText('KVITVIKA', 32, 50);
+    c.font = `600 10px ${FONT.cond}`;
+    (c as any).letterSpacing = '2.5px';
+    c.fillStyle = INK.ink2;
+    c.fillText('SJØKART · TACTICAL CHART', 32, 66);
     c.textAlign = 'right';
-    c.font = '700 15px Barlow Condensed, sans-serif';
-    const sy = W > 1250 ? 26 : 78;
-    if (s.uav > 0) {
-      c.fillStyle = Math.sin(this.t * 6) > -0.3 ? '#ff6a5a' : '#ffb0a0';
-      this.halo(`UAV ONLINE  ${Math.ceil(s.uav)}s  ·  ALL ENEMIES TRACKED`, W - 28, sy, c.fillStyle as string);
-    } else {
-      this.halo(`ENEMY GUNFIRE SHOWN WITHIN ${FIRE_REVEAL_RADIUS} m`, W - 28, sy, 'rgba(255,255,255,0.7)');
-    }
+    c.font = `500 12px ${FONT.mono}`;
     (c as any).letterSpacing = '0px';
-    // legend (bottom)
+    c.fillStyle = INK.red;
+    c.fillText(`${gridRef(s.px, s.pz)} · ${landmarkAt(s.px, s.pz).toUpperCase()}`, 18 + cw - 14, 50);
+    c.fillStyle = INK.ink2;
+    c.fillText(s.uav > 0 ? `UAV ${Math.ceil(s.uav)} s` : `GUNFIRE ≤ ${FIRE_REVEAL_RADIUS} m`, 18 + cw - 14, 66);
+    // score (top centre)
+    const mine = s.team, foe = 1 - s.team;
+    const sw = 300, sx = W / 2 - sw / 2;
+    c.fillStyle = 'rgba(246,241,230,0.94)';
+    c.fillRect(sx, 16, sw, 40);
+    c.strokeStyle = INK.ink;
+    c.lineWidth = 1.5;
+    c.strokeRect(sx, 16, sw, 40);
+    c.textAlign = 'center';
+    c.textBaseline = 'middle';
+    c.font = `800 20px ${FONT.display}`;
+    c.fillStyle = INK.friend;
+    c.fillText(`${s.scores[mine]}`, sx + 50, 37);
+    c.fillStyle = INK.foe;
+    c.fillText(`${s.scores[foe]}`, sx + sw - 50, 37);
+    c.font = `600 15px ${FONT.mono}`;
+    c.fillStyle = INK.ink;
+    c.fillText(s.timeLeft, W / 2, 33);
+    c.font = `600 8.5px ${FONT.cond}`;
+    (c as any).letterSpacing = '2px';
+    c.fillStyle = INK.ink2;
+    c.fillText(s.mode.toUpperCase(), W / 2, 48);
+    (c as any).letterSpacing = '0px';
+    // compass rose (top right)
+    compassRose(c, W - 74, 82, 50, 0.95);
+    // legend + controls (bottom right, a paper key)
+    const kx = W - 214, ky = H - 196;
+    c.fillStyle = 'rgba(246,241,230,0.94)';
+    c.fillRect(kx - 14, ky - 22, 210, 190);
+    c.strokeStyle = INK.ink;
+    c.lineWidth = 1.5;
+    c.strokeRect(kx - 14, ky - 22, 210, 190);
+    c.font = `600 10px ${FONT.cond}`;
+    (c as any).letterSpacing = '2.5px';
+    c.fillStyle = INK.red;
+    c.textAlign = 'left';
+    c.fillText('TEGNFORKLARING · KEY', kx - 2, ky - 8);
+    (c as any).letterSpacing = '0px';
+    const row = (i: number, draw: (x: number, y: number) => void, label: string) => {
+      const y = ky + 12 + i * 19;
+      draw(kx + 6, y);
+      c.fillStyle = INK.ink;
+      c.font = `500 12px ${FONT.sans}`;
+      c.textAlign = 'left';
+      c.textBaseline = 'middle';
+      c.fillText(label, kx + 24, y + 1);
+    };
+    row(0, (x, y) => inkArrow(c, x, y, 0, 7, INK.red), 'You');
+    row(1, (x, y) => inkArrow(c, x, y, 0, 7, INK.friend), 'Squad');
+    row(2, (x, y) => { c.fillStyle = INK.foe; c.beginPath(); c.arc(x, y, 4, 0, Math.PI * 2); c.fill(); }, 'Enemy gunfire / UAV');
+    row(3, (x, y) => { c.strokeStyle = INK.foe; inkLine(c, [[x - 5, y - 5], [x + 5, y + 5]], 1, 2.2); inkLine(c, [[x + 5, y - 5], [x - 5, y + 5]], 2, 2.2); }, 'Spotted enemy');
+    row(4, (x, y) => inkDiamond(c, x, y, 6, 3, INK.gold), 'Ping');
+    row(5, (x, y) => { c.fillStyle = '#3E8E5A'; c.fillRect(x - 5, y - 5, 10, 10); }, 'Tunnel exit / hatch');
+    row(6, (x, y) => { c.strokeStyle = '#E2563C'; c.lineWidth = 3; c.beginPath(); c.moveTo(x - 7, y); c.lineTo(x + 7, y); c.stroke(); }, 'Road');
+    row(7, (x, y) => { c.fillStyle = INK.sea; c.font = `italic 500 12px ${FONT.serif}`; c.textAlign = 'center'; c.fillText('12', x, y + 1); }, 'Depth (m)');
+    // scale bar
+    scaleBar(c, W - 214, H - 236, this.ppm, 160);
+    // controls strip (bottom left)
     const items: [string, string][] = [['WHEEL', 'ZOOM'], ['DRAG', 'PAN'], ['LMB / X', 'PING'], ['RMB', 'WAYPOINT'], ['R', 'RE-CENTRE'], ['M', 'CLOSE']];
-    c.font = '600 13px Barlow Condensed, sans-serif';
+    c.font = `500 11px ${FONT.mono}`;
+    let lx = 30;
+    const ly = H - 26;
+    c.fillStyle = 'rgba(246,241,230,0.94)';
+    c.fillRect(16, ly - 16, 560, 32);
+    c.strokeStyle = INK.ink;
+    c.lineWidth = 1.2;
+    c.strokeRect(16, ly - 16, 560, 32);
     c.textAlign = 'left';
     c.textBaseline = 'middle';
-    let lx = 28;
-    const ly = H - 24;
-    c.fillStyle = 'rgba(6,9,11,0.7)';
-    c.fillRect(16, ly - 16, 600, 32);
     for (const [k, v] of items) {
       const kw = c.measureText(k).width + 12;
-      c.strokeStyle = 'rgba(255,255,255,0.55)';
+      c.strokeStyle = INK.ink;
       c.lineWidth = 1;
-      c.strokeRect(lx, ly - 10, kw, 20);
-      c.fillStyle = '#ffffff';
+      c.strokeRect(lx, ly - 9, kw, 18);
+      c.fillStyle = INK.ink;
       c.fillText(k, lx + 6, ly + 1);
-      c.fillStyle = 'rgba(255,255,255,0.65)';
+      c.fillStyle = INK.ink2;
       c.fillText(v, lx + kw + 6, ly + 1);
-      lx += kw + c.measureText(v).width + 22;
+      lx += kw + c.measureText(v).width + 20;
     }
-    // key (bottom right): what the symbols mean
-    const kx = W - 196, ky = H - 132;
-    c.fillStyle = 'rgba(6,9,11,0.7)';
-    c.fillRect(kx - 12, ky - 14, 192, 124);
-    const row = (i: number, draw: (x: number, y: number) => void, label: string) => {
-      const y = ky + i * 19;
-      draw(kx + 6, y);
-      c.fillStyle = 'rgba(255,255,255,0.8)';
-      c.font = '600 12px Barlow Condensed, sans-serif';
-      c.textAlign = 'left';
-      c.fillText(label, kx + 22, y + 1);
-    };
-    row(0, (x, y) => { c.fillStyle = '#ffe27a'; c.beginPath(); c.moveTo(x, y - 6); c.lineTo(x + 5, y + 5); c.lineTo(x - 5, y + 5); c.fill(); }, 'YOU');
-    row(1, (x, y) => { c.fillStyle = '#5aa8ff'; c.beginPath(); c.moveTo(x, y - 6); c.lineTo(x + 5, y + 5); c.lineTo(x - 5, y + 5); c.fill(); }, 'SQUAD');
-    row(2, (x, y) => { c.fillStyle = '#ff4a3a'; c.beginPath(); c.arc(x, y, 5, 0, Math.PI * 2); c.fill(); }, 'ENEMY GUNFIRE / UAV');
-    row(3, (x, y) => { c.save(); c.translate(x, y); c.rotate(Math.PI / 4); c.fillStyle = '#ff4a3a'; c.fillRect(-4, -4, 8, 8); c.restore(); }, 'SPOTTED ENEMY');
-    row(4, (x, y) => { c.save(); c.translate(x, y); c.rotate(Math.PI / 4); c.strokeStyle = '#ffd25a'; c.lineWidth = 2; c.strokeRect(-4, -4, 8, 8); c.restore(); }, 'PING');
-    row(5, (x, y) => { c.fillStyle = '#1f9a52'; c.fillRect(x - 5, y - 5, 10, 10); }, 'TUNNEL EXIT / HATCH');
-    // scale bar
-    const ppm = this.ppm;
-    const len = [200, 100, 50, 25, 10, 5].find((m) => m * ppm <= 150) ?? 5;
-    const bx = W - 196, by = ky - 34;
-    c.strokeStyle = '#ffffff';
-    c.lineWidth = 2;
-    c.beginPath();
-    c.moveTo(bx, by); c.lineTo(bx + len * ppm, by);
-    c.moveTo(bx, by - 4); c.lineTo(bx, by + 4);
-    c.moveTo(bx + len * ppm, by - 4); c.lineTo(bx + len * ppm, by + 4);
-    c.stroke();
-    c.textAlign = 'left';
-    this.halo(`${len} m`, bx + len * ppm + 8, by, '#ffffff');
   }
 
   private drawCursor(s: MapState) {
     const c = this.c, x = this.mx, y = this.my;
-    c.strokeStyle = 'rgba(255,255,255,0.95)';
-    c.lineWidth = 1.5;
+    // a navigator's divider point: crosshair + ring
+    c.strokeStyle = INK.ink;
+    c.lineWidth = 1.4;
     c.beginPath();
     c.arc(x, y, 9, 0, Math.PI * 2);
-    c.moveTo(x - 15, y); c.lineTo(x - 5, y);
-    c.moveTo(x + 5, y); c.lineTo(x + 15, y);
-    c.moveTo(x, y - 15); c.lineTo(x, y - 5);
-    c.moveTo(x, y + 5); c.lineTo(x, y + 15);
+    c.moveTo(x - 16, y); c.lineTo(x - 5, y);
+    c.moveTo(x + 5, y); c.lineTo(x + 16, y);
+    c.moveTo(x, y - 16); c.lineTo(x, y - 5);
+    c.moveTo(x, y + 5); c.lineTo(x, y + 16);
     c.stroke();
     const wx = this.wx(x), wz = this.wz(y);
     if (Math.abs(wx) <= PLAY_HALF && Math.abs(wz) <= PLAY_HALF) {
-      c.font = '600 12px Barlow Condensed, sans-serif';
+      c.font = `500 11px ${FONT.mono}`;
       c.textAlign = 'left';
       c.textBaseline = 'middle';
-      const name = landmarkAt(wx, wz);
-      this.halo(`${gridRef(wx, wz)} · ${name.toUpperCase()} · ${Math.round(Math.hypot(wx - s.px, wz - s.pz))} m`, x + 18, y + 16, 'rgba(255,255,255,0.9)');
+      const brg = Math.round(((Math.atan2(wx - s.px, -(wz - s.pz)) * 180) / Math.PI + 360) % 360);
+      this.halo(`${gridRef(wx, wz)} · ${landmarkAt(wx, wz).toUpperCase()} · ${Math.round(Math.hypot(wx - s.px, wz - s.pz))} m · ${String(brg).padStart(3, '0')}°`, x + 18, y + 16, INK.ink);
     }
   }
 }

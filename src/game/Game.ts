@@ -55,6 +55,10 @@ import { KILL_TIMING, KnifeKill } from '../weapons/KnifeAnim';
 import { makeThrowingKnife } from '../weapons/WeaponModels';
 import { reportError, installErrorReport } from '../core/ErrorReport';
 import { WeaponPreview } from '../ui/WeaponPreview';
+import { Silhouettes } from '../ui/Silhouettes';
+import { MenuScene } from './MenuScene';
+import { chartThumb } from '../ui/Chart';
+import type { ScoreRow, CompassMark } from '../ui/UI';
 import { UI, TacticalId, LethalId, LETHALS } from '../ui/UI';
 import { TacticalMap, FIRE_REVEAL_RADIUS, MapState } from '../ui/TacticalMap';
 import { NetGame } from '../net/NetGame';
@@ -425,6 +429,14 @@ export class Game {
   tmap!: TacticalMap;
   /** multiplayer (host / join, chat, commands) */
   netg!: NetGame;
+  private silhouettes!: Silhouettes;
+  menuScene: MenuScene | null = null;
+  /** damage taken by each soldier recently (victim → attacker → time): assists */
+  private dmgLog = new Map<number, Map<number, number>>();
+  /** the last explosion (damage arcs point at it, drawn as blast arcs) */
+  private lastBlast: { p: THREE.Vector3; t: number } | null = null;
+  /** scoreboard cursor mode (mute / report): the pointer is free but the game is not paused */
+  private sbCursor = false;
   private waypoint: THREE.Vector3 | null = null;
   private vmCamRoll = 0;
   private radarT = 0;
@@ -447,7 +459,11 @@ export class Game {
       },
       onLoadout: () => this.onLoadoutChanged(),
       onSettings: () => this.applySettings(),
+      onQuickPlay: () => this.netg.quickPlay(),
+      onMute: (id) => this.netg.toggleMuteSlot(id),
+      onReport: (id) => this.netg.report(id),
     });
+    this.ui.sfx = (n, g = 1) => this.audio?.play(n, { bus: 'ui', gain: 0.55 * g, reverb: 0, prio: 2 });
     const bootT0 = performance.now();
     const bootLog: [string, number][] = ((window as any).__bootLog = []);
     const mark = (s: string) => bootLog.push(['  · ' + s, Math.round(performance.now() - bootT0)]);
@@ -632,6 +648,9 @@ export class Game {
     this.wmats = makeWeaponMaterials(this.mats);
     // loadout screen: studio preview + silhouette thumbnails of every gun
     this.ui.previewFactory = () => new WeaponPreview((id) => WEAPON_BUILDERS[id as WeaponId](this.wmats).root);
+    // weapon silhouettes from the game's own models (kill feed, death card, kit card)
+    this.silhouettes = new Silhouettes(r, (id) => WEAPON_BUILDERS[id as WeaponId](this.wmats).root);
+    this.ui.weaponIcon = (n) => this.silhouettes.get(n);
     this.vm = new Viewmodel(this.vmScene, makeArmMaterials(this.mats));
     if (armsGltf) {
       try {
@@ -665,6 +684,7 @@ export class Game {
     this.combat = new Combat(this.physics, this.fx, {
       onKill: (k, v, def, hs, wb) => this.onKill(k, v, def.name, hs, wb),
       onDamage: (v, a, amt, part, dir, through) => {
+        this.logDamage(v, a);
         if (a === this.avatar && v.health > 0) {
           // the marker says what you hit: head (gold), limb (small, thin), through cover (grey),
           // and one that leaves them nearly dead (bright, a little bigger)
@@ -811,7 +831,8 @@ export class Game {
     });
     this.input.onLockChange = (locked) => {
       if (!locked) this.setMapOpen(false);
-      if (!locked && this.state === 'playing') this.pauseGame();
+      if (!locked && this.state === 'playing' && !this.sbCursor) this.pauseGame();
+      if (locked && this.sbCursor) this.closeScoreboardCursor();
     };
     window.addEventListener('pointerdown', () => this.audio.resume());
 
@@ -820,8 +841,23 @@ export class Game {
     this.toMenu();
     this.clock.start();
     this.netg = new NetGame(this);
+    this.menuScene = new MenuScene(this.scene, this.terrain, (id) => WEAPON_BUILDERS[id](this.wmats), (a, b) => this.physics.lineOfSight(a, b));
+    this.ui.onKitChange = () => this.menuScene?.setKit(this.avatar.team, this.ui.primary);
+    this.menuScene.setKit(this.avatar.team, this.ui.primary);
+    this.ui.meName = this.avatar.name;
+
+    // the operation brief's chart and the weapon silhouettes are drawn in idle time after boot
+    const idle = (fn: () => boolean | void) => {
+      const step = () => {
+        const more = fn();
+        if (more === false) (window as any).requestIdleCallback ? (window as any).requestIdleCallback(step, { timeout: 400 }) : setTimeout(step, 60);
+      };
+      (window as any).requestIdleCallback ? (window as any).requestIdleCallback(step, { timeout: 1500 }) : setTimeout(step, 300);
+    };
+    idle(() => this.refreshBrief());
+    idle(() => this.silhouettes.warm(2));
     this.perf.net = () => (this.netg.active ? this.netg.graphSample() : null);
-    this.ui.sbExtra = (id: number) => (this.netg.active ? { ping: this.netg.pingOf(id), talk: this.netg.speakingSlot(id) } : null);
+    this.ui.sbExtra = (id: number) => (this.netg.active ? { ping: this.netg.pingOf(id), talk: this.netg.speakingSlot(id), muted: this.netg.isMutedSlot(id) } : null);
     this.input.onPadPause = () => {
       if (this.state === 'playing') {
         this.input.unlock();
@@ -1173,6 +1209,9 @@ export class Game {
   // ================================================================ states
   toMenu() {
     this.state = 'menu';
+    this.sbCursor = false;
+    this.menuScene?.setKit(this.avatar.team, this.ui.primary);
+    this.refreshBrief();
     this.audio.music.bedTo('menu', 2.5);
     this.radio.clear();
     this.input.unlock();
@@ -1189,7 +1228,61 @@ export class Game {
     }
   }
 
+  /** scoreboard rows: the match snapshot plus role, assists, captures, bot flag */
+  private scoreRows(): ScoreRow[] {
+    return this.match.players.map((c) => {
+      const b = c instanceof Bot ? c : null;
+      const def = b ? b.def : WEAPONS[this.ui.primary];
+      return {
+        id: c.id, name: c.name, team: c.team, kills: c.kills, deaths: c.deaths, score: c.score, alive: c.alive, isPlayer: c === this.avatar,
+        assists: c.assists, captures: (c as { captures?: number }).captures ?? 0, role: roleFor(def.cls, def.id), bot: !!b && !b.netHuman,
+      };
+    });
+  }
+  private closeScoreboardCursor() {
+    this.sbCursor = false;
+    this.ui.setScoreboard(false);
+    if (this.state === 'playing') this.input.lock();
+  }
+
+  /** flags, pings, the waypoint and spotted enemies as bearings for the compass ribbon */
+  private cmpMarks: CompassMark[] = [];
+  private compassMarks(p: THREE.Vector3) {
+    const out = this.cmpMarks;
+    out.length = 0;
+    const brg = (x: number, z: number) => ((Math.atan2(x - p.x, -(z - p.z)) * 180) / Math.PI + 360) % 360;
+    for (const f of this.dom.flags) out.push({ bearing: brg(f.pos.x, f.pos.z), kind: 'flag', label: f.letter, rel: f.owner === -1 ? 'n' : f.owner === this.avatar.team ? 'f' : 'e' });
+    for (const pg of this.worldPings) if (pg.until > this.time) out.push({ bearing: brg(pg.pos.x, pg.pos.z), kind: 'ping' });
+    if (this.waypoint) out.push({ bearing: brg(this.waypoint.x, this.waypoint.z), kind: 'wp' });
+    for (const b of this.bots) {
+      if (!b.alive || b.team === this.avatar.team) continue;
+      if ((this.spotted.get(b.id) ?? 0) > this.time) out.push({ bearing: brg(b.position().x, b.position().z), kind: 'foe' });
+    }
+    return out;
+  }
+
+  /** operation brief: the chart of the area (last match's objectives on it) and the conditions */
+  refreshBrief() {
+    const flags = this.dom?.flags?.map((f) => ({ x: f.pos.x, z: f.pos.z, letter: f.letter })) ?? [];
+    let chart: HTMLCanvasElement | null = null;
+    try {
+      chart = chartThumb(this.terrain, 336, 210, flags, { rose: true, cover: true });
+    } catch (e) {
+      console.warn('[brief]', e);
+    }
+    const env = this.env;
+    const hour = env?.hour ?? 12;
+    const hh = Math.floor(hour), mm = Math.floor((hour - hh) * 60);
+    const w = env?.weather ?? 'clear';
+    const wind = w === 'snow' || w === 'rain' ? 'NV 9 m/s' : w === 'overcast' ? 'SV 6 m/s' : 'V 3 m/s';
+    const sea = w === 'snow' || w === 'rain' ? '3 · moderat' : w === 'overcast' ? '2 · lett' : '1 · rolig';
+    this.ui.setBrief(chart, { wind, sea, time: `${String(hh).padStart(2, '0')}:${String(mm).padStart(2, '0')}`, season: this.winter ? 'Vinter' : 'Høst' });
+    return true;
+  }
+
   startMatch() {
+    this.menuScene?.show(false);
+    this.ui.soldierTag(null, this.avatar.team);
     this.world?.shootable?.repairAll();
     this.tknives?.clear();
     if (this.knifeK?.froze) this.player.frozen = false;
@@ -1367,7 +1460,11 @@ export class Game {
     if (this.tmap?.open && this.state !== 'playing') this.setMapOpen(false);
     this.radio.update(this.time);
     if (this.state === 'menu' || this.state === 'loading') {
-      this.menuCamera(dt);
+      if (this.menuScene) {
+        this.menuScene.show(true);
+        const tag = this.menuScene.update(dt, this.camera, window.innerWidth, window.innerHeight);
+        this.ui.soldierTag(this.ui.menuVisible ? tag : null, this.avatar.team);
+      } else this.menuCamera(dt);
       this.env.update(dt, this.camera);
       this.world.update(this.time, this.camera.position, this.env);
       this.weather.update(dt, this.camera.position, this.env.weather);
@@ -1460,8 +1557,17 @@ export class Game {
     this.ui.interactHint(a.alive && this.state === 'playing' ? (this.world.zips.ride ? '[SPACE] LET GO' : zipHere ? '[F] ZIPLINE' : this.doorFocus() ? (Math.abs(this.doorFocus()!.target) > 0.5 ? '[F] CLOSE DOOR' : '[F] OPEN DOOR') : '') : '');
     if (a.alive && this.weapons.enabled) this.playerActions(dt);
     if (inp.wasPressed('ping') && a.alive) this.ping();
-    if (inp.wasPressed('scoreboard')) this.ui.setScoreboard(true, this.match.snapshot(), this.match.teamNames);
-    if (inp.wasReleased('scoreboard')) this.ui.setScoreboard(false);
+    if (inp.wasPressed('scoreboard')) {
+      if (this.sbCursor) this.closeScoreboardCursor();
+      else this.ui.setScoreboard(true, this.scoreRows(), this.match.teamNames, this.avatar.id);
+    }
+    if (inp.wasReleased('scoreboard') && !this.sbCursor) this.ui.setScoreboard(false);
+    // online: right click while the scoreboard is up frees the pointer to mute / report players
+    if (inp.isDown('scoreboard') && inp.wasPressed('ads') && this.netg?.active && !this.sbCursor) {
+      this.sbCursor = true;
+      this.input.unlock();
+      this.ui.scoreboardCursor(true);
+    }
 
     // ---------------- health & bounds ----------------
     a.lastHitT += dt;
@@ -1483,7 +1589,7 @@ export class Game {
       keys.forEach((k, i) => {
         if (inp.wasPressed(k)) this.ui.selectPreset(i);
       });
-      this.ui.showDeath(true, this.killerName, this.killerWeapon, this.respawnT + (this.killcamSlot >= 0 ? 4 : 0));
+      this.ui.showDeath(true, this.killerName, this.killerWeapon, this.respawnT + (this.killcamSlot >= 0 ? 4 : 0), this.killerTeam);
       if (this.respawnT <= 0 && this.match.phase === 'live') {
         if (this.killcamSlot >= 0 && this.startKillcam()) return;
         this.respawnPlayer();
@@ -1615,6 +1721,7 @@ export class Game {
       teamNames: this.match.teamNames,
     }, dt);
     w.spread();
+    this.ui.compassMarks(this.compassMarks(p));
     this.ui.updateFeed(this.match.feed, this.time);
     // low ammo callout once per magazine
     if (s.mag > 0 && s.mag <= Math.ceil(s.def.mag * 0.2) && s.def.mag > 6 && !this.lowCalled) {
@@ -2470,6 +2577,7 @@ export class Game {
   private setupExplosives() {
     this.explosives = new Explosives(this.scene, this.physics, this.fx, {
       damage: (v, att, amt) => {
+        this.logDamage(v, att);
         if (att === this.avatar && v !== this.avatar && v.health > 0) {
           this.ui.hitmarker(false, false, amt);
           this.audio.play('hit', { gain: 0.6, bus: 'ui', reverb: 0, prio: 3 });
@@ -2519,6 +2627,7 @@ export class Game {
       intercept: (g) => this.deployables?.intercept(g) ?? false,
     }, () => this.match.players);
     this.explosives.onExplode = (p, radius, owner) => {
+      this.lastBlast = { p: p.clone(), t: this.time };
       this.deployables.blast(p, radius, owner);
       this.destruction?.blast(p, radius, owner);
     };
@@ -3217,12 +3326,15 @@ export class Game {
     const mine = e.team === this.avatar.team;
     const f = e.flag;
     if (e.kind === 'captured') {
-      for (const c of e.by) if (c.team === e.team) c.score += 200;
+      for (const c of e.by) if (c.team === e.team) {
+        c.score += 200;
+        (c as { captures?: number }).captures = ((c as { captures?: number }).captures ?? 0) + 1;
+      }
       this.announcer(mine ? `sec${f.letter}` : `lost${f.letter}`);
       if (mine) {
         this.ui.announce(`${f.letter} SECURED`, f.name.toUpperCase(), 'good');
         this.audio.play('flagWon', { gain: 0.55, bus: 'ui', reverb: 0 });
-        if (e.by.includes(this.avatar)) this.ui.killText(200, [`CAPTURED ${f.letter}`]);
+        if (e.by.includes(this.avatar)) this.ui.popup(`CAPTURE ${f.letter}`, 200, 'cap');
       } else {
         this.ui.announce(`ENEMY TOOK ${f.letter}`, f.name.toUpperCase(), 'bad');
         this.audio.play('flagLost', { gain: 0.55, bus: 'ui', reverb: 0 });
@@ -3231,7 +3343,7 @@ export class Game {
       if (mine) {
         this.ui.announce(`${f.letter} NEUTRALIZED`, '', 'good');
         this.audio.play('radio', { gain: 0.4, bus: 'ui', reverb: 0 });
-        if (e.by.includes(this.avatar)) this.ui.killText(50, [`NEUTRALIZED ${f.letter}`]);
+        if (e.by.includes(this.avatar)) this.ui.popup(`NEUTRALIZE ${f.letter}`, 50, 'cap');
       } else {
         this.announcer(`losing${f.letter}`);
         this.ui.announce(`LOSING ${f.letter}`, f.name.toUpperCase(), 'bad');
@@ -3535,7 +3647,7 @@ export class Game {
     }
     if (best) {
       this.spotted.set(best.id, this.time + 7);
-      this.ui.notify('ENEMY SPOTTED', best.name.toUpperCase());
+      this.ui.popup(`SPOTTED · ${best.name.toUpperCase()}`, 0, 'info');
       this.audio.play('medal', { gain: 0.18, bus: 'ui', reverb: 0, rate: 1.6 });
       // teammates hear about it
       for (const m of this.bots) if (m.alive && m.team === this.avatar.team) m.hear(best.position(), best, 0.95);
@@ -3737,7 +3849,7 @@ export class Game {
             this.hurtPlayer(amt, 'FIRE');
             if (Math.random() < dt * 4) {
               const to = p.clone().sub(this.player.pos);
-              this.ui.damageFrom(Math.atan2(to.x, -to.z) + this.player.yaw);
+              this.ui.damageFrom(Math.atan2(to.x, -to.z) + this.player.yaw, 'fire');
               this.audio.play('hit', { gain: 0.25, rate: 0.6, bus: 'ui', reverb: 0 });
             }
           } else if (c instanceof Bot && !c.netPuppet) {
@@ -3757,6 +3869,7 @@ export class Game {
   }
   /** A blast nobody owns (a stray barrel / car): damages everyone, deaths count as accidents. */
   private envBlast(p: THREE.Vector3, r: number, dmg: number, def: WeaponDef) {
+    this.lastBlast = { p: p.clone(), t: this.time };
     this.fx.explosion(p, new THREE.Vector3(0, 1, 0), r / 8, 'asphalt');
     const d0 = p.distanceTo(this.camera.position);
     this.audio.play(d0 > 90 ? 'explosionFar' : 'explosion', { pos: p, gain: 1, ref: 14, reverb: 0.7, delay: true, prio: 3 });
@@ -4342,10 +4455,11 @@ export class Game {
     this.vm.jolt(-0.8 * k, side * 0.9 * k, 0.3 * k);
     if (amt > 40) this.audio.play('imp_punch', { gain: 0.35, reverb: 0, rate: 0.7 });
     this.flashFx = Math.min(0.25, this.flashFx + amt / 300);
-    if (from) {
-      const to = from.position().clone().sub(this.player.pos);
+    const blast = this.lastBlast && this.time - this.lastBlast.t < 0.15 ? this.lastBlast.p : null;
+    if (blast || from) {
+      const to = (blast ?? from!.position()).clone().sub(this.player.pos);
       const world = Math.atan2(to.x, -to.z);
-      this.ui.damageFrom(world + this.player.yaw);
+      this.ui.damageFrom(world + this.player.yaw, blast ? 'explosion' : 'bullet');
     }
     this.audio.play('imp_flesh', { gain: 0.7, reverb: 0 });
   }
@@ -4375,9 +4489,31 @@ export class Game {
     this.audio.play('scream', { pos: p, variant: v, gain: occl ? 0.8 : 1.15, ref: 4.5, maxDist: 75, reverb: occl ? 0.5 : 0.3, rate, vary: 0.03, prio: 2, lowpass: occl ? 1400 : undefined });
   }
 
+  private logDamage(v: Combatant, a: Combatant | null) {
+    if (!a || a === v || a.team === v.team) return;
+    let m = this.dmgLog.get(v.id);
+    if (!m) this.dmgLog.set(v.id, (m = new Map()));
+    m.set(a.id, this.time);
+  }
+  /** everyone else who hurt the victim in the last 10 s gets an assist (+50) */
+  private awardAssists(killer: Combatant, victim: Combatant) {
+    const m = this.dmgLog.get(victim.id);
+    this.dmgLog.delete(victim.id);
+    if (!m) return;
+    for (const [id, t] of m) {
+      if (id === killer.id || this.time - t > 10) continue;
+      const c = this.match.players.find((x) => x.id === id);
+      if (!c || c.team === victim.team) continue;
+      c.assists++;
+      c.score += 50;
+      if (c === this.avatar) this.ui.popup('ASSIST', 50);
+    }
+  }
+
   private onKill(killer: Combatant, victim: Combatant, weapon: string, headshot: boolean, wallbang: boolean) {
     // online: a soldier owned by another machine only dies when its owner says so
     if (NETF.active && victim instanceof Bot && victim.netPuppet && !NETF.allowPuppetDeath) return;
+    this.awardAssists(killer, victim);
     this.netg?.reportDeath(killer, victim, weapon, headshot, wallbang);
     this.match.registerKill(killer, victim, weapon, headshot, wallbang, this.time);
     this.streaks.onKill(killer, victim, weapon === MORTAR.name || weapon === HELI.name);
@@ -4403,6 +4539,7 @@ export class Game {
       this.killcamSlot = killer instanceof Bot ? this.bots.indexOf(killer) : -1;
       this.respawnT = this.killcamSlot >= 0 ? 1.7 : 3.5;
       this.killerName = killer.name.toUpperCase();
+      this.killerTeam = killer.team;
       this.killerWeapon = weapon.toUpperCase();
       this.deathCamTarget = killer !== victim ? killer.position().clone() : null;
       this.vm.root.visible = false;
@@ -4416,6 +4553,7 @@ export class Game {
   }
 
   private lastKiller: Combatant | null = null;
+  private killerTeam: 0 | 1 = 1;
   private multiT = -99;
   private multiN = 0;
   private deathStreak = 0;
@@ -4429,11 +4567,11 @@ export class Game {
     this.rig.killPunch(headshot ? 1.1 : 0.8);
     const vdir = victim.position().clone().sub(this.player.pos).setY(0).normalize();
     this.fx.killBurst(victim.chest(new THREE.Vector3()), vdir, headshot, victim.position().y);
-    const reasons: string[] = [];
+    const reasons: [string, number][] = [];
     let pts = 100;
     let bonus = 0;
     const add = (label: string, p: number, matchCounted = false) => {
-      reasons.push(label);
+      reasons.push([label, p]);
       pts += p;
       if (!matchCounted) bonus += p;
     };
@@ -4470,7 +4608,8 @@ export class Game {
     const multi = ['', '', 'DOUBLE KILL', 'TRIPLE KILL', 'FURY KILL', 'FRENZY KILL', 'SUPER KILL'][Math.min(this.multiN, 6)];
     if (multi) add(multi, 50 * (this.multiN - 1));
     this.avatar.score += bonus;
-    this.ui.killText(pts, reasons);
+    this.ui.popup('ELIMINATION', 100, 'kill');
+    for (const [label, p] of reasons) this.ui.popup(label, p);
     if (this.multiN >= 2) this.playerVoice('multi', 0.8);
     else if (headshot) this.playerVoice('headshot', 0.45);
     else this.playerVoice('kill', 0.35);

@@ -51,7 +51,7 @@ URL options: `?quality=low|medium|high|ultra`, `?weather=clear|overcast|rain|sno
 | Hold breath (scoped) | Shift |
 | Climb ladder | walk into it, W/S, Space to let go. From the top, walk over the edge towards the ladder to climb down |
 | Tactical map | M. Scroll to zoom at the cursor, drag to pan, left click (or X) to ping, right click for a waypoint (right click it again to clear), R to re-centre. You can still move while it is open, but not shoot or aim |
-| Scoreboard | Tab |
+| Scoreboard | Tab. Online: hold Tab and right-click for a cursor, then click a player to mute or report them |
 | Chat / commands (multiplayer) | Enter, or / for a command. `/help` lists them. U = team chat |
 | Voice chat (multiplayer) | `/voice` to turn on, hold K to talk (or open mic in Settings) |
 | Spectate / free camera | F6 (fly with WASD, SPACE / C, SHIFT; fire = follow next player) |
@@ -289,6 +289,117 @@ URL options: `?quality=low|medium|high|ultra`, `?weather=clear|overcast|rain|sno
 - **MP7:** sprint and jump clutter reduced.
 - **Rifle:** support hand moved so it no longer shows through the optic window.
 - **Pistol:** hold reworked.
+
+## Update 29: "Sjøkart", a new interface across the whole game
+
+The interface is redrawn as a Norwegian nautical chart (*sjøkart*):
+- **Paper and ink:** cream paper, navy ink, signal red, sea blue, brown contour lines, and chart neat-line borders on every card.
+- **In game:** the HUD uses the same language, lighter — paper-white ink over the world, navy shadow plates, red for danger.
+- **Throughout:** new fonts, colours, icons, emblems and sounds.
+
+### Identity
+- **Fonts** (self-hosted, SIL OFL; the old build never actually loaded its fonts):
+
+  | Font | Used for |
+  | --- | --- |
+  | Big Shoulders Display | Display text and big numbers |
+  | IBM Plex Sans Condensed | Labels |
+  | IBM Plex Sans | Body text |
+  | IBM Plex Mono | Bearings, distances, timers |
+  | IBM Plex Serif Italic | Water names and notes |
+
+- **One original icon set** (`src/ui/Icons.ts`): one ink style on a 24-unit grid, with 1.75 px strokes and light tint fills. It covers:
+  - Equipment, killstreaks and roles.
+  - Kill-feed glyphs: headshot, wallbang, melee, explosion, fire, fall.
+  - Comms: mic, speaker, mute, report.
+  - Map markers, menu tabs, game modes and fire modes.
+- **Faction emblems:** Kystjegerne is a fouled anchor in a rope ring with a gull over it. Nordfront is a raven over three peaks in a cut-corner shield.
+- **Interface sounds** (synthesized in the audio engine): a soft tick on hover, a brass confirm, a falling "back", a ship's bell when you ready up, and a ship's horn when a match is found or starts.
+
+### Loading screen
+A chart of Kvitvikfjorden:
+- A boat sails the course from the harbour to the fort as the game loads, and the red course line is the progress bar.
+- Map trivia and control tips rotate underneath.
+- The boat moves on its own light layer, so the screen costs almost nothing to repaint. With that, boot reached "ready" about 2.5 s sooner than Update 28 in the headless test.
+
+### Main menu
+- **Live 3D scene:** your soldier, in your side's camo and holding your current primary, stands on the shore with the fjord behind.
+  - The spot is found automatically: dry, level ground with open water behind and a clear view.
+  - The camera breathes slowly, and a name tag floats above the soldier.
+- **Vertical tab rail:** Play · Loadout · Settings · Manual.
+- **Mode cards:** Domination, Multiplayer, Quick Play. Below them, your current kit with its weapon silhouette.
+- **Operation brief as a chart card:**
+  - The area drawn as a real chart (see below), with the last match's objectives and a compass rose.
+  - Wind, sea state, time and season.
+  - Both sides' emblems.
+- **News and patch notes:** the newest "Update" sections of this README, with their section headings, loaded after the menu appears.
+
+### HUD
+- **Smaller and contextual:**
+  - Health only appears while you are hurt.
+  - Ammo, equipment and killstreaks fade back when they have nothing new to say.
+- **Ammo block:**
+  - A big magazine count, the reserve, and a round-pip strip.
+  - A fire-mode glyph (auto / burst / semi / bolt / pump).
+- **Compass ribbon:**
+  - Chart bearings in three digits every 15°, Norwegian cardinals (N, NØ, Ø …, north in red) and your exact bearing in a box.
+  - Flag markers (coloured by owner), pings, the waypoint and spotted enemies ride on it.
+- **Killstreak tracker:** a pip per kill with marks at each streak's cost. Streak icons light up gold when ready, with their key.
+- **Equipment row:** lethal and tactical icons in rings that empty as you use them. The field upgrade has a charge ring that turns gold when ready.
+- **Hitmarkers:**
+
+  | Hit | Marker |
+  | --- | --- |
+  | Normal | Ticks |
+  | Limb / armour | Short thin ticks |
+  | Headshot | Gold ticks and a gold diamond |
+  | Kill | Red X with an expanding ring |
+  | Through cover | Grey |
+
+- **Damage direction arcs**, a shape per threat:
+  - **Bullet:** a thin red arc with an inward tick, pointing at the shooter.
+  - **Explosion:** a heavy jagged arc, pointing at the blast, not the thrower.
+  - **Fire:** a dashed amber arc.
+  - **Grenade nearby:** a blinking ring with a grenade glyph.
+- **Score popups:** a vertical stack beside the crosshair, for example "+100 ELIMINATION", "+50 HEADSHOT", "+50 ASSIST", "+200 CAPTURE B", "SPOTTED · HAUGEN".
+  - **Assists are new:** anyone who hurt the victim in the last 10 s gets one (+50).
+  - **Captures are now counted per player.**
+- **Kill feed:**
+  - White silhouettes rendered from the game's own 3D gun models, using the main renderer, no extra WebGL context.
+  - Glyphs for headshots, wallbangs, melee, explosions and fire.
+  - Your kills and deaths are highlighted.
+
+### Scoreboard, death and end screens
+- **Scoreboard rows:** role icon, name (BOT tag), K / D / A, captures, score, ping with signal bars, and a mic icon (talking / muted). Team cards carry the emblem and total.
+  - **Online:** hold Tab and right-click for a cursor, then click a player to **mute** (chat and voice) or **report** them. A report goes to the host, who can `/kick`.
+- **Death screen:** a killer card (emblem, name, weapon and its silhouette), then the five loadout cards (keys 1–5).
+- **End screen:** SEIER / NEDERLAG / UAVGJORT, with emblems and the full scoreboard.
+
+### Loadout: the workbench
+- The gun sits on a blueprint-gridded bench with technical-drawing callouts: calibre, rate of fire, magazine, effective range, and a drawing plate.
+- **Click a gun to inspect it** (second click or EQUIP takes it). Every stat shows a **green or red delta against the gun you have equipped**.
+
+### Tactical map and minimap: the chart
+Both are drawn from one shared chart raster (`src/ui/Chart.ts`):
+- **Land:** paper with brown contours every 5 m (index contour every 25 m), pale-green woodland and gentle hill shading.
+- **Sea:** depth bands, darkest in the shallows; blue isobaths at 2, 5 and 10 m; italic depth soundings with decimetre subscripts, placed where the depth changes; an inked coastline.
+- **Features:** red roads, black buildings, cartographic place names (spaced capitals for places, blue italic serif for water such as Kvitvikfjorden, Hamnbukta and Fyrsundet).
+- **Chart furniture:** a compass rose, a black-and-white scale bar (målestokk), a title cartouche and a key (tegnforklaring).
+- **Hand-inked markers:**
+  - Objectives: letters in double rings with the capture arc.
+  - Pings: diamonds.
+  - Waypoint: a pennant with a course line.
+  - Squad: blue arrowheads.
+  - Spotted enemies: red crosses.
+- **Minimap:** a round cut-out of the same chart with a turning bearing ring (N in red).
+
+### Multiplayer screen
+- **Paper card:** Quick Play, Host (public / private) and Join.
+- **Room cards:** a chart thumbnail, the room name, map, players, the host's region (time zone area), and a **measured ping**. A tiny data-channel echo to each host is colour-coded.
+
+### Tested
+- `tools/uishots29.cjs`: screenshots of the loading screen, menu, manual, multiplayer screen, workbench, HUD (popups, arcs, hitmarker, feed), scoreboard, chart map and death screen. Settings, pause and end screens were checked separately.
+- `tools/mptest.cjs`, `match12` (180 s: 52 kills, sim 3.2 ms/frame) and the boot-time profile.
 
 ## Update 28: multiplayer netcode, lobby, voice, controller, rebinding, saved loadouts
 
@@ -1691,7 +1802,8 @@ The environment this was built in could only reach GitHub and npm. Sketchfab, Po
 - **fps_arms.glb**: "fps arms" by DJMaesen (https://sketchfab.com/bumstrum), licensed **CC BY 4.0**. Changes: its material was rebuilt for three.js, and its textures were re-encoded from PNG to JPEG (the unused specular-glossiness map was replaced by a stub) to cut the download (`tools/glb_compress.py`).
 - **Footstep and impact recordings**: Kenney "Impact Sounds" (CC0), via the GitHub mirror `Boyquotes/kenney-impact-sounds-for-godot`.
 - **waternormals.jpg** comes from the three.js examples (MIT-licensed repository).
-- Fonts are Barlow Condensed and Inter, via @fontsource (SIL Open Font License).
+- **Fonts** (Update 29): **Big Shoulders Display** and the **IBM Plex** family (Sans, Sans Condensed, Mono, Serif Italic), all under the **SIL Open Font License 1.1**, self-hosted in `public/assets/fonts/` (from @fontsource; licence texts alongside).
+- **Icons, faction emblems, the chart rendering and the interface sounds** (hover, confirm, back, ready bell, match-found horn) are drawn / synthesized in code for this game.
 
 To swap in higher-fidelity licensed assets later (for example CC0 weapon GLBs or recorded audio), use these points:
 - `WEAPON_BUILDERS` in `src/weapons/WeaponModels.ts`: a GLB only needs the same sockets (`muzzle`, `eject`, `sight`, `rightHand`, `leftHand`, `magWell`) and named parts (`mag`, `bolt`, ...).

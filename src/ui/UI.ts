@@ -3,7 +3,7 @@ import { ACTION_LABELS, keysFor, keyLabel, applyKeybinds, Action } from '../core
 import { loadIce, saveIce, testIce } from '../net/Net';
 import { WEAPONS, PRIMARIES, SECONDARIES, WeaponDef } from '../weapons/WeaponDefs';
 import type { WeaponPreview } from './WeaponPreview';
-import { icon } from './Icons';
+import { icon, emblem } from './Icons';
 import { WeaponId } from '../weapons/WeaponModels';
 import { KillEvent } from '../game/Match';
 import { CombatantState } from '../game/Combatant';
@@ -41,6 +41,7 @@ const h = (tag: string, cls = '', html = '') => {
   if (html) e.innerHTML = html;
   return e;
 };
+const esc = (s: string) => String(s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]!);
 
 export interface HUDState {
   health: number;
@@ -64,6 +65,10 @@ export interface HUDState {
   hint?: string;
   teamNames: [string, string];
 }
+/** something on the compass ribbon: bearing in degrees (0 = north) */
+export interface CompassMark { bearing: number; kind: 'flag' | 'ping' | 'wp' | 'foe'; label?: string; rel?: 'f' | 'e' | 'n' }
+/** scoreboard row (match snapshot + what the scoreboard shows) */
+export interface ScoreRow extends CombatantState { role?: string; assists?: number; captures?: number; bot?: boolean }
 
 export type TacticalId = 'flash' | 'smoke' | 'stun' | 'stim' | 'snapshot' | 'decoy';
 export type LethalId = 'frag' | 'tknife' | 'sticky' | 'claymore' | 'c4';
@@ -82,16 +87,41 @@ export const TACTICALS: { id: TacticalId; name: string; count: number; desc: str
   { id: 'snapshot', name: 'SNAPSHOT GRENADE', count: 1, desc: 'A scan pulse that outlines every enemy within 22 m through walls for a few seconds.' },
   { id: 'decoy', name: 'DECOY GRENADE', count: 2, desc: 'Plays fake gunfire for 12 s and puts fake contacts on the enemy minimap.' },
 ];
+/** calibre stamped on the workbench callouts */
+const CALIBRE: Record<string, string> = {
+  k416: '5.56×45 mm', ks17: '5.56×45 mm', hval47: '7.62×39 mm', kr98: '7.92×57 mm', lmg: '5.56×45 mm · belt', stille9: '9×19 mm', ums45: '.45 ACP',
+  mp7: '4.6×30 mm', pump12: '12 gauge', as20: '12 gauge', db12: '12 gauge', skv338: '.338 Lapua Mag.', dmr14: '7.62×51 mm', p80: '9×19 mm', mp18: '9×19 mm', rv357: '.357 Magnum', knife: '—',
+};
 
 export interface UIHandlers {
   onPlay(): void;
   onMultiplayer?(): void;
+  onQuickPlay?(): void;
   onResume(): void;
   onQuit(): void;
   onRestart(): void;
   onLoadout(): void;
   onSettings(): void;
+  /** scoreboard row actions (multiplayer) */
+  onMute?(id: number): void;
+  onReport?(id: number): void;
 }
+
+/** loading-screen lines: the map's own lore, then controls */
+const TIPS: [string, string][] = [
+  ['FRA KARTET · FROM THE CHART', "Kvitvika's harbour freezes over for only a few days each winter — the Gulf Stream keeps the fjord open."],
+  ['FRA KARTET · FROM THE CHART', 'Kystfortet was cut into the headland in 1942. Its guns still point at the fjord mouth; its tunnels still connect the batteries.'],
+  ['FRA KARTET · FROM THE CHART', 'The rorbuer on Brygga were fishermen\'s cabins for the winter cod season. Every one has a back door onto the quay.'],
+  ['FRA KARTET · FROM THE CHART', 'Hjellene — the drying racks — hang stockfish from February to June. Their timber frames stop nothing, but they hide everything.'],
+  ['FRA KARTET · FROM THE CHART', 'The road tunnel under Ryggen has two emergency exits on each side, and hatches up to the ridge.'],
+  ['FRA KARTET · FROM THE CHART', 'Fyret, the lighthouse, has guided boats past the skerries at the fjord mouth since 1894.'],
+  ['KONTROLLER · CONTROLS', 'Double-tap SHIFT for tactical sprint. Crouch while sprinting to slide; jump out of it to keep the speed.'],
+  ['KONTROLLER · CONTROLS', 'Hold Q / E to lean round corners. Aim at a closed door to ease it open a crack and peek.'],
+  ['KONTROLLER · CONTROLS', 'N flips the night-vision goggles down. At night they are the difference between seeing and guessing.'],
+  ['KONTROLLER · CONTROLS', 'Hold Y and flick the mouse to order your squad: attack, defend, follow, hold.'],
+  ['KONTROLLER · CONTROLS', 'Hold V for the combat knife. Throwing knives kill in one hit — walk over them to pick them up.'],
+  ['KONTROLLER · CONTROLS', 'M opens the chart: scroll to zoom, right-click for a waypoint, left-click to ping.'],
+];
 
 export class UI {
   root: HTMLDivElement;
@@ -108,6 +138,7 @@ export class UI {
   private feedEl!: HTMLElement;
   private notifyEl!: HTMLElement;
   private dmgEl!: HTMLElement;
+  private popEl!: HTMLElement;
   private hitT = 0;
   private lastFeedKey = '';
   // ('mpx' was the old SMG id: carry saved loadouts over to its MP7 replacement)
@@ -126,7 +157,11 @@ export class UI {
   presets: { name: string; p: WeaponId; s: WeaponId; l: LethalId; t: TacticalId }[] = [];
   activePreset = 0;
   /** multiplayer: per-row ping / speaking for the scoreboard (null offline) */
-  sbExtra: ((id: number) => { ping: string; talk: boolean } | null) | null = null;
+  sbExtra: ((id: number) => { ping: string; talk: boolean; muted?: boolean } | null) | null = null;
+  /** weapon name → white silhouette (data URL) rendered from the game's own 3D models */
+  weaponIcon: ((name: string) => string | null) | null = null;
+  /** play an interface sound (wired to the audio engine's 'ui' bus by the game) */
+  sfx: (name: 'uiHover' | 'uiConfirm' | 'uiBack' | 'uiReady' | 'uiHorn', gain?: number) => void = () => {};
   private settingsBack: 'menu' | 'pause' = 'menu';
   private loadoutBack: 'menu' | 'pause' = 'menu';
 
@@ -146,9 +181,37 @@ export class UI {
     this.scoreboard = h('div', 'scoreboard hidden');
     this.deathEl = h('div', 'death hidden');
     root.append(this.hud, this.scoreboard, this.deathEl, this.menu, this.pause, this.end, this.settingsEl, this.loadoutEl, this.loading);
+    this.wireSounds();
   }
 
-  // ---------------------------------------------------------------- screens
+  /** interface sounds by delegation: a soft tick when the pointer reaches something clickable, a
+   *  confirm on press (a falling "back" on back / close buttons) */
+  private wireSounds() {
+    const CLICKABLE = 'button, .mode, .ldcard, .room, .kit, .dlo, [data-human]';
+    let lastHover: Element | null = null;
+    let lastT = 0;
+    this.root.addEventListener('pointerover', (e) => {
+      const t = (e.target as Element).closest?.(CLICKABLE);
+      if (!t || t === lastHover) return;
+      lastHover = t;
+      const now = performance.now();
+      if (now - lastT < 45) return;
+      lastT = now;
+      this.sfx('uiHover', 0.5);
+    });
+    this.root.addEventListener('pointerout', (e) => {
+      if ((e.target as Element).closest?.(CLICKABLE) === lastHover) lastHover = null;
+    });
+    this.root.addEventListener('click', (e) => {
+      const t = (e.target as Element).closest?.(CLICKABLE) as HTMLElement | null;
+      if (!t) return;
+      const a = t.dataset?.a ?? '';
+      if (a === 'back' || a === 'menu' || a === 'quit' || a === 'resume' || t.classList.contains('back')) this.sfx('uiBack', 0.6);
+      else this.sfx('uiConfirm', t.classList.contains('primary') || t.classList.contains('mode') ? 0.75 : 0.45);
+    }, true);
+  }
+
+  // ---------------------------------------------------------------- loading: a boat crossing the fjord
   private buildLoading() {
     // adopt the loading screen index.html already painted (no blank frame between page and game)
     const pre = document.getElementById('boot');
@@ -156,39 +219,43 @@ export class UI {
       pre.classList.add('screen', 'loading');
       return pre;
     }
-    const e = h('div', 'screen loading', `
-      <div class="brand"><div class="flag"></div><h1>FJORDFRONT</h1></div>
-      <div class="sub">KVITVIKA · LOFOTEN</div>
-      <div class="bar"><div class="fill"></div></div>
-      <div class="row"><span class="status">Initialising…</span><span class="pct">0%</span></div>
-      <div class="tip">TIP — Double-tap SHIFT for tactical sprint. Crouch while sprinting to slide.</div>`);
-    return e;
+    return h('div', 'screen loading', `<div class="row"><span class="pct">0%</span><span class="bstatus">Loading</span></div><div class="tip"><small></small><span></span></div>`);
   }
 
   private loadP = 0;
   private tipI = 0;
   private tipT = 0;
-  private static TIPS = [
-    'TIP — Double-tap SHIFT for tactical sprint. Crouch while sprinting to slide.',
-    'TIP — Hold Q / E to lean around corners.',
-    'TIP — Press N at night to flip your goggles down.',
-    'TIP — F3 shows the performance overlay: frame time, GPU time and render resolution.',
-    'TIP — Hold V for the combat knife; throwing knives kill in one hit.',
-    'TIP — Capture and hold flags: Domination is won on ticks, not kills.',
-  ];
-  /** progress never moves backwards, the percentage counts with it */
+  private courseLen = 0;
+  /** progress never moves backwards; the boat sails the course as the game loads */
+  private loadDrawT = 0;
   setLoading(p: number, status: string) {
     this.loadP = Math.max(this.loadP, Math.min(1, p));
     const pct = Math.round(this.loadP * 100);
-    (this.loading.querySelector('.fill') as HTMLElement).style.width = `${Math.max(2, pct)}%`;
-    (this.loading.querySelector('.status') as HTMLElement).textContent = status;
-    const pe = this.loading.querySelector('.pct') as HTMLElement | null;
-    if (pe) pe.textContent = `${pct}%`;
+    const L = this.loading;
+    // (at most ~6 visual updates a second: shader warm-up calls this between every program)
+    const tnow = performance.now();
+    if (this.loadP < 1 && tnow - this.loadDrawT < 160) return;
+    this.loadDrawT = tnow;
+    const course = L.querySelector('#course') as SVGPathElement | null;
+    if (course) {
+      if (!this.courseLen) this.courseLen = course.getTotalLength();
+      const len = this.courseLen;
+      const at = len * this.loadP;
+      (L.querySelector('.done') as SVGPathElement).setAttribute('stroke-dasharray', `${at.toFixed(1)} ${len + 10}`);
+      const a = course.getPointAtLength(at), b = course.getPointAtLength(Math.min(len, at + 4));
+      const ang = (Math.atan2(b.y - a.y, b.x - a.x) * 180) / Math.PI;
+      (L.querySelector('.boat') as SVGGElement).setAttribute('transform', `translate(${a.x.toFixed(1)} ${a.y.toFixed(1)}) rotate(${(ang * 0.6).toFixed(1)})`);
+    }
+    setText(L.querySelector('.bstatus'), status);
+    setText(L.querySelector('.pct'), `${pct}%`);
     const now = performance.now();
-    if (now - this.tipT > 3500) {
+    if (now - this.tipT > 4200) {
       this.tipT = now;
-      const tip = this.loading.querySelector('.tip') as HTMLElement | null;
-      if (tip && this.tipI++ > 0) tip.textContent = UI.TIPS[this.tipI % UI.TIPS.length];
+      const tip = L.querySelector('.tip') as HTMLElement | null;
+      if (tip && this.tipI++ > 0) {
+        const [k, v] = TIPS[(this.tipI + Math.floor(Math.random() * 3)) % TIPS.length];
+        tip.innerHTML = `<small>${k}</small><span>${v}</span>`;
+      }
     }
   }
   hideLoading() {
@@ -197,64 +264,175 @@ export class UI {
     setTimeout(() => this.loading.classList.add('hidden'), 600);
   }
 
+  // ---------------------------------------------------------------- main menu
+  private menuTab: 'play' | 'manual' = 'play';
   private buildMenu() {
     const e = h('div', 'screen menu hidden', `
-      <div class="menu-left">
-        <div class="brand"><div class="flag"></div><h1>FJORDFRONT</h1></div>
-        <div class="sub">DOMINATION · KVITVIKA, NORDLAND</div>
-        <nav>
-          <button data-a="play" class="primary"><span>DEPLOY</span><small>12 v 12 · AI squads</small></button>
-          <button data-a="mp"><span>MULTIPLAYER</span><small>Host or join friends · bots fill the slots</small></button>
-          <button data-a="loadout"><span>LOADOUT</span><small class="cur-weapon"></small></button>
-          <button data-a="settings"><span>SETTINGS</span><small>Controls · Graphics · Audio</small></button>
-          <button data-a="controls"><span>FIELD MANUAL</span><small>Movement & handling</small></button>
-        </nav>
-        <div class="controls-help hidden">
-          <div><b>WASD</b> Move</div><div><b>MOUSE</b> Look / Fire / Aim</div>
-          <div><b>SHIFT</b> Sprint · tap again: Tactical sprint</div><div><b>C / CTRL</b> Crouch · while sprinting: Slide</div>
-          <div><b>Z</b> Prone · hold C: Prone</div><div><b>SPACE</b> Jump · Mantle · Vault (auto)</div>
-          <div><b>R</b> Reload</div><div><b>1 / 2 / Wheel</b> Switch weapon</div>
-          <div><b>B</b> Fire mode</div><div><b>I</b> Inspect weapon</div>
-          <div><b>F</b> Use: door · zipline · spot enemy</div><div><b>SHIFT (scoped)</b> Hold breath</div>
-          <div><b>Q / E</b> Lean left / right (hold)</div><div><b>H</b> Field upgrade (Trophy System)</div>
-          <div><b>N</b> Night vision</div><div><b>AIM at a door</b> Peek round it</div>
-          <div><b>G</b> Lethal (hold: cook / aim / place)</div><div><b>T</b> Tactical</div>
-          <div><b>F F</b> Detonate C4</div><div><b>LMG + prone / ledge</b> Bipod deploys</div>
-          <div><b>V</b> Melee</div><div><b>3 / 4 / 5</b> Killstreaks</div>
-          <div><b>TAB</b> Scoreboard</div><div><b>ESC</b> Pause · Loadout · Tuning</div>
-          <div><b>M</b> Tactical map · zoom, pan, ping, waypoint</div><div><b>X / MIDDLE</b> Ping</div>
+      <nav class="rail">
+        <div class="mark">${icon('anchor')}</div>
+        <button class="tab on" data-tab="play">${icon('play')}<span>PLAY</span></button>
+        <button class="tab" data-tab="loadout">${icon('loadout')}<span>LOADOUT</span></button>
+        <button class="tab" data-tab="settings">${icon('settings')}<span>SETTINGS</span></button>
+        <button class="tab" data-tab="manual">${icon('manual')}<span>MANUAL</span></button>
+        <div class="grow"></div>
+        <div class="ver">KART<br>NR. 29</div>
+      </nav>
+      <div class="menu-body">
+        <div class="brand"><div class="wordmark">FJORDFRONT</div><div class="tagline"><i></i>DOMINATION · KVITVIKA, NORDLAND</div></div>
+        <div class="pane"></div>
+        <div class="side">
+          <div class="news paper-card"><div class="nh"><b>MELDINGER</b><span class="eyebrow">NEWS · PATCH NOTES</span></div><div class="nl"><div class="ni"><div class="serif-note">Reading the logbook…</div></div></div></div>
+          <div class="brief paper-card">
+            <div class="bh"><b>OPERASJONSORDRE</b><span class="eyebrow red">OPERATION BRIEF</span></div>
+            <div class="chart"><div class="loadingc">Drawing the chart…</div></div>
+            <div class="facts"><div><small>VIND</small><span class="f-wind">—</span></div><div><small>SJØ</small><span class="f-sea">—</span></div><div><small>KL.</small><span class="f-time">—</span></div><div><small>SESONG</small><span class="f-season">—</span></div></div>
+            <p>Hostile forces of <b class="red">NORDFRONT</b> hold the old coastal fort above Kvitvika. Push from the harbour with the <b class="blue">KYSTJEGERNE</b>, take three objectives and hold the fjord.</p>
+            <div class="sides"><div class="sd k">${emblem(0)}KYSTJEGERNE</div><span class="vs">mot</span><div class="sd n">NORDFRONT${emblem(1)}</div></div>
+          </div>
         </div>
+        <div class="credits">Chart fonts: Big Shoulders Display · IBM Plex (SIL OFL) · Firearm recordings: Free Firearm Sound Library (CC0) · Voices &amp; effects: ElevenLabs · Music: Stable Audio 2.5 (Stability AI) · FPS arms by DJMaesen (CC BY 4.0) · Kenney Impact Sounds (CC0) · Procedural soldiers, icons &amp; emblems · Water normals: three.js</div>
       </div>
-      <div class="menu-right">
-        <div class="intel">
-          <div class="label">OPERATION BRIEF</div>
-          <p>Hostile forces of <b class="red">NORDFRONT</b> have seized the old coastal fort above Kvitvika. Push from the harbour with the <b class="blue">KYSTJEGERNE</b>, take the village and hold the fjord.</p>
-          <div class="label">AREA</div>
-          <p>Fishing village, rorbuer and docks · Industrial harbour · Two-lane road tunnel with emergency exits up to the ridge · Inlet bridge · WW2 coastal fort</p>
-        </div>
-      </div>
-      <div class="credits">Procedural art · Firearm recordings: Free Firearm Sound Library (CC0) · Voices &amp; effects: ElevenLabs · Music: Stable Audio 2.5 (Stability AI) · FPS arms by DJMaesen (CC BY 4.0) · Kenney Impact Sounds (CC0) · Procedural soldiers &amp; animation · Water normals: three.js</div>`);
-    e.querySelectorAll('button').forEach((b) =>
+      <div class="soldier-tag paper-card hidden"></div>`);
+    e.querySelectorAll('.rail .tab').forEach((b) =>
       b.addEventListener('click', () => {
-        const a = (b as HTMLElement).dataset.a;
-        if (a === 'play') this.handlers.onPlay();
-        if (a === 'mp') this.handlers.onMultiplayer?.();
-        if (a === 'loadout') this.showLoadout();
-        if (a === 'settings') this.showSettings('menu');
-        if (a === 'controls') e.querySelector('.controls-help')!.classList.toggle('hidden');
+        const t = (b as HTMLElement).dataset.tab!;
+        if (t === 'loadout') return this.showLoadout('menu');
+        if (t === 'settings') return this.showSettings('menu');
+        this.menuTab = t as 'play' | 'manual';
+        e.querySelectorAll('.rail .tab').forEach((x) => x.classList.toggle('on', x === b));
+        this.renderPane();
       }),
     );
-    this.updateMenuWeapon(e);
+    this.menu = e;
+    this.renderPane();
+    this.loadNews();
     return e;
   }
 
-  private updateMenuWeapon(e = this.menu) {
-    const s = e.querySelector('.cur-weapon');
-    if (s) s.textContent = `${WEAPONS[this.primary].short} · ${WEAPONS[this.secondary].short} · ${(LETHALS.find((l) => l.id === this.lethal)?.name ?? '').toLowerCase()} · ${TACTICALS.find((t) => t.id === this.tactical)!.name.toLowerCase()}`;
+  /** the left pane: mode cards + the current kit, or the field manual */
+  private renderPane() {
+    const pane = this.menu.querySelector('.pane') as HTMLElement;
+    if (this.menuTab === 'manual') {
+      const rows: [string, string][] = [
+        ['W A S D', 'Move'], ['MOUSE', 'Look · fire · aim'], ['SHIFT', 'Sprint · again: tactical sprint'], ['C / CTRL', 'Crouch · sprinting: slide'],
+        ['Z', 'Prone · sprinting: dive'], ['SPACE', 'Jump · mantle · vault'], ['R', 'Reload'], ['1 / 2', 'Switch weapon'],
+        ['Q / E', 'Lean (hold)'], ['B', 'Fire mode'], ['I', 'Inspect · hold: mag check'], ['F', 'Use · door · zipline · spot'],
+        ['G', 'Lethal (hold: cook / aim)'], ['T', 'Tactical'], ['H', 'Field upgrade'], ['V', 'Melee · hold: knife'],
+        ['3 4 5', 'Killstreaks'], ['N', 'Night vision'], ['X', 'Ping'], ['M', 'Chart (tactical map)'],
+        ['Y', 'Squad orders (hold)'], ['TAB', 'Scoreboard · RMB: cursor'], ['ENTER / U', 'Chat · team chat'], ['K', 'Push to talk'],
+        ['F6', 'Spectate / free camera'], ['F3', 'Performance overlay'], ['ESC', 'Pause · loadout · settings'], ['1–5 (dead)', 'Loadout for next life'],
+      ];
+      pane.innerHTML = `<div class="ptitle">FELTHÅNDBOK<small>FIELD MANUAL · ALL KEYS CAN BE REBOUND IN SETTINGS</small></div>
+        <div class="manual paper-card"><div class="mg">${rows.map(([k, v]) => `<div><b>${k}</b>${v}</div>`).join('')}</div></div>`;
+      return;
+    }
+    pane.innerHTML = `<div class="ptitle">VELG OPPDRAG<small>CHOOSE A MISSION</small></div>
+      <div class="modes">
+        <button class="mode paper-card hot" data-mode="dom"><span class="mi">${icon('domination')}</span><span><b>Domination</b><span>12 v 12 against AI squads. Take and hold three flags.</span></span><em>SOLO</em></button>
+        <button class="mode paper-card" data-mode="mp"><span class="mi">${icon('multiplayer')}</span><span><b>Multiplayer</b><span>Host a room, join with a code or browse public rooms. Bots fill the empty slots.</span></span><em>ONLINE</em></button>
+        <button class="mode paper-card" data-mode="quick"><span class="mi">${icon('quick')}</span><span><b>Quick Play</b><span>Straight into the fullest public room — or open one if there is none.</span></span><em>ONLINE</em></button>
+      </div>
+      <div class="kit paper-card" data-a="kit"><span class="eyebrow red">KIT · <span class="kit-preset"></span></span><div class="kn"></div><div class="ks"></div></div>`;
+    pane.querySelector('[data-mode=dom]')!.addEventListener('click', () => this.handlers.onPlay());
+    pane.querySelector('[data-mode=mp]')!.addEventListener('click', () => this.handlers.onMultiplayer?.());
+    pane.querySelector('[data-mode=quick]')!.addEventListener('click', () => this.handlers.onQuickPlay?.());
+    pane.querySelector('.kit')!.addEventListener('click', () => this.showLoadout('menu'));
+    this.updateMenuWeapon();
   }
+
+  /** README "Update N" sections → the news panel (loaded lazily, outside the boot path) */
+  private async loadNews() {
+    try {
+      const md: string = (await import('../../README.md?raw')).default;
+      const items: { n: string; title: string; bullets: string[] }[] = [];
+      const re = /^## Update (\d+)(?::\s*(.*))?$/gm;
+      const heads: { n: string; title: string; at: number; end: number }[] = [];
+      let m: RegExpExecArray | null;
+      while ((m = re.exec(md))) heads.push({ n: m[1], title: m[2] || '', at: m.index + m[0].length, end: md.length });
+      heads.forEach((hd, i) => (hd.end = i + 1 < heads.length ? heads[i + 1].at : md.indexOf('\n## ', hd.at) > 0 ? md.indexOf('\n## ', hd.at) : md.length));
+      heads.sort((a, b) => +b.n - +a.n);
+      for (const hd of heads.slice(0, 8)) {
+        const body = md.slice(hd.at, hd.end);
+        // the update's own section headings make the best summary; else its first bullets
+        const subs = [...body.matchAll(/^### (.+)$/gm)].map((b) => b[1]).filter((t) => !/^(tested|not yet|known)/i.test(t));
+        const bullets = (subs.length ? subs : [...body.matchAll(/^- (?:\*\*(.+?)\*\*[:.]?\s*)?(.*)$/gm)].map((b) => (b[1] ? b[1] : b[2])))
+          .slice(0, 5)
+          .map((b) => b.replace(/\*\*|`/g, '').replace(/\[(.+?)\]\(.+?\)/g, '$1').replace(/\s*\(`?src\/.*?\)$/, '').slice(0, 110));
+        items.push({ n: hd.n, title: hd.title.replace(/\*\*|`/g, ''), bullets });
+      }
+      const nl = this.menu.querySelector('.news .nl') as HTMLElement;
+      nl.innerHTML = items.map((it, i) => `<div class="ni ${i === 0 ? 'new' : ''}"><div class="nt"><em>OPPD. ${it.n}</em><b>${esc(it.title || 'Update ' + it.n)}</b></div>${it.bullets.length ? `<ul>${it.bullets.map((b) => `<li>${esc(b)}</li>`).join('')}</ul>` : ''}</div>`).join('');
+    } catch {
+      /* no news is good news */
+    }
+  }
+
+  /** operation brief: the chart (built by the game from the terrain) and the conditions */
+  setBrief(chart: HTMLCanvasElement | null, facts: { wind: string; sea: string; time: string; season: string }) {
+    const b = this.menu.querySelector('.brief') as HTMLElement;
+    if (chart) {
+      const box = b.querySelector('.chart') as HTMLElement;
+      box.innerHTML = '';
+      box.appendChild(chart);
+    }
+    setText(b.querySelector('.f-wind'), facts.wind);
+    setText(b.querySelector('.f-sea'), facts.sea);
+    setText(b.querySelector('.f-time'), facts.time);
+    setText(b.querySelector('.f-season'), facts.season);
+  }
+
+  /** the 3D menu soldier's name tag (screen position from the game; null hides it) */
+  soldierTag(pos: { x: number; y: number } | null, team: 0 | 1) {
+    const t = this.menu.querySelector('.soldier-tag') as HTMLElement;
+    if (!pos || this.menuTab !== 'play') {
+      t.classList.add('hidden');
+      return;
+    }
+    t.classList.remove('hidden');
+    const name = (localStorage.getItem('ff.name') || 'Soldat').toUpperCase();
+    const p = this.presets[this.activePreset];
+    const html = `${emblem(team)}<span><b>${esc(name)}</b><small>${team === 0 ? 'KYSTJEGERNE' : 'NORDFRONT'} · ${esc(p?.name ?? '')}</small></span>`;
+    setHTML(t, html);
+    setCls(t, `soldier-tag paper-card ${team === 0 ? 'k' : 'n'}`);
+    // keep it in the middle column, clear of the mode cards and the news / brief cards
+    const side = this.menu.querySelector('.side')?.getBoundingClientRect();
+    const pane = this.menu.querySelector('.pane')?.getBoundingClientRect();
+    const half = (t.offsetWidth || 200) / 2;
+    const x = Math.max((pane?.right ?? 0) + half + 12, Math.min((side?.left ?? window.innerWidth) - half - 12, pos.x));
+    t.style.left = `${x.toFixed(0)}px`;
+    t.style.top = `${Math.max(150, pos.y).toFixed(0)}px`;
+  }
+
+  private updateMenuWeapon(e = this.menu) {
+    const p = this.presets[this.activePreset];
+    setText(e.querySelector('.kit-preset'), p?.name ?? '');
+    setText(e.querySelector('.kit .kn'), `${WEAPONS[this.primary].short} · ${WEAPONS[this.secondary].short}`);
+    setText(e.querySelector('.kit .ks'), `${(LETHALS.find((l) => l.id === this.lethal)?.name ?? '').toLowerCase()} · ${TACTICALS.find((t) => t.id === this.tactical)!.name.toLowerCase()}`);
+    // the silhouette is rendered on first use: after the menu has painted, not in its way
+    const name = WEAPONS[this.primary].name;
+    setTimeout(() => {
+      const kit = e.querySelector('.kit') as HTMLElement | null;
+      const url = kit ? this.weaponIcon?.(name) : null;
+      if (!kit || !url) return;
+      let img = kit.querySelector('img');
+      if (!img) {
+        img = document.createElement('img');
+        img.alt = '';
+        kit.appendChild(img);
+      }
+      if (img.src !== url) img.src = url;
+    }, 120);
+    this.onKitChange?.();
+  }
+  /** the game re-dresses the menu soldier when the kit changes */
+  onKitChange: (() => void) | null = null;
 
   showMenu(v: boolean) {
     this.menu.classList.toggle('hidden', !v);
+    if (v) this.updateMenuWeapon();
+  }
+  get menuVisible() {
+    return !this.menu.classList.contains('hidden') && this.settingsEl.classList.contains('hidden') && this.loadoutEl.classList.contains('hidden');
   }
 
   /** Loadout: primary, sidearm, lethal and tactical. From the pause menu it applies on your next spawn (or right away if you just spawned). */
@@ -269,6 +447,7 @@ export class UI {
     return this._preview;
   }
   private ldSlot: 'p' | 's' | 'e' = 'p';
+  private ldShown: WeaponId | null = null;
   private ldCat = '';
 
   private loadPresets() {
@@ -349,16 +528,17 @@ export class UI {
       const selId: WeaponId = slot === 's' ? this.secondary : this.primary;
       if (slot !== 'e' && !cats.some((c) => c.cls === this.ldCat)) this.ldCat = WEAPONS[selId].cls;
       const list = pool.filter((id) => WEAPONS[id].cls === this.ldCat);
-      const shown: WeaponId = list.includes(selId) ? selId : list[0] ?? selId;
+      // inspected (clicked once) or the equipped one
+      const shown: WeaponId = this.ldShown && list.includes(this.ldShown) ? this.ldShown : list.includes(selId) ? selId : list[0] ?? selId;
       const d = WEAPONS[shown];
       const card = (id: WeaponId) => {
         const w = WEAPONS[id];
         const eq = id === selId;
         const img = this.preview ? `<img alt="" src="${this.preview.thumbnail(id)}">` : '';
-        return `<div class="ldcard ${eq ? 'eq' : ''} ${id === shown ? 'on' : ''}" data-id="${id}">${eq ? '<i class="chk">✓</i>' : ''}<div class="th">${img}</div><div class="cn">${w.short}</div><div class="cs">${CLS_NAME[w.cls]}</div>${eq ? '<div class="eqb">EQUIPPED</div>' : ''}</div>`;
+        return `<div class="ldcard ${eq ? 'eq' : ''} ${id === shown ? 'on' : ''}" data-id="${id}">${eq ? `<i class="chk">${icon('check')}</i>` : ''}<div class="th">${img}</div><div class="cn">${w.short}</div><div class="cs">${CLS_NAME[w.cls]}</div>${eq ? '<div class="eqb">EQUIPPED</div>' : ''}</div>`;
       };
       const ecard = (id: string, name: string, desc: string, count: number, sel: boolean, group: string) =>
-        `<div class="ldcard eqp ${sel ? 'eq on' : ''}" data-g="${group}" data-id="${id}">${sel ? '<i class="chk">✓</i>' : ''}<div class="th ic">${icon(id, 'big')}</div><div class="cn">${name}</div><div class="cs">${desc}</div><div class="cs">×${count} PER LIFE</div></div>`;
+        `<div class="ldcard eqp ${sel ? 'eq on' : ''}" data-g="${group}" data-id="${id}">${sel ? `<i class="chk">${icon('check')}</i>` : ''}<div class="th ic">${icon(id, 'big')}</div><div class="cn">${name}</div><div class="cs">${desc}</div><div class="cs">×${count} PER LIFE</div></div>`;
       const bar = `<div class="ldpresets">${this.presets.map((p, i) => `<button data-preset="${i}" class="${i === this.activePreset ? 'on' : ''}" title="Double-click to rename"><small>${i + 1}</small>${p.name}</button>`).join('')}</div>`;
       const top = `${bar}<div class="ldtop"><div class="ldtitle">${slot === 'p' ? 'PRIMARY WEAPON' : slot === 's' ? 'SIDEARM' : 'EQUIPMENT'} <small>${back === 'pause' ? 'changes apply on your next spawn' : 'choose your kit'}</small></div>
         <div class="ldslots">
@@ -373,20 +553,44 @@ export class UI {
           <div class="lsec">FIELD UPGRADE</div><div class="ldrow">${ecard('trophy', 'TROPHY SYSTEM', 'Press H to deploy. Shoots down up to 3 enemy grenades, C4, sticky grenades and throwing knives within 7.5 m. Recharges over time.', 1, true, 'f')}</div></div>
           <div class="ldbot"><button class="primary" data-a="done">CONFIRM</button></div></div>`;
       } else {
+        // stat comparison against the gun equipped in this slot: green gains, red losses
+        const eqd = WEAPONS[selId];
+        const cmp = shown !== selId;
+        const statRow = ([k, v]: [string, number], i: number) => {
+          const nv = Math.max(0.04, Math.min(1, v)), ov = Math.max(0.04, Math.min(1, stats(eqd)[i][1]));
+          const dlt = Math.round((nv - ov) * 100);
+          const lo = Math.min(nv, ov), hi = Math.max(nv, ov);
+          return `<div class="ldst"><span>${k}</span><b><i style="width:${Math.round(lo * 100)}%"></i>${cmp && dlt ? `<s class="${dlt < 0 ? 'neg' : ''}" style="left:${Math.round(lo * 100)}%;width:${Math.round((hi - lo) * 100)}%"></s>` : ''}</b><em class="${cmp && dlt > 0 ? 'up' : cmp && dlt < 0 ? 'down' : ''}">${cmp && dlt ? (dlt > 0 ? '+' : '−') + Math.abs(dlt) : Math.round(nv * 100)}</em></div>`;
+        };
         e.innerHTML = `<div class="ld">${top}${note ? `<div class="lnote">${note}</div>` : ''}
           <div class="ldmain">
             <div class="ldinfo"><div class="ldcls">${CLS_NAME[d.cls]}</div><div class="ldname">${d.name.toUpperCase()}</div><p>${d.desc}</p>
-              <div class="ldstats">${stats(d).map(([k, v]) => `<div class="ldst"><span>${k}</span><b><i style="width:${Math.round(Math.max(0.04, Math.min(1, v)) * 100)}%"></i></b></div>`).join('')}</div>
-              <div class="ldnums"><div><small>ROUNDS</small>${d.mag}</div><div><small>RESERVE</small>${d.reserve}</div><div><small>RPM</small>${d.rpm}</div></div>
+              <div class="ldstats">${stats(d).map(statRow).join('')}</div>
+              ${cmp ? `<div class="hint">Compared with your equipped ${eqd.short}: <span style="color:var(--green)">green</span> is better, <span style="color:var(--red)">red</span> worse.</div>` : ''}
+              <div class="ldnums"><div><small>ROUNDS</small>${d.mag}</div><div><small>RESERVE</small>${d.reserve}</div><div><small>RPM</small>${d.rpm}</div><div><small>DAMAGE</small>${d.damage[0]}${d.pellets > 1 ? `×${d.pellets}` : ''}</div></div>
             </div>
-            <div class="ldview"></div>
+            <div class="ldview">
+              <svg class="callouts" viewBox="0 0 1000 600" preserveAspectRatio="none">
+                <path d="M120 150H230L300 262"/><circle cx="300" cy="262" r="5"/>
+                <path d="M880 150H760L640 262"/><circle cx="640" cy="262" r="5"/>
+                <path d="M560 520H600L560 380"/><circle cx="560" cy="380" r="5"/>
+                <path class="dim" d="M160 470H840M160 455V485M840 455V485"/>
+              </svg>
+              <div class="co" style="left:4%;top:13%"><small>KALIBER · CALIBRE</small><b>${CALIBRE[d.id] ?? '—'}</b></div>
+              <div class="co" style="right:4%;top:13%;text-align:right"><small>KADENS · RATE</small><b>${d.rpm} RPM</b></div>
+              <div class="co" style="left:61%;top:82%"><small>MAGASIN · MAGAZINE</small><b>${d.mag} + ${d.reserve}</b></div>
+              <div class="co" style="left:16%;top:80%"><small>EFFEKTIV RANGE</small><b>${d.range[0]}–${d.range[1]} m</b></div>
+              <div class="plate"><b>${d.short}</b>TEGNING NR. ${String(PRIMARIES.concat(SECONDARIES).indexOf(d.id as WeaponId) + 1).padStart(2, '0')} · ${CLS_NAME[d.cls]}</div>
+            </div>
           </div>
           <div class="ldtabs">${cats.map((c) => `<button data-cat="${c.cls}" class="${c.cls === this.ldCat ? 'on' : ''}">${c.label}</button>`).join('')}</div>
           <div class="ldcar">${list.map(card).join('')}</div>
-          <div class="ldbot"><span class="ldhint">Click a weapon to equip it</span><button class="primary" data-a="done">CONFIRM</button></div></div>`;
+          <div class="ldbot"><span class="ldhint">Click a weapon to inspect it on the bench · click again (or EQUIP) to take it</span>${shown !== selId ? `<button data-a="equip">EQUIP ${d.short}</button>` : ''}<button class="primary" data-a="done">CONFIRM</button></div></div>`;
         if (this.preview) this.preview.show(e.querySelector('.ldview') as HTMLElement, shown);
+        const cv = e.querySelector('.ldview canvas');
+        if (cv) e.querySelector('.ldview')!.insertBefore(cv, e.querySelector('.ldview svg'));
       }
-      e.querySelectorAll('[data-slot]').forEach((b) => b.addEventListener('click', () => { this.ldSlot = (b as HTMLElement).dataset.slot as 'p' | 's' | 'e'; this.ldCat = ''; render(); }));
+      e.querySelectorAll('[data-slot]').forEach((b) => b.addEventListener('click', () => { this.ldSlot = (b as HTMLElement).dataset.slot as 'p' | 's' | 'e'; this.ldCat = ''; this.ldShown = null; render(); }));
       e.querySelectorAll('[data-preset]').forEach((b) => {
         const i = +(b as HTMLElement).dataset.preset!;
         b.addEventListener('click', () => {
@@ -408,6 +612,12 @@ export class UI {
         c.addEventListener('click', () => {
           const el = c as HTMLElement;
           const id = el.dataset.id!;
+          // weapons: first click puts it on the bench (with the comparison), the second equips it
+          if ((this.ldSlot === 'p' || this.ldSlot === 's') && this.ldShown !== id && id !== (this.ldSlot === 'p' ? this.primary : this.secondary)) {
+            this.ldShown = id as WeaponId;
+            render();
+            return;
+          }
           if (this.ldSlot === 'p') this.primary = id as WeaponId;
           else if (this.ldSlot === 's') this.secondary = id as WeaponId;
           else if (el.dataset.g === 't') this.tactical = id as TacticalId;
@@ -418,6 +628,14 @@ export class UI {
           render();
         }),
       );
+      e.querySelector('[data-a=equip]')?.addEventListener('click', () => {
+        if (!this.ldShown) return;
+        if (this.ldSlot === 'p') this.primary = this.ldShown;
+        else if (this.ldSlot === 's') this.secondary = this.ldShown;
+        Object.assign(this.presets[this.activePreset], { p: this.primary, s: this.secondary, l: this.lethal, t: this.tactical });
+        this.savePresets();
+        render();
+      });
       e.querySelector('[data-a=done]')!.addEventListener('click', () => {
         e.classList.add('hidden');
         this.preview?.stop();
@@ -720,13 +938,17 @@ export class UI {
     if (!v) this.settingsEl.classList.add('hidden');
   }
 
-  showEnd(winner: 0 | 1 | -1, myTeam: 0 | 1, rows: CombatantState[], scores: [number, number], names: [string, string]) {
+  // ---------------------------------------------------------------- end of match
+  showEnd(winner: 0 | 1 | -1, myTeam: 0 | 1, rows: ScoreRow[], scores: [number, number], names: [string, string]) {
     const won = winner === myTeam;
-    const title = winner === -1 ? 'DRAW' : won ? 'VICTORY' : 'DEFEAT';
-    this.end.innerHTML = `<div class="panel wide"><div class="ptitle big ${won ? 'win' : winner === -1 ? '' : 'loss'}">${title}</div>
-      <div class="final"><span class="blue">${names[0]} ${scores[0]}</span> — <span class="red">${scores[1]} ${names[1]}</span></div>
+    const title = winner === -1 ? 'UAVGJORT' : won ? 'SEIER' : 'NEDERLAG';
+    const sub = winner === -1 ? 'DRAW' : won ? 'VICTORY' : 'DEFEAT';
+    this.end.innerHTML = `<div class="panel wide"><div class="eyebrow ${won ? '' : 'red'}" style="text-align:center">${sub} · KAMPEN ER OVER</div>
+      <div class="ptitle big ${won ? 'win' : winner === -1 ? '' : 'loss'}">${title}</div>
+      <div class="final"><span class="blue">${emblem(0)} ${names[0]} ${scores[0]}</span> &nbsp;—&nbsp; <span class="red">${scores[1]} ${names[1]} ${emblem(1)}</span></div>
       ${this.tableHTML(rows, names)}
       <div class="row"><button class="primary" data-a="again">PLAY AGAIN</button><button data-a="menu">MAIN MENU</button></div></div>`;
+    this.end.querySelectorAll('.final .emblem').forEach((e) => ((e as HTMLElement).style.cssText = 'width:30px;height:30px;vertical-align:middle'));
     this.end.classList.remove('hidden');
     this.end.querySelector('[data-a=again]')!.addEventListener('click', () => {
       this.end.classList.add('hidden');
@@ -741,24 +963,88 @@ export class UI {
     this.end.classList.add('hidden');
   }
 
-  private tableHTML(rows: CombatantState[], names: [string, string]) {
+  // ---------------------------------------------------------------- scoreboard: player rows
+  /** ping text ("43", "43 · 2%", "HOST", "BOT", "…") → signal bars */
+  private pingBars(p: string) {
+    const ms = parseInt(p, 10);
+    const q = p === 'HOST' ? 3 : Number.isNaN(ms) ? 0 : ms < 70 ? 3 : ms < 140 ? 2 : 1;
+    return `<span class="bars q${q}"><i></i><i></i><i></i></span>`;
+  }
+  private tableHTML(rows: ScoreRow[], names: [string, string]) {
     const team = (t: 0 | 1) => {
       const r = rows.filter((x) => x.team === t).sort((a, b) => b.score - a.score);
-      const net = !!this.sbExtra?.(-1);
-      const ex = (id: number) => (this.sbExtra ? this.sbExtra(id) : null);
-      return `<div class="sbteam ${t === 0 ? 'blue' : 'red'} ${net ? 'net' : ''}"><div class="sbh"><span>${names[t]}</span><span>K</span><span>D</span><span>SCORE</span>${net ? '<span>PING</span>' : ''}</div>${r
+      const total = r.reduce((a, x) => a + x.score, 0);
+      return `<div class="sbteam ${t === 0 ? 'blue' : 'red'}"><div class="sbt">${emblem(t)}<b>${names[t]}</b><span>${total}</span></div>
+        <div class="sbh"><span></span><span>NAME</span><span>K</span><span>D</span><span>A</span><span>CAP</span><span>SCORE</span><span>PING</span><span></span></div>${r
         .map((x) => {
-          const e = ex(x.id);
-          return `<div class="sbr ${x.isPlayer ? 'me' : ''} ${x.alive ? '' : 'dead'}"><span>${e?.talk ? '<i class="spk"></i>' : ''}${x.name}</span><span>${x.kills}</span><span>${x.deaths}</span><span>${x.score}</span>${net ? `<span class="pg">${e?.ping ?? ''}</span>` : ''}</div>`;
+          const e = this.sbExtra ? this.sbExtra(x.id) : null;
+          const human = !x.bot && !!e;
+          const ping = e ? (x.bot ? '' : e.ping) : '';
+          const mic = !e || x.bot ? '' : `<i class="mic ${e.muted ? 'mute' : e.talk ? 'talk' : ''}">${icon(e.muted ? 'muted' : 'mic')}</i>`;
+          return `<div class="sbr ${x.isPlayer && !x.bot && !e ? 'me' : ''} ${x.alive ? '' : 'dead'}" ${human ? `data-human="${x.id}"` : ''} data-name="${esc(x.name)}">${icon(x.role || 'rifleman')}<span class="nm">${esc(x.name)}${x.bot ? '<small>BOT</small>' : ''}</span><span>${x.kills}</span><span>${x.deaths}</span><span>${x.assists ?? 0}</span><span>${x.captures ?? 0}</span><span>${x.score}</span><span class="pg">${e && !x.bot ? `${ping.replace(/ ·.*/, '')}${this.pingBars(ping)}` : x.bot ? '—' : ''}</span>${mic || '<span></span>'}</div>`;
         })
         .join('')}</div>`;
     };
     return `<div class="sbwrap">${team(0)}${team(1)}</div>`;
   }
 
-  setScoreboard(v: boolean, rows?: CombatantState[], names?: [string, string]) {
+  private sbRows: ScoreRow[] = [];
+  private sbNames: [string, string] = ['', ''];
+  setScoreboard(v: boolean, rows?: ScoreRow[], names?: [string, string], meId = -1) {
     this.scoreboard.classList.toggle('hidden', !v);
-    if (v && rows && names) this.scoreboard.innerHTML = this.tableHTML(rows, names);
+    if (!v) {
+      this.scoreboardCursor(false);
+      return;
+    }
+    if (rows && names) {
+      this.sbRows = rows;
+      this.sbNames = names;
+      this.scoreboard.innerHTML = this.tableHTML(rows, names);
+      if (meId >= 0) this.scoreboard.querySelector(`[data-name="${CSS.escape(rows.find((r) => r.id === meId)?.name ?? '')}"]`)?.classList.add('me');
+      if (this.sbExtra?.(-1)) this.scoreboard.insertAdjacentHTML('beforeend', `<div class="sbhint">${this.sbCursor ? 'CLICK A PLAYER: MUTE · REPORT' : 'HOLD TAB + RIGHT CLICK: CURSOR (MUTE / REPORT)'}</div>`);
+      this.wireRows();
+    }
+  }
+  private sbCursor = false;
+  /** right-click while the scoreboard is up: a cursor to click rows (mute / report) */
+  scoreboardCursor(on: boolean) {
+    this.sbCursor = on;
+    this.scoreboard.classList.toggle('cursor', on);
+    if (!on) this.scoreboard.querySelector('.sbmenu')?.remove();
+    const hint = this.scoreboard.querySelector('.sbhint');
+    if (hint) hint.textContent = on ? 'CLICK A PLAYER: MUTE · REPORT · TAB / ESC TO CLOSE' : 'HOLD TAB + RIGHT CLICK: CURSOR (MUTE / REPORT)';
+  }
+  get scoreboardOpen() {
+    return !this.scoreboard.classList.contains('hidden');
+  }
+  private wireRows() {
+    this.scoreboard.querySelectorAll('[data-human]').forEach((r) =>
+      r.addEventListener('click', (ev) => {
+        if (!this.sbCursor) return;
+        const id = +(r as HTMLElement).dataset.human!;
+        const row = this.sbRows.find((x) => x.id === id);
+        this.scoreboard.querySelector('.sbmenu')?.remove();
+        const e = this.sbExtra?.(id);
+        const m = h('div', 'sbmenu paper-card', `<b>${esc(row?.name ?? '')}</b><button data-x="mute">${icon(e?.muted ? 'speaker' : 'muted')}${e?.muted ? 'UNMUTE' : 'MUTE'} (CHAT + VOICE)</button><button data-x="report">${icon('report')}REPORT TO THE HOST</button>`);
+        const me = ev as MouseEvent;
+        m.style.left = `${me.clientX + 6}px`;
+        m.style.top = `${me.clientY + 6}px`;
+        this.scoreboard.appendChild(m);
+        m.querySelector('[data-x=mute]')!.addEventListener('click', (x) => {
+          x.stopPropagation();
+          this.handlers.onMute?.(id);
+          m.remove();
+          this.scoreboard.innerHTML = this.tableHTML(this.sbRows, this.sbNames);
+          this.scoreboard.insertAdjacentHTML('beforeend', `<div class="sbhint">CLICK A PLAYER: MUTE · REPORT · TAB / ESC TO CLOSE</div>`);
+          this.wireRows();
+        });
+        m.querySelector('[data-x=report]')!.addEventListener('click', (x) => {
+          x.stopPropagation();
+          this.handlers.onReport?.(id);
+          m.remove();
+        });
+      }),
+    );
   }
 
   // ---------------------------------------------------------------- HUD
@@ -767,43 +1053,46 @@ export class UI {
     e.innerHTML = `
       <div class="top">
         <div class="scorebar">
-          <div class="team blue"><span class="tn"></span><b class="s0">0</b><div class="prog"><i class="p0"></i></div></div>
+          <div class="team blue">${emblem(0)}<span class="tn"></span><div class="prog"><i class="p0"></i></div><b class="s0">0</b></div>
           <div class="clock">10:00</div>
-          <div class="team red"><div class="prog"><i class="p1"></i></div><b class="s1">0</b><span class="tn"></span></div>
+          <div class="team red"><b class="s1">0</b><div class="prog"><i class="p1"></i></div><span class="tn"></span>${emblem(1)}</div>
         </div>
         <div class="flags"></div>
-        <div class="compass"><div class="strip"></div><div class="needle"></div></div>
+        <div class="compass"><div class="strip"></div><div class="marks"></div><div class="needle"></div><div class="brg">000</div></div>
         <div class="loc"></div>
       </div>
       <div class="crosshair"><i class="l"></i><i class="r"></i><i class="t"></i><i class="b"></i><i class="dot"></i></div>
-      <div class="hitmarker"><i></i><i></i><i></i><i></i></div>
+      <div class="hitmarker"><i></i><i></i><i></i><i></i><b></b><u></u></div>
       <div class="dmg"></div>
       <div class="feed"></div>
       <div class="notify"></div>
-      <div class="killtext"><b class="kx"></b><div class="kr"></div></div>
+      <div class="popups"></div>
       <div class="prompt"></div>
       <div class="capbar hidden"><div class="cl"></div><div class="ct"></div><div class="cb"><i></i></div></div>
       <div class="flagmarks"></div>
-      <div class="streaks"></div>
-      <div class="nades"></div>
-      <div class="health"><div class="hb"><i class="hf"></i></div><span class="hv">100</span></div>
-      <div class="ammo"><div class="wn"></div><div class="nums"><b class="mag">30</b><span class="res">/ 120</span></div><div class="pips"></div><div class="fm"></div></div>
+      <div class="streaks ctx"></div>
+      <div class="nades ctx"></div>
+      <div class="health ctx gone"><span class="hl">HP</span><div class="hb"><i class="hf"></i></div><span class="hv">100</span></div>
+      <div class="ammo ctx"><div class="wn"></div><div class="fm"></div><div class="nums"><b class="mag">30</b><span class="res">/ 120</span></div><div class="pips"></div></div>
       <div class="fps hidden"></div>
       <div class="scope hidden"><div class="ring"></div></div>`;
     const q = (s: string) => e.querySelector(s) as HTMLElement;
-    for (const k of ['s0', 's1', 'p0', 'p1', 'clock', 'strip', 'loc', 'crosshair', 'hitmarker', 'hf', 'hv', 'mag', 'res', 'wn', 'fm', 'pips', 'prompt', 'fps', 'scope']) this.els[k] = q('.' + k);
+    for (const k of ['s0', 's1', 'p0', 'p1', 'clock', 'strip', 'marks', 'brg', 'loc', 'crosshair', 'hitmarker', 'hf', 'hv', 'mag', 'res', 'wn', 'fm', 'pips', 'prompt', 'fps', 'scope', 'health', 'ammo', 'streaks', 'nades']) this.els[k] = q('.' + k);
     this.feedEl = q('.feed');
     this.notifyEl = q('.notify');
     this.dmgEl = q('.dmg');
-    // compass ticks (each degree = 4px)
-    const strip = this.els.strip;
+    this.popEl = q('.popups');
+    // compass: 4 px per degree; chart bearings every 15° (three digits), cardinal letters, ticks every 5°
     let html = '';
-    for (let d = -360; d <= 720; d += 15) {
+    for (let d = -360; d <= 720; d += 5) {
       const deg = ((d % 360) + 360) % 360;
-      const lab = { 0: 'N', 45: 'NE', 90: 'E', 135: 'SE', 180: 'S', 225: 'SW', 270: 'W', 315: 'NW' }[deg as 0];
-      html += `<span style="left:${(d + 360) * 4}px" class="${lab ? 'c' : ''}">${lab ?? deg}</span>`;
+      const x = (d + 360) * 4;
+      const lab = ({ 0: 'N', 45: 'NØ', 90: 'Ø', 135: 'SØ', 180: 'S', 225: 'SV', 270: 'V', 315: 'NV' } as Record<number, string>)[deg];
+      if (lab) html += `<span style="left:${x}px" class="c ${deg === 0 ? 'n' : ''}">${lab}</span>`;
+      else if (deg % 15 === 0) html += `<span style="left:${x}px">${String(deg).padStart(3, '0')}</span>`;
+      html += `<i style="left:${x}px" class="${deg % 15 === 0 ? 'm' : ''}"></i>`;
     }
-    strip.innerHTML = html;
+    this.els.strip.innerHTML = html;
     return e;
   }
 
@@ -811,8 +1100,11 @@ export class UI {
     this.hud.classList.toggle('hidden', !v);
   }
 
+  /** contextual HUD: what changed recently stays bright, what has nothing to say fades */
+  private ctx = { hurtT: 99, lastHp: 100, ammoT: 0, lastMag: -1, lastWeapon: '', streakT: 0, eqT: 0, heading: 0 };
   updateHUD(s: HUDState, dt: number) {
     const e = this.els;
+    const c = this.ctx;
     setText(e.s0, String(s.scores[0]));
     setText(e.s1, String(s.scores[1]));
     setStyle(e.p0, 'width', `${((s.scores[0] / s.limit) * 100).toFixed(1)}%`);
@@ -826,7 +1118,9 @@ export class UI {
     // compass: heading in degrees, 0 = north (-Z)
     let deg = ((-s.heading * 180) / Math.PI) % 360;
     if (deg < 0) deg += 360;
+    c.heading = deg;
     setStyle(e.strip, 'transform', `translateX(${(-(deg + 360) * 4).toFixed(1)}px)`);
+    setText(e.brg, String(Math.round(deg) % 360).padStart(3, '0'));
     setText(e.loc, s.location.toUpperCase());
     // crosshair
     const gap = 6 + s.spread * 9;
@@ -837,24 +1131,39 @@ export class UI {
       ch.style.setProperty('--gap', gs);
     }
     setStyle(ch, 'opacity', String(Math.max(0, 1 - s.ads * 2.5) * (s.sprint > 0.5 ? 0.0 : 1)));
-    // hitmarker
     this.hitT = Math.max(0, this.hitT - dt);
     setStyle(e.hitmarker, 'opacity', '0');
-    // health
+    // health: only while hurt (and a few seconds after)
+    if (s.health < c.lastHp - 0.5) c.hurtT = 0;
+    c.lastHp = s.health;
+    c.hurtT += dt;
+    setCls(e.health, `health ctx ${s.health >= 99.5 && c.hurtT > 3 ? 'gone' : ''}`);
     setStyle(e.hf, 'width', `${s.health.toFixed(0)}%`);
     e.hf.classList.toggle('low', s.health < 35);
     setText(e.hv, String(Math.ceil(s.health)));
-    // ammo
+    // ammo: bright while shooting / reloading / aiming / low, quiet otherwise
+    if (s.mag !== c.lastMag || s.weapon !== c.lastWeapon || s.reloading || s.ads > 0.3) c.ammoT = 0;
+    c.lastMag = s.mag;
+    c.lastWeapon = s.weapon;
+    c.ammoT += dt;
+    const lowAmmo = s.magSize > 0 && s.mag <= Math.ceil(s.magSize * 0.25);
+    setCls(e.ammo, `ammo ctx ${c.ammoT > 4 && !lowAmmo ? 'quiet' : ''}`);
     setText(e.mag, s.magSize > 0 ? String(s.mag) : '∞');
-    e.mag.classList.toggle('low', s.mag <= Math.ceil(s.magSize * 0.25));
+    e.mag.classList.toggle('low', lowAmmo);
     setText(e.res, s.magSize > 0 ? `/ ${s.reserve}` : '');
     setText(e.wn, s.weapon);
-    setText(e.fm, s.mode);
+    const fm = s.mode.toLowerCase();
+    setHTML(e.fm, `${icon('fm_' + (['auto', 'burst', 'semi', 'bolt', 'pump'].includes(fm) ? fm : 'semi'))}${s.mode}`);
     const pipKey = `${s.mag}/${s.magSize}`;
     if (e.pips.dataset.k !== pipKey) {
       e.pips.dataset.k = pipKey;
       e.pips.innerHTML = Array.from({ length: Math.min(s.magSize, 40) }, (_, i) => `<i class="${i < s.mag ? '' : 'e'}"></i>`).join('');
     }
+    // killstreaks / equipment fade when nothing changes
+    c.streakT += dt;
+    c.eqT += dt;
+    setCls(e.streaks, `streaks ctx ${c.streakT > 6 && !this.streakReady ? 'quiet' : ''}`);
+    setCls(e.nades, `nades ctx ${c.eqT > 5 ? 'quiet' : ''}`);
     // prompt
     let prompt = '';
     if (s.outOfBounds > 0) prompt = `<span class="warn">RETURN TO THE COMBAT AREA</span> ${Math.ceil(s.outOfBounds)}`;
@@ -866,30 +1175,56 @@ export class UI {
     e.fps.classList.toggle('hidden', !Settings.data.showFps);
     if (Settings.data.showFps) setText(e.fps, `${Math.round(s.fps)} FPS`);
     e.scope.classList.toggle('hidden', !s.scoped);
-    // damage indicators fade
-    this.dmgEl.querySelectorAll('i').forEach((i) => {
-      const el = i as HTMLElement;
+    // damage arcs fade
+    for (const el of Array.from(this.dmgEl.children) as HTMLElement[]) {
       const life = parseFloat(el.dataset.life || '0') - dt;
       el.dataset.life = String(life);
-      el.style.opacity = String(Math.max(0, Math.min(1, life)));
+      el.style.opacity = String(Math.max(0, Math.min(1, life / 0.8)));
       if (life <= 0) el.remove();
-    });
+    }
   }
 
-  /** MW-style hitmarker: pops on every hit, scales with damage, red X on kills. */
+  /** flags, pings, waypoint and spotted enemies on the compass ribbon */
+  private compassPool: HTMLElement[] = [];
+  compassMarks(list: CompassMark[]) {
+    const host = this.els.marks;
+    let n = 0;
+    for (const mk of list) {
+      let d = mk.bearing - this.ctx.heading;
+      d = ((d % 360) + 540) % 360 - 180;
+      if (Math.abs(d) > 58) continue;
+      let el = this.compassPool[n];
+      const tag = mk.kind === 'flag' ? 'B' : 'I';
+      if (!el || el.tagName !== tag) {
+        el?.remove();
+        el = document.createElement(tag.toLowerCase());
+        host.appendChild(el);
+        this.compassPool[n] = el;
+      }
+      setCls(el, mk.kind === 'flag' ? (mk.rel ?? 'n') : mk.kind);
+      if (mk.kind === 'flag') setText(el, mk.label ?? '');
+      setStyle(el, 'transform', `translateX(${(d * 4).toFixed(1)}px) translateX(-50%)${mk.kind === 'ping' || mk.kind === 'foe' ? ' rotate(45deg)' : ''}`);
+      el.style.display = '';
+      n++;
+    }
+    for (let i = n; i < this.compassPool.length; i++) this.compassPool[i].style.display = 'none';
+  }
+
+  /** Hitmarker shapes: ticks (normal), short thin ticks (limb / armour), gold ticks + diamond (head),
+   *  red X with an expanding ring (kill), grey (through cover). Scales with damage. */
   hitmarker(kill: boolean, head: boolean, damage = 30, kind: '' | 'limb' | 'through' | 'low' = '') {
-    // every hit gets its own marker: rapid hits stack and overlap instead of restarting one
     const tpl = this.els.hitmarker;
     const el = tpl.cloneNode(true) as HTMLElement;
     el.className = `hitmarker live ${kill ? 'kill' : ''} ${head ? 'head' : ''} ${kind}`;
     el.style.opacity = '';
-    el.style.setProperty('--hs', String(Math.min(1.6, 0.85 + damage / 90) * (kill ? 1.35 : 1)));
+    el.style.setProperty('--hs', String(Math.min(1.6, 0.85 + damage / 90) * (kill ? 1.3 : 1)));
     el.style.setProperty('--hr', `${((Math.random() - 0.5) * 6).toFixed(1)}deg`);
     el.style.animationDuration = kill ? '0.55s' : '0.3s';
     tpl.parentElement!.appendChild(el);
     this.liveHits.push(el);
     while (this.liveHits.length > 14) this.liveHits.shift()!.remove();
-    el.addEventListener('animationend', () => {
+    el.addEventListener('animationend', (ev) => {
+      if (ev.target !== el) return;
       el.remove();
       const i = this.liveHits.indexOf(el);
       if (i >= 0) this.liveHits.splice(i, 1);
@@ -897,34 +1232,24 @@ export class UI {
   }
   private liveHits: HTMLElement[] = [];
 
-  /** Score ticker under the crosshair: accumulates quick kills, lists the reasons. */
-  private kt = { pts: 0, reasons: [] as string[], timer: 0 };
-  /** Small "+XP" and reason lines next to the hitmarker; kills within a short window accumulate. */
+  // ---------------------------------------------------------------- score popups
+  /** one line in the stack right of the crosshair: "+100 CAPTURE", "+50 ASSIST", "SPOTTED" */
+  popup(label: string, pts = 0, cls = '') {
+    const el = h('div', `pp ${cls}`, `<b>${pts ? `+${pts}` : ''}</b><span>${esc(label)}</span>`);
+    this.popEl.appendChild(el);
+    while (this.popEl.children.length > 6) this.popEl.firstChild!.remove();
+    setTimeout(() => el.classList.add('out'), 2600);
+    setTimeout(() => el.remove(), 3150);
+  }
+  /** legacy entry: total points + reasons (each reason becomes its own line) */
   killText(points: number, reasons: string[]) {
-    const box = this.hud.querySelector('.killtext') as HTMLElement;
-    const k = this.kt;
-    if (!box.classList.contains('on')) {
-      k.pts = 0;
-      k.reasons = [];
-    }
-    k.pts += points;
-    for (const r of reasons) if (!k.reasons.includes(r)) k.reasons.push(r);
-    while (k.reasons.length > 4) k.reasons.shift();
-    setText((box.querySelector('.kx') as HTMLElement), `+${k.pts} XP`);
-    (box.querySelector('.kr') as HTMLElement).innerHTML = k.reasons.map((r) => `<div>${r}</div>`).join('');
-    box.classList.add('on');
-    clearTimeout(k.timer);
-    k.timer = window.setTimeout(() => box.classList.remove('on'), 2600);
+    if (!reasons.length) return this.popup('ELIMINATION', points, 'kill');
+    for (const r of reasons) this.popup(r, reasons.length === 1 ? points : 0);
   }
-
   scoreEvent(points: number, label: string, kill = true) {
-    // all score feedback goes through the small text by the crosshair
-    if (!kill) return this.killText(points, [label]);
-    return this.killText(points, []);
+    if (!kill) return this.popup(label, points);
+    return this.popup('ELIMINATION', points, 'kill');
   }
-
-
-
 
   /** Domination HUD: flag strip under the score bar, in-world flag markers, capture bar. */
   updateFlags(
@@ -961,29 +1286,44 @@ export class UI {
     }
   }
 
-  /** Killstreak column (bottom right, above the ammo): ready streaks glow, with their key. */
+  // ---------------------------------------------------------------- killstreak tracker
+  private streakReady = false;
+  /** a pip per kill up to the last streak (marks at each streak's cost); the streak icons light up when ready */
   updateStreaks(list: { name: string; key: string; kills: number; ready: boolean; active: boolean }[], streak: number) {
-    const el = this.hud.querySelector('.streaks') as HTMLElement;
+    const el = this.els.streaks;
     const key = list.map((s) => `${s.ready}${s.active}`).join() + streak;
     if (el.dataset.k === key) return;
     el.dataset.k = key;
-    el.innerHTML = list
-      .map((s) => `<div class="sk ${s.ready ? 'ready' : ''} ${s.active ? 'active' : ''}"><em>${s.ready ? `[${s.key}]` : `${Math.min(streak, s.kills)}/${s.kills}`}</em><b>${s.name}</b>${icon(s.name === 'UAV' ? 'uav' : s.name.startsWith('MORTAR') ? 'mortar' : 'heli')}</div>`)
-      .join('');
+    this.ctx.streakT = 0;
+    this.streakReady = list.some((s) => s.ready);
+    const max = Math.max(...list.map((s) => s.kills), 1);
+    const marks = new Set(list.map((s) => s.kills));
+    const pips = Array.from({ length: max }, (_, i) => `<i class="${i < streak ? 'on' : ''} ${marks.has(i + 1) ? 'mark' : ''}"></i>`).join('');
+    const ic = (n: string) => (n === 'UAV' ? 'uav' : n.startsWith('MORTAR') ? 'mortar' : 'heli');
+    el.innerHTML = `<div class="sks">${list
+      .slice()
+      .reverse()
+      .map((s) => `<div class="sk ${s.ready ? 'ready' : ''} ${s.active ? 'active' : ''}"><em>${s.ready ? `[${s.key}]` : `${Math.min(streak, s.kills)}/${s.kills}`}</em><span>${s.name}</span><span class="si">${icon(ic(s.name))}</span></div>`)
+      .join('')}</div><div class="pipcol">${pips}</div>`;
   }
 
-  /** Lethal / tactical slots next to the ammo: icon, count, key; frag cook timer. */
+  // ---------------------------------------------------------------- equipment row
+  /** lethal / tactical: a ring that empties as they are used; field upgrade: a charge ring */
   updateNades(frags: number, cooking: number, tac: TacticalId = this.tactical, tacN = 0, lethal: LethalId = this.lethal, field = 0, c4Out = 0) {
-    const el = this.hud.querySelector('.nades') as HTMLElement;
+    const el = this.els.nades;
     const key = `${frags}|${cooking > 0 ? Math.ceil(cooking * 10) : 0}|${tac}|${tacN}|${lethal}|${Math.floor(field * 40)}|${c4Out}`;
     if (el.dataset.k === key) return;
+    if (el.dataset.k && el.dataset.k.split('|').slice(0, 5).join() !== key.split('|').slice(0, 5).join()) this.ctx.eqT = 0;
+    if (field >= 1 && !(el.dataset.k ?? '').includes('|40|')) this.ctx.eqT = 0;
     el.dataset.k = key;
-    const slot = (name: string, n: number, k: string) => `<div class="eqs ${n ? '' : 'empty'}">${icon(name)}<b>${n}</b><em>${k}</em></div>`;
-    // field upgrade: a charge ring that fills, glowing with its key when ready
+    const C = 125.66; // 2πr, r = 20
+    const ring = (frac: number) => `<svg class="ring" viewBox="0 0 46 46"><circle class="bg" cx="23" cy="23" r="20"/><circle class="fg" cx="23" cy="23" r="20" style="stroke-dashoffset:${(C * (1 - Math.max(0, Math.min(1, frac)))).toFixed(1)}"/></svg>`;
+    const lmax = LETHALS.find((l) => l.id === lethal)?.count ?? 2, tmax = TACTICALS.find((t) => t.id === tac)?.count ?? 1;
+    const slot = (name: string, n: number, max: number, k: string) => `<div class="eqs ${n ? '' : 'empty'}">${ring(n / max)}${icon(name)}<b>${n}</b><em>${k}</em></div>`;
     const ready = field >= 1;
-    const ring = `<div class="eqs fu ${ready ? 'ready' : 'empty'}" style="--fu:${Math.min(1, field) * 360}deg">${icon('trophy')}<b>${ready ? '' : Math.floor(field * 100) + '%'}</b><em>H</em></div>`;
+    const fu = `<div class="eqs fu ${ready ? 'ready' : ''}">${ring(field)}${icon('trophy')}<b>${ready ? '✓' : Math.floor(field * 100)}</b><em>H</em></div>`;
     const det = c4Out > 0 ? `<div class="det">${frags > 0 ? '[F][F]' : '[G]'} DETONATE · ${c4Out}</div>` : '';
-    el.innerHTML = slot(lethal, frags, 'G') + slot(tac, tacN, 'T') + ring + det + (cooking > 0 ? `<div class="cook"><i style="width:${(cooking / 3.5) * 100}%"></i><b>${cooking.toFixed(1)}</b></div>` : '');
+    el.innerHTML = slot(lethal, frags, lmax, 'G') + slot(tac, tacN, tmax, 'T') + fu + det + (cooking > 0 ? `<div class="cook"><i style="width:${(cooking / 3.5) * 100}%"></i><b>${cooking.toFixed(1)}</b></div>` : '');
   }
 
   /** Status effects: stim boost timer, stunned / blinded labels. */
@@ -1011,7 +1351,6 @@ export class UI {
     el.classList.toggle('hidden', !v);
     if (v) setHTML(el, `${icon('mortar')}<b class="${tooClose ? 'warn' : ''}">${tooClose ? 'TOO CLOSE' : `TARGET ${dist} m`}</b><span>[LMB] CALL MORTAR STRIKE · [RMB / 4] CANCEL</span>`);
   }
-
 
   /** Big centred announcement (flag captured / lost, killstreak inbound). */
   announce(text: string, sub = '', cls = '') {
@@ -1071,7 +1410,7 @@ export class UI {
   }
 
   private hintText = '';
-  /** Context prompt under the crosshair ([E] OPEN DOOR ...). */
+  /** Context prompt under the crosshair ([F] OPEN DOOR ...). */
   interactHint(text: string) {
     if (text === this.hintText) return;
     this.hintText = text;
@@ -1091,19 +1430,48 @@ export class UI {
       el = h('div', 'nadewarn');
       this.hud.appendChild(el);
     }
-    while (el.children.length < angles.length) el.appendChild(h('i', '', '<b></b>'));
+    while (el.children.length < angles.length) el.appendChild(h('i', '', `<b>${icon('frag')}</b>`));
     Array.from(el.children).forEach((c, i) => {
       const e = c as HTMLElement;
       e.style.display = i < angles.length ? '' : 'none';
-      if (i < angles.length) e.style.transform = `rotate(${angles[i]}rad) translateY(-120px)`;
+      if (i < angles.length) {
+        e.style.transform = `rotate(${angles[i]}rad) translateY(-118px)`;
+        (e.firstElementChild as HTMLElement).style.transform = `rotate(${-angles[i]}rad)`;
+      }
     });
   }
 
-  damageFrom(angle: number) {
-    const i = h('i');
-    i.dataset.life = '1.6';
-    i.style.transform = `rotate(${angle}rad)`;
-    this.dmgEl.appendChild(i);
+  /**
+   * Damage direction arc (screen angle, radians, 0 = straight ahead). bullet: a thin red arc with
+   * an inward tick; explosion: a heavy jagged arc, wider; fire: a dashed orange arc.
+   */
+  damageFrom(angle: number, kind: 'bullet' | 'explosion' | 'fire' = 'bullet') {
+    const R = 118;
+    const span = kind === 'explosion' ? 0.62 : kind === 'fire' ? 0.42 : 0.3;
+    const arc = (r: number) => {
+      const a0 = -Math.PI / 2 - span, a1 = -Math.PI / 2 + span;
+      return `M${(Math.cos(a0) * r).toFixed(1)} ${(Math.sin(a0) * r).toFixed(1)} A${r} ${r} 0 0 1 ${(Math.cos(a1) * r).toFixed(1)} ${(Math.sin(a1) * r).toFixed(1)}`;
+    };
+    let body = '';
+    if (kind === 'explosion') {
+      // jagged inner edge: a zigzag between two radii
+      let zz = '';
+      const n = 14;
+      for (let i = 0; i <= n; i++) {
+        const a = -Math.PI / 2 - span + (i / n) * span * 2;
+        const r = i % 2 ? R - 16 : R - 7;
+        zz += `${i ? 'L' : 'M'}${(Math.cos(a) * r).toFixed(1)} ${(Math.sin(a) * r).toFixed(1)} `;
+      }
+      body = `<path d="${arc(R)}" stroke="#F0453C" stroke-width="9" fill="none" stroke-linecap="round" opacity=".9"/><path d="${zz}" stroke="#F2B544" stroke-width="2.4" fill="none" stroke-linejoin="round"/>`;
+    } else if (kind === 'fire') {
+      body = `<path d="${arc(R)}" stroke="#F2B544" stroke-width="6" fill="none" stroke-dasharray="7 6" stroke-linecap="round"/>`;
+    } else {
+      body = `<path d="${arc(R)}" stroke="#F0453C" stroke-width="5" fill="none" stroke-linecap="round"/><path d="M-6 ${-R + 8}L0 ${-R + 18}L6 ${-R + 8}" stroke="#F4EFE3" stroke-width="2" fill="none" stroke-linejoin="round"/>`;
+    }
+    const svg = h('div', '', `<svg viewBox="-160 -160 320 320" style="filter:drop-shadow(0 0 2px rgba(5,10,20,.6))"><g transform="rotate(${((angle * 180) / Math.PI).toFixed(1)})">${body}</g></svg>`);
+    svg.dataset.life = kind === 'explosion' ? '2.2' : '1.6';
+    this.dmgEl.appendChild(svg);
+    while (this.dmgEl.children.length > 8) this.dmgEl.firstChild!.remove();
   }
 
   notify(text: string, sub = '', cls = '') {
@@ -1114,6 +1482,19 @@ export class UI {
     setTimeout(() => n.remove(), 2400);
   }
 
+  // ---------------------------------------------------------------- kill feed
+  /** what goes between the names: the weapon's silhouette, or a glyph for knives / explosions / fire */
+  private feedWeapon(w: string) {
+    const lw = w.toLowerCase();
+    if (/knife|melee|bayonet/.test(lw)) return icon('melee');
+    if (/grenade|frag|c4|claymore|sticky|mortar|explosive|helicopter|heli/.test(lw)) return icon(/mortar/.test(lw) ? 'mortar' : /heli/.test(lw) ? 'heli' : 'explosion');
+    if (/fire|burn/.test(lw)) return icon('fire');
+    if (/bounds|fall|map/.test(lw)) return icon('fall');
+    const url = this.weaponIcon?.(w);
+    return url ? `<img alt="" src="${url}">` : `<span class="wn">${esc(w.toUpperCase())}</span>`;
+  }
+  /** the player's own name (their kills / deaths are highlighted in the feed) */
+  meName = '';
   updateFeed(feed: KillEvent[], now: number) {
     const key = feed.map((f) => f.t).join(',');
     if (key === this.lastFeedKey) {
@@ -1125,12 +1506,13 @@ export class UI {
     }
     this.lastFeedKey = key;
     this.feedEl.innerHTML = feed
-      .map((f) => `<div class="k" data-t="${f.t}"><span class="${f.killerTeam === 0 ? 'blue' : 'red'}">${f.killer}</span><em>${f.weapon}${f.headshot ? ' <i class="hs">✛</i>' : ''}${f.wallbang ? ' <i class="wb">▤</i>' : ''}</em><span class="${f.victimTeam === 0 ? 'blue' : 'red'}">${f.victim}</span></div>`)
+      .map((f) => `<div class="k ${f.killer === this.meName || f.victim === this.meName ? 'mine' : ''}" data-t="${f.t}"><span class="${f.killerTeam === 0 ? 'blue' : 'red'}">${esc(f.killer)}</span>${this.feedWeapon(f.weapon)}${f.headshot ? icon('headshot', 'hs') : ''}${f.wallbang ? icon('wallbang') : ''}<span class="${f.victimTeam === 0 ? 'blue' : 'red'}">${esc(f.victim)}</span></div>`)
       .join('');
   }
 
+  // ---------------------------------------------------------------- death screen
   private deathKey = '';
-  showDeath(v: boolean, killer = '', weapon = '', t = 0) {
+  showDeath(v: boolean, killer = '', weapon = '', t = 0, killerTeam: 0 | 1 = 1) {
     this.deathEl.classList.toggle('hidden', !v);
     if (!v) {
       this.deathKey = '';
@@ -1139,7 +1521,11 @@ export class UI {
     const key = `${killer}|${weapon}|${Math.ceil(t)}|${this.activePreset}`;
     if (key === this.deathKey) return;
     this.deathKey = key;
-    const cards = this.presets.map((p, i) => `<div class="dlo ${i === this.activePreset ? 'on' : ''}"><b>${i + 1}</b><span>${p.name}</span><small>${WEAPONS[p.p]?.short ?? ''} · ${WEAPONS[p.s]?.short ?? ''}</small></div>`).join('');
-    setHTML(this.deathEl, `<div class="kb">ELIMINATED BY</div><div class="kn">${killer}</div><div class="kw">${weapon}</div><div class="rs">Redeploying in ${Math.ceil(t)}…</div><div class="dloadouts">${cards}</div><div class="dlhint">1–5: loadout for your next life</div>`);
+    const url = weapon ? this.weaponIcon?.(weapon) : null;
+    const cards = this.presets.map((p, i) => `<div class="dlo ${i === this.activePreset ? 'on' : ''}"><b>${i + 1}</b><span>${esc(p.name)}</span><small>${WEAPONS[p.p]?.short ?? ''} · ${WEAPONS[p.s]?.short ?? ''}</small></div>`).join('');
+    setHTML(this.deathEl, `<div class="killer paper-card">${emblem(killerTeam)}<div><div class="kb">FALT · ELIMINATED BY</div><div class="kn">${esc(killer)}</div><div class="kw">${esc(weapon)}</div></div>${url ? `<img alt="" src="${url}">` : ''}</div>
+      <div class="rs">REDEPLOYING IN ${Math.max(0, Math.ceil(t))} S</div><div class="dloadouts">${cards}</div><div class="dlhint">1–5 · LOADOUT FOR YOUR NEXT LIFE</div>`);
+    const em = this.deathEl.querySelector('.killer .emblem') as HTMLElement | null;
+    if (em) em.style.color = killerTeam === 0 ? 'var(--sea-2)' : 'var(--red)';
   }
 }

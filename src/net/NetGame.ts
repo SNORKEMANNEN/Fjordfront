@@ -1,5 +1,7 @@
 import * as THREE from 'three';
-import { Net, NetMsg, cleanCode, LobbyRegistry, RoomInfo } from './Net';
+import { Net, NetMsg, cleanCode, LobbyRegistry, RoomInfo, probeRooms, myRegion } from './Net';
+import { icon } from '../ui/Icons';
+import { chartThumb } from '../ui/Chart';
 import { Voice } from './Voice';
 import { Settings } from '../game/Settings';
 import { bindOf } from '../core/Input';
@@ -559,6 +561,7 @@ export class NetGame {
     }
     this.applyRoster(true);
     g.respawnPlayer();
+    g.ui.sfx('uiHorn', 1);
     this.sys(`Joined room <b>${esc(m.code)}</b> as <b>${esc(this.name)}</b>. Enter to chat, /help for commands.`);
     if (!g.input.locked) g.ui.notify('CONNECTED', 'CLICK THE SCREEN TO TAKE CONTROL');
   }
@@ -746,6 +749,17 @@ export class NetGame {
         if (s) {
           s.vc = !!m.on;
           this.broadcastRoster();
+        }
+        return;
+      }
+      case 'report': {
+        // a player reported another (kept on the host's screen and console; there is no server)
+        if (!this.isHost) return;
+        const by = this.roster.find((x) => x.slot === this.peerSlot.get(from));
+        const who = this.roster.find((x) => x.slot === m.slot);
+        if (by && who) {
+          console.warn('[report]', by.name, '→', who.name);
+          this.sys(`Report: <b>${esc(by.name)}</b> reported <b>${esc(who.name)}</b>. /kick ${esc(who.name)} removes them.`);
         }
         return;
       }
@@ -1366,6 +1380,7 @@ export class NetGame {
     if (!this.active) return this.sys('Ready-up is for multiplayer rooms.');
     if (this.g.match.phase !== 'ended') return this.sys('Ready-up opens when the match is over.');
     this.imReady = v;
+    if (v) this.g.ui.sfx('uiReady', 1);
     if (this.isClient) this.net.send({ t: 'ready', v });
     else {
       if (v) this.readySet.add(this.mySlot);
@@ -1384,6 +1399,7 @@ export class NetGame {
     this.updateStatus();
     if (n === humans.length && humans.length > 1 && this.readyT < 0) {
       this.readyT = 3;
+      this.g.ui.sfx('uiHorn', 1);
       this.sys('Everyone is ready: next match in 3 seconds.', true);
     }
   }
@@ -1462,7 +1478,7 @@ export class NetGame {
     this.reg.announce((): RoomInfo | null => {
       if (!this.isHost || !this.isPublic) return null;
       const g = this.g;
-      return { code: this.net.code, name: `${this.name}'s room`, players: this.roster.filter((s) => s.human).length, max: SLOTS, map: `${g.winter ? 'Winter' : 'Autumn'} · Domination` };
+      return { code: this.net.code, name: `${this.name}'s room`, players: this.roster.filter((s) => s.human).length, max: SLOTS, map: `${g.winter ? 'Winter' : 'Autumn'} · Domination`, region: myRegion() };
     });
   }
 
@@ -1856,7 +1872,53 @@ export class NetGame {
     this.statusEl.innerHTML = `${this.isHost ? 'HOST' : 'ONLINE'}${this.isPublic && this.isHost ? ' · PUBLIC' : ''} · ROOM <b>${this.net.code}</b> · ${humans} PLAYER${humans === 1 ? '' : 'S'} + ${bots} BOTS${rd}`;
   }
 
-  /** Main menu → MULTIPLAYER: name, quick play, room browser, host (public / private), join by code */
+  // ================================================================ scoreboard actions
+  /** mute / unmute a player from the scoreboard (chat + voice, this machine only) */
+  toggleMuteSlot(slot: number) {
+    const s = this.roster.find((x) => x.slot === slot);
+    if (!s) return;
+    if (this.muted.has(s.name)) this.muted.delete(s.name);
+    else this.muted.add(s.name);
+    this.sys(`${esc(s.name)} ${this.muted.has(s.name) ? 'muted (chat and voice)' : 'unmuted'}.`);
+  }
+  isMutedSlot(slot: number) {
+    const s = this.roster.find((x) => x.slot === slot);
+    return !!s && this.muted.has(s.name);
+  }
+  /** report a player to the host (there is no server: the host decides) */
+  report(slot: number) {
+    const s = this.roster.find((x) => x.slot === slot);
+    if (!s) return;
+    if (this.isClient) this.net.send({ t: 'report', slot });
+    else if (this.isHost) this.sys(`Noted. As the host you can remove <b>${esc(s.name)}</b> with /kick ${esc(s.name)}.`);
+    this.sys(`Reported <b>${esc(s.name)}</b> to the host.`);
+  }
+
+  // ================================================================ quick play
+  /** join the fullest public room with space, or open a public room if there is none */
+  async quickPlay(status: (t: string) => void = (t) => this.g.ui.notify('QUICK PLAY', t.toUpperCase())) {
+    status('Looking for a room…');
+    const rs = (await LobbyRegistry.list()).filter((r) => r.players < r.max).sort((a, b) => b.players - a.players);
+    for (const r of rs) {
+      try {
+        status(`Joining ${r.name}…`);
+        await this.join(r.code);
+        return;
+      } catch {
+        /* next */
+      }
+    }
+    this.isPublic = true;
+    localStorage.setItem('ff.public', '1');
+    status('No open rooms — opening one');
+    await this.host();
+    this.panel?.remove();
+    this.g.startMatch();
+  }
+
+  // ================================================================ the multiplayer screen
+  private roomThumb: HTMLCanvasElement | null = null;
+  /** Main menu → MULTIPLAYER: name, quick play, host (public / private), join by code, room cards */
   showPanel(prefill = '') {
     const g = this.g;
     this.panel?.remove();
@@ -1864,19 +1926,20 @@ export class NetGame {
     p.className = 'screen netpanel';
     p.innerHTML = `
       <div class="card">
-        <h2>MULTIPLAYER</h2>
-        <div class="sub">Play with friends. Bots fill every empty slot (12 v 12).</div>
-        <label>YOUR NAME<input class="nm" maxlength="16" spellcheck="false"></label>
+        <div class="eyebrow red">FLERSPILLER · MULTIPLAYER</div>
+        <h2>FINN ET LAG</h2>
+        <div class="sub">Play with friends — peer to peer, bots fill every empty slot (12 v 12).</div>
+        <label>DITT NAVN · YOUR NAME<input class="nm" maxlength="16" spellcheck="false"></label>
         <div class="row">
-          <div class="col"><h3>QUICK PLAY</h3><p>Join the fullest public room, or open one if there is none.</p><button class="primary" data-a="quick">QUICK PLAY</button></div>
-          <div class="col"><h3>HOST</h3><p>Start a room on this computer and send friends the code.</p>
-            <label class="pub"><input type="checkbox" class="public"> Public (listed in the room browser)</label>
+          <div class="col">${icon('quick')}<h3>QUICK PLAY</h3><p>Join the fullest public room, or open one if there is none.</p><button class="primary" data-a="quick">QUICK PLAY</button></div>
+          <div class="col">${icon('host')}<h3>HOST</h3><p>Start a room on this computer and send friends the code.</p>
+            <label class="pub"><input type="checkbox" class="public"> Public — listed in the room browser</label>
             <button class="primary" data-a="host">HOST GAME</button></div>
-          <div class="col"><h3>JOIN</h3><p>Type the code your friend got.</p><input class="code" maxlength="8" placeholder="CODE" spellcheck="false"><button class="primary" data-a="join">JOIN GAME</button></div>
+          <div class="col">${icon('multiplayer')}<h3>JOIN</h3><p>Type the code your friend got.</p><input class="code" maxlength="8" placeholder="CODE" spellcheck="false"><button class="primary" data-a="join">JOIN GAME</button></div>
         </div>
-        <div class="rooms"><div class="rh"><h3>PUBLIC ROOMS</h3><button data-a="refresh">REFRESH</button></div><div class="rlist"><div class="rempty">Looking for rooms…</div></div></div>
+        <div class="rooms"><div class="rh"><h3>OFFENTLIGE ROM · PUBLIC ROOMS</h3><button data-a="refresh">REFRESH</button></div><div class="rlist"><div class="rempty">Looking for rooms…</div></div></div>
         <div class="msg"></div>
-        <div class="foot"><span>Peer-to-peer: the host's game runs the match (if they leave, another player takes over). Enter = chat, U = team chat, /help = commands. Connection problems: Settings → Multiplayer.</span><button data-a="back">BACK</button></div>
+        <div class="foot"><span>The host's game runs the match — if they leave, another player takes over. Enter = chat · U = team chat · /help = commands · connection problems: Settings → Multiplayer.</span><button class="back" data-a="back">BACK</button></div>
       </div>`;
     g.ui.root.appendChild(p);
     this.panel = p;
@@ -1907,6 +1970,7 @@ export class NetGame {
         await this.host();
         p.remove();
         g.startMatch();
+        g.ui.sfx('uiHorn', 1);
         if (!g.input.locked) g.ui.notify('ROOM OPEN', 'CLICK THE SCREEN TO PLAY · /code FOR THE INVITE LINK');
       } catch (e) {
         busy(false, (e as Error).message);
@@ -1930,38 +1994,50 @@ export class NetGame {
         busy(false, (e as Error).message);
       }
     };
+    // room cards: chart thumbnail, name, players, region, measured ping
     let rooms: RoomInfo[] = [];
     const list = p.querySelector('.rlist') as HTMLDivElement;
     const refresh = async () => {
       list.innerHTML = '<div class="rempty">Looking for rooms…</div>';
       rooms = (await LobbyRegistry.list()).filter((r) => r.players < r.max).sort((a, b) => b.players - a.players);
       if (!p.isConnected) return;
-      list.innerHTML = rooms.length
-        ? rooms.map((r, i) => `<div class="room"><b>${esc(r.name)}</b><span>${esc(r.map)}</span><span>${r.players} player${r.players === 1 ? '' : 's'} + bots</span><button data-room="${i}">JOIN</button></div>`).join('')
-        : '<div class="rempty">No public rooms right now. Host one, or use QUICK PLAY.</div>';
-      list.querySelectorAll('[data-room]').forEach((b) => b.addEventListener('click', () => doJoin(rooms[+(b as HTMLElement).dataset.room!].code)));
+      if (!rooms.length) {
+        list.innerHTML = '<div class="rempty">No public rooms on the chart right now. Host one, or use QUICK PLAY.</div>';
+        return;
+      }
+      try {
+        this.roomThumb ??= chartThumb(g.terrain, 220, 124, [], { names: false, cover: true });
+      } catch {
+        this.roomThumb = null;
+      }
+      list.innerHTML = rooms.map((r, i) => `<div class="room" data-room="${i}"><canvas width="440" height="248"></canvas><span class="rtag">${esc(r.code)}</span>
+        <div class="rb"><b>${esc(r.name)}</b><span class="rp"><span class="ms" data-ms="${esc(r.code)}">… ms</span>${icon('signal')}</span><small>${esc(r.map)}</small><small>${r.players}/${r.max} players · ${esc(r.region ?? '—')}</small></div></div>`).join('');
+      list.querySelectorAll('.room').forEach((el) => {
+        const cv = el.querySelector('canvas') as HTMLCanvasElement;
+        if (this.roomThumb) cv.getContext('2d')!.drawImage(this.roomThumb, 0, 0, cv.width, cv.height);
+        el.addEventListener('click', () => doJoin(rooms[+(el as HTMLElement).dataset.room!].code));
+      });
+      const pings = await probeRooms(rooms.map((r) => r.code));
+      for (const [c, ms] of pings) {
+        const el = list.querySelector(`[data-ms="${CSS.escape(c)}"]`);
+        if (!el) continue;
+        el.textContent = ms === null ? 'no reply' : `${ms} ms`;
+        el.className = `ms ${ms === null ? 'bad' : ms < 80 ? 'good' : ms < 160 ? 'ok' : 'bad'}`;
+      }
     };
     p.querySelector('[data-a=back]')!.addEventListener('click', () => p.remove());
     p.querySelector('[data-a=host]')!.addEventListener('click', doHost);
     p.querySelector('[data-a=join]')!.addEventListener('click', () => doJoin());
     p.querySelector('[data-a=refresh]')!.addEventListener('click', refresh);
     p.querySelector('[data-a=quick]')!.addEventListener('click', async () => {
+      setName();
       busy(true, 'Looking for a room…');
-      const rs = (await LobbyRegistry.list()).filter((r) => r.players < r.max).sort((a, b) => b.players - a.players);
-      for (const r of rs) {
-        try {
-          busy(true, `Joining ${r.name}…`);
-          await doJoin(r.code);
-          if (this.isClient) return;
-        } catch {
-          /* next */
-        }
+      try {
+        await this.quickPlay((t) => (msg.textContent = t));
+        if (g.state === 'playing') p.remove();
+      } catch (e) {
+        busy(false, (e as Error).message);
       }
-      // nobody to join: open a public room
-      this.isPublic = true;
-      pub.checked = true;
-      localStorage.setItem('ff.public', '1');
-      await doHost();
     });
     code.addEventListener('keydown', (e) => {
       e.stopPropagation();

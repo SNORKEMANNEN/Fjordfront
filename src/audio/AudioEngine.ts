@@ -219,10 +219,58 @@ async function impact(surface: string): Promise<AudioBuffer> {
 }
 
 async function mech(kind: string): Promise<AudioBuffer> {
-  const LEN: Record<string, number> = { smokeHiss: 7, snapPulse: 1.6, servo: 0.9, zap: 0.8, trophyDeploy: 1.0, carFire: 3, debris: 1.2, bipod: 0.4, fireIgnite: 1.4 };
+  const LEN: Record<string, number> = { uiHorn: 2.6, uiReady: 1.1, uiConfirm: 0.5, smokeHiss: 7, snapPulse: 1.6, servo: 0.9, zap: 0.8, trophyDeploy: 1.0, carFire: 3, debris: 1.2, bipod: 0.4, fireIgnite: 1.4 };
   return render(LEN[kind] ?? 0.6, (ctx, out) => {
     const t = 0.002;
     switch (kind) {
+      // ---- Update 29: interface sounds (chart-room: soft paper ticks, brass, a ship's horn) ----
+      case 'uiHover':
+        // a short, soft tick: a pencil tapping the chart table
+        burst(ctx, out, t, { dur: 0.012, attack: 0.0005, decay: 0.008, gain: 0.22, type: 'bandpass', freq: 2400, q: 2.2 });
+        tone(ctx, out, t, 1900, 1750, 0.03, 0.05, 'sine', 0.025);
+        break;
+      case 'uiConfirm':
+        // brass "tock" and a rising two-note confirm
+        burst(ctx, out, t, { dur: 0.02, attack: 0.0005, decay: 0.014, gain: 0.35, type: 'bandpass', freq: 1500, q: 1.6 });
+        tone(ctx, out, t, 220, 150, 0.06, 0.25, 'sine', 0.06);
+        tone(ctx, out, t + 0.025, 784, 784, 0.16, 0.14, 'triangle', 0.18);
+        tone(ctx, out, t + 0.085, 1175, 1175, 0.22, 0.12, 'triangle', 0.26);
+        break;
+      case 'uiBack':
+        // the same voice, falling
+        burst(ctx, out, t, { dur: 0.016, attack: 0.0005, decay: 0.012, gain: 0.25, type: 'bandpass', freq: 1200, q: 1.6 });
+        tone(ctx, out, t + 0.01, 988, 988, 0.12, 0.1, 'triangle', 0.14);
+        tone(ctx, out, t + 0.06, 659, 659, 0.16, 0.1, 'triangle', 0.2);
+        break;
+      case 'uiReady':
+        // ship's bell: a struck bar with long inharmonic partials
+        for (const [r, a] of [[1, 1], [2.32, 0.5], [3.98, 0.32], [5.9, 0.18]] as const) tone(ctx, out, t, 880 * r, 880 * r * 0.999, 1.0 / Math.sqrt(r), 0.16 * a, 'sine', 0.9 / Math.sqrt(r));
+        burst(ctx, out, t, { dur: 0.01, decay: 0.008, gain: 0.25, type: 'highpass', freq: 3000 });
+        break;
+      case 'uiHorn': {
+        // match found: a low two-tone ship horn, swelling and fading over the water
+        for (const [f, g] of [[110, 0.26], [138.6, 0.2], [220, 0.12], [277, 0.08], [330, 0.05]] as const) {
+          const o = ctx.createOscillator();
+          o.type = 'sawtooth';
+          o.frequency.setValueAtTime(f * 0.985, t);
+          o.frequency.linearRampToValueAtTime(f, t + 0.25);
+          const lp = ctx.createBiquadFilter();
+          lp.type = 'lowpass';
+          lp.frequency.value = 900;
+          const gn = ctx.createGain();
+          gn.gain.setValueAtTime(0, t);
+          gn.gain.linearRampToValueAtTime(g, t + 0.3);
+          gn.gain.setValueAtTime(g, t + 1.5);
+          gn.gain.exponentialRampToValueAtTime(0.0001, t + 2.5);
+          o.connect(lp);
+          lp.connect(gn);
+          gn.connect(out);
+          o.start(t);
+          o.stop(t + 2.55);
+        }
+        burst(ctx, out, t, { dur: 2.3, attack: 0.3, decay: 1.8, gain: 0.05, type: 'bandpass', freq: 500, q: 0.7, color: 'pink' });
+        break;
+      }
       // ---- Update 20 equipment ----
       case 'beep':
         tone(ctx, out, t, 2750, 2750, 0.07, 0.32, 'sine', 0.06);
@@ -793,7 +841,7 @@ export class AudioEngine {
     // (weapon audio is recorded only: see the firearm library load below)
     for (const s of ['grass', 'dirt', 'gravel', 'concrete', 'wood', 'metal', 'water']) for (let v = 0; v < 4; v++) jobs.push([`step_${s}`, () => footstep(s, v)]);
     for (const s of ['concrete', 'metal', 'wood', 'glass', 'flesh', 'water', 'dirt']) for (let v = 0; v < 2; v++) jobs.push([`imp_${s}`, () => impact(s)]);
-    for (const k of ['click', 'cloth', 'adsIn', 'adsOut', 'lowAmmo', 'breathIn', 'breathOut', 'whiz', 'jump', 'land', 'mantle', 'tac', 'medal', 'flagWon', 'flagLost', 'capTick', 'streak', 'radio', 'uavPing', 'heartbeat', 'whistle', 'swish', 'pin', 'smokeHiss', 'stimHiss', 'beep', 'beepLow', 'armChirp', 'clack', 'stick', 'legs', 'claymoreClick', 'zap', 'servo', 'trophyDeploy', 'snapPulse', 'bipod', 'debris', 'fireIgnite', 'carFire'])
+    for (const k of ['uiHover', 'uiConfirm', 'uiBack', 'uiReady', 'uiHorn', 'click', 'cloth', 'adsIn', 'adsOut', 'lowAmmo', 'breathIn', 'breathOut', 'whiz', 'jump', 'land', 'mantle', 'tac', 'medal', 'flagWon', 'flagLost', 'capTick', 'streak', 'radio', 'uavPing', 'heartbeat', 'whistle', 'swish', 'pin', 'smokeHiss', 'stimHiss', 'beep', 'beepLow', 'armChirp', 'clack', 'stick', 'legs', 'claymoreClick', 'zap', 'servo', 'trophyDeploy', 'snapPulse', 'bipod', 'debris', 'fireIgnite', 'carFire'])
       jobs.push([k, () => mech(k)]);
     for (const k of ['wind', 'waves', 'rain', 'slide', 'heli', 'snowwind'] as const) jobs.push([`loop_${k}`, () => loopBuffer(k)]);
     for (let i = 0; i < 3; i++) jobs.push(['gull', () => bird('gull')]);

@@ -5,43 +5,130 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>FJORDFRONT</title>
     <meta name="description" content="A first-person shooter set on the Norwegian coast." />
-    <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' fill='%23ba0c2f'/%3E%3Crect x='9' width='6' height='32' fill='%23fff'/%3E%3Crect y='13' width='32' height='6' fill='%23fff'/%3E%3Crect x='10.5' width='3' height='32' fill='%2300205b'/%3E%3Crect y='14.5' width='32' height='3' fill='%2300205b'/%3E%3C/svg%3E" />
+    <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' fill='%23EDE6D6'/%3E%3Cpath d='M4 24h24l-3.5 5h-17z' fill='%2314213D'/%3E%3Cpath d='M16 4v18M10 10h12' stroke='%2314213D' stroke-width='2.5' fill='none'/%3E%3Ccircle cx='16' cy='5' r='2.5' fill='%23D7262E'/%3E%3C/svg%3E" />
     <!-- the big downloads start right away, in parallel with the game code -->
     <link rel="preload" href="assets/models/fps_arms.glb" as="fetch" crossorigin="anonymous" />
     <link rel="preload" href="assets/textures/waternormals.jpg" as="image" crossorigin="anonymous" />
+    <link rel="preload" href="assets/fonts/big-shoulders-display-latin-800-normal.woff2" as="font" type="font/woff2" crossorigin="anonymous" />
+    <link rel="preload" href="assets/fonts/ibm-plex-sans-condensed-latin-600-normal.woff2" as="font" type="font/woff2" crossorigin="anonymous" />
+    <link rel="preload" href="assets/fonts/ibm-plex-mono-latin-400-normal.woff2" as="font" type="font/woff2" crossorigin="anonymous" />
     <style>
-      /* instant loading screen: painted with the first byte of HTML, before any script runs; the
-         game adopts this element and drives its progress bar */
-      html, body { margin: 0; height: 100%; background: #0b0e10; overflow: hidden; }
-      #boot { position: fixed; inset: 0; z-index: 50; display: flex; flex-direction: column; align-items: center; justify-content: center;
-        background: radial-gradient(ellipse at 30% 40%, #1d2a30 0%, #0b0e10 70%); color: #e9ece6;
-        font-family: 'Barlow Condensed', 'Arial Narrow', 'Roboto Condensed', sans-serif; transition: opacity .6s; pointer-events: auto; }
+      /* Fonts: self-hosted, SIL Open Font License (see assets/fonts/OFL-*.txt).
+         Big Shoulders Display · IBM Plex Sans / Sans Condensed / Mono / Serif Italic */
+      @font-face { font-family: 'Big Shoulders Display'; font-weight: 500; font-display: swap; src: url(assets/fonts/big-shoulders-display-latin-500-normal.woff2) format('woff2'); }
+      @font-face { font-family: 'Big Shoulders Display'; font-weight: 700; font-display: swap; src: url(assets/fonts/big-shoulders-display-latin-700-normal.woff2) format('woff2'); }
+      @font-face { font-family: 'Big Shoulders Display'; font-weight: 800 900; font-display: swap; src: url(assets/fonts/big-shoulders-display-latin-800-normal.woff2) format('woff2'); }
+      @font-face { font-family: 'IBM Plex Sans'; font-weight: 400; font-display: swap; src: url(assets/fonts/ibm-plex-sans-latin-400-normal.woff2) format('woff2'); }
+      @font-face { font-family: 'IBM Plex Sans'; font-weight: 500; font-display: swap; src: url(assets/fonts/ibm-plex-sans-latin-500-normal.woff2) format('woff2'); }
+      @font-face { font-family: 'IBM Plex Sans'; font-weight: 600 700; font-display: swap; src: url(assets/fonts/ibm-plex-sans-latin-600-normal.woff2) format('woff2'); }
+      @font-face { font-family: 'IBM Plex Sans Condensed'; font-weight: 400 500; font-display: swap; src: url(assets/fonts/ibm-plex-sans-condensed-latin-500-normal.woff2) format('woff2'); }
+      @font-face { font-family: 'IBM Plex Sans Condensed'; font-weight: 600; font-display: swap; src: url(assets/fonts/ibm-plex-sans-condensed-latin-600-normal.woff2) format('woff2'); }
+      @font-face { font-family: 'IBM Plex Sans Condensed'; font-weight: 700 900; font-display: swap; src: url(assets/fonts/ibm-plex-sans-condensed-latin-700-normal.woff2) format('woff2'); }
+      @font-face { font-family: 'IBM Plex Mono'; font-weight: 300 400; font-display: swap; src: url(assets/fonts/ibm-plex-mono-latin-400-normal.woff2) format('woff2'); }
+      @font-face { font-family: 'IBM Plex Mono'; font-weight: 500; font-display: swap; src: url(assets/fonts/ibm-plex-mono-latin-500-normal.woff2) format('woff2'); }
+      @font-face { font-family: 'IBM Plex Mono'; font-weight: 600 700; font-display: swap; src: url(assets/fonts/ibm-plex-mono-latin-600-normal.woff2) format('woff2'); }
+      @font-face { font-family: 'IBM Plex Serif'; font-style: italic; font-weight: 400; font-display: swap; src: url(assets/fonts/ibm-plex-serif-latin-400-italic.woff2) format('woff2'); }
+      @font-face { font-family: 'IBM Plex Serif'; font-style: italic; font-weight: 500 700; font-display: swap; src: url(assets/fonts/ibm-plex-serif-latin-500-italic.woff2) format('woff2'); }
+
+      /* instant loading screen (a chart of the fjord), painted with the first byte of HTML; the
+         game adopts this element and sails the boat along the course as it loads */
+      html, body { margin: 0; height: 100%; background: #EDE6D6; overflow: hidden; }
+      #boot { position: fixed; inset: 0; z-index: 50; display: flex; flex-direction: column; justify-content: space-between; padding: 5vh 6vw 4.5vh;
+        color: #14213D; font-family: 'IBM Plex Sans Condensed', 'Arial Narrow', sans-serif; transition: opacity .6s; pointer-events: auto; box-sizing: border-box;
+        background: radial-gradient(120% 90% at 50% 45%, #F3EDE0 0%, #EDE6D6 55%, #E2D7BF 100%); }
+      #boot::before { content: ''; position: absolute; inset: 14px; border: 1.5px solid #14213D; pointer-events: none; }
+      #boot::after { content: ''; position: absolute; inset: 19px; border: 1px solid rgba(20,33,61,.25); pointer-events: none; }
       #boot.fade { opacity: 0; }
-      #boot .brand { display: flex; align-items: center; gap: 16px; }
-      #boot h1 { margin: 0; font-weight: 700; font-size: 64px; letter-spacing: .14em; line-height: 1; }
-      #boot .flag { width: 44px; height: 32px; position: relative; box-shadow: 0 2px 12px rgba(0,0,0,.4); background:
-        linear-gradient(90deg, transparent 12px, #fff 12px, #fff 20px, transparent 20px), linear-gradient(180deg, transparent 12px, #fff 12px, #fff 20px, transparent 20px), #ba0c2f; }
-      #boot .flag::after { content: ''; position: absolute; inset: 0; background:
-        linear-gradient(90deg, transparent 14px, #00205b 14px, #00205b 18px, transparent 18px), linear-gradient(180deg, transparent 14px, #00205b 14px, #00205b 18px, transparent 18px); }
-      #boot .sub { color: #98a29b; letter-spacing: .32em; font-size: 15px; margin-top: 10px; }
-      #boot .bar { position: relative; width: min(420px, 70vw); height: 3px; background: rgba(255,255,255,.08); margin-top: 48px; overflow: hidden; }
-      #boot .fill { height: 100%; width: 2%; background: #e8c547; transition: width .35s ease-out; box-shadow: 0 0 10px rgba(232,197,71,.6); }
-      #boot .bar::after { content: ''; position: absolute; inset: 0; width: 30%; background: linear-gradient(90deg, transparent, rgba(255,255,255,.35), transparent); animation: bootsheen 1.4s linear infinite; }
-      @keyframes bootsheen { from { transform: translateX(-100%); } to { transform: translateX(400%); } }
-      #boot .row { display: flex; justify-content: space-between; width: min(420px, 70vw); margin-top: 14px; color: #98a29b; letter-spacing: .2em; font-size: 14px; text-transform: uppercase; }
-      #boot .pct { font-variant-numeric: tabular-nums; color: #e9ece6; }
-      #boot .tip { position: absolute; bottom: 40px; padding: 0 24px; text-align: center; color: #98a29b; font-family: Inter, system-ui, sans-serif; font-size: 13px; transition: opacity .4s; }
+      #boot .head, #boot .foot { align-self: stretch; }
+      #boot .head { display: flex; justify-content: space-between; align-items: flex-start; position: relative; z-index: 1; }
+      #boot h1 { margin: 0; font-family: 'Big Shoulders Display', 'Arial Narrow', sans-serif; font-weight: 800; font-size: clamp(44px, 7vw, 92px); letter-spacing: .06em; line-height: .88; }
+      #boot .sub { margin-top: 10px; font-family: 'IBM Plex Mono', ui-monospace, monospace; font-size: 12px; letter-spacing: .2em; color: #2B3A55; display: flex; gap: 10px; align-items: center; }
+      #boot .sub i { width: 24px; height: 1px; background: #D7262E; display: inline-block; }
+      #boot .cart { text-align: right; font-family: 'IBM Plex Mono', ui-monospace, monospace; font-size: 11px; line-height: 1.6; color: #5B6579; }
+      #boot .cart b { display: block; font-family: 'IBM Plex Sans Condensed', sans-serif; font-weight: 600; letter-spacing: .26em; color: #14213D; font-size: 11px; }
+      #boot .chartwrap { position: relative; z-index: 1; width: 100%; align-self: stretch; }
+      #boot svg.fjord { position: relative; width: 100%; height: auto; max-height: 46vh; display: block; will-change: transform; }
+      #boot svg.prog { position: absolute; inset: 0; width: 100%; height: 100%; }
+      #boot .foot { position: relative; z-index: 1; display: grid; grid-template-columns: 1fr auto; gap: 8px 30px; align-items: end; }
+      #boot .tip { max-width: 720px; min-height: 46px; transition: opacity .4s; }
+      #boot .tip small { display: block; font-weight: 600; font-size: 10.5px; letter-spacing: .3em; color: #D7262E; }
+      #boot .tip span { display: block; font-family: 'IBM Plex Serif', Georgia, serif; font-style: italic; font-size: 15px; color: #2B3A55; margin-top: 4px; line-height: 1.4; }
+      #boot .row { text-align: right; font-family: 'IBM Plex Mono', ui-monospace, monospace; font-size: 12px; color: #5B6579; letter-spacing: .08em; }
+      #boot .pct { display: block; font-family: 'Big Shoulders Display', sans-serif; font-weight: 800; font-size: 46px; color: #14213D; line-height: 1; font-variant-numeric: tabular-nums; }
+      #boot .bstatus { display: block; margin-top: 4px; text-transform: uppercase; }
     </style>
   </head>
   <body>
     <canvas id="game"></canvas>
     <div id="ui"></div>
     <div id="boot">
-      <div class="brand"><div class="flag"></div><h1>FJORDFRONT</h1></div>
-      <div class="sub">KVITVIKA · LOFOTEN</div>
-      <div class="bar"><div class="fill"></div></div>
-      <div class="row"><span class="status">Loading game files</span><span class="pct">0%</span></div>
-      <div class="tip">TIP — Double-tap SHIFT for tactical sprint. Crouch while sprinting to slide.</div>
+      <div class="head">
+        <div>
+          <h1>FJORDFRONT</h1>
+          <div class="sub"><i></i>SJØKART · KVITVIKA · NORDLAND</div>
+        </div>
+        <div class="cart"><b>KART NR. 29</b>68°07′N · 13°34′Ø<br>Dybder i meter · Målestokk 1:5 000</div>
+      </div>
+      <div class="chartwrap">
+      <svg class="fjord" viewBox="0 0 1000 300" preserveAspectRatio="xMidYMid meet" xmlns="http://www.w3.org/2000/svg" fill="none" stroke-linecap="round" stroke-linejoin="round">
+        <defs>
+          <pattern id="hatch" width="7" height="7" patternUnits="userSpaceOnUse" patternTransform="rotate(35)"><path d="M0 0v7" stroke="#845C34" stroke-opacity=".18" stroke-width="1"/></pattern>
+        </defs>
+        <!-- sea -->
+        <rect x="0" y="40" width="1000" height="220" fill="#C9DCE8" opacity=".55"/>
+        <path d="M0 96C120 120 210 70 330 92s210 64 330 40 220-40 340-18v126C880 220 780 260 660 236s-200-60-330-40S110 230 0 210z" fill="#B2D0E4" opacity=".55"/>
+        <path d="M0 122c130 18 230-24 340-2s200 52 330 32 220-30 330-12" stroke="#5C8CB6" stroke-width="1" stroke-dasharray="5 4"/>
+        <path d="M0 188c130 6 230 30 340 10s200-46 330-28 220 26 330 12" stroke="#5C8CB6" stroke-width="1" stroke-dasharray="5 4"/>
+        <!-- north shore -->
+        <path d="M0 0h1000v58c-60 10-110-4-160 6-70 14-90 40-160 34-60-6-80-34-150-30-80 4-110 44-190 40-70-3-100-36-170-30C110 82 60 70 0 74z" fill="#E4DAC4"/>
+        <path d="M0 0h1000v58c-60 10-110-4-160 6-70 14-90 40-160 34-60-6-80-34-150-30-80 4-110 44-190 40-70-3-100-36-170-30C110 82 60 70 0 74z" fill="url(#hatch)"/>
+        <path d="M0 74c60-4 110 8 170 4 70-6 100 27 170 30 80 4 110-36 190-40 70-4 90 24 150 30 70 6 90-20 160-34 50-10 100 4 160-6" stroke="#14213D" stroke-width="2"/>
+        <path d="M60 40c60-10 120 20 190 6s120-30 190-10M520 30c60 6 110 26 170 10s110-20 170-6" stroke="#845C34" stroke-opacity=".45" stroke-width="1"/>
+        <!-- south shore -->
+        <path d="M0 300h1000v-48c-70-8-120 10-180 0-70-12-100-40-170-36-80 4-90 40-170 44-70 4-110-30-180-26-70 4-110 30-180 26-50-3-80-10-120-8z" fill="#E4DAC4"/>
+        <path d="M0 300h1000v-48c-70-8-120 10-180 0-70-12-100-40-170-36-80 4-90 40-170 44-70 4-110-30-180-26-70 4-110 30-180 26-50-3-80-10-120-8z" fill="url(#hatch)"/>
+        <path d="M0 252c40-2 70 5 120 8 70 4 110-22 180-26 70-4 110 30 180 26 80-4 90-40 170-44 70-4 100 24 170 36 60 10 110-8 180 0" stroke="#14213D" stroke-width="2"/>
+        <path d="M120 285c80-12 140 6 210-4s120-16 190 0M600 280c70-10 120 4 190-6" stroke="#845C34" stroke-opacity=".45" stroke-width="1"/>
+        <!-- buildings: harbour (left), fort (right) -->
+        <g fill="#14213D"><rect x="58" y="230" width="9" height="7"/><rect x="72" y="236" width="12" height="7"/><rect x="88" y="230" width="7" height="9"/><rect x="104" y="238" width="10" height="6"/></g>
+        <g fill="#14213D"><rect x="900" y="40" width="14" height="10"/><rect x="920" y="34" width="9" height="9"/><rect x="884" y="48" width="8" height="8"/></g>
+        <path d="M940 30v-16l12 4-12 4" stroke="#D7262E" stroke-width="2"/>
+        <!-- depth soundings -->
+        <g fill="#2B3A55" fill-opacity=".72" font-family="'IBM Plex Serif', Georgia, serif" font-style="italic" font-size="13" text-anchor="middle">
+          <text x="210" y="150">8</text><text x="300" y="178">12</text><text x="390" y="134">17</text><text x="470" y="186">21</text><text x="560" y="140">24</text>
+          <text x="640" y="190">19</text><text x="720" y="128">15</text><text x="800" y="170">11</text><text x="880" y="140">6</text><text x="150" y="196">5</text>
+        </g>
+        <!-- names -->
+        <text x="500" y="160" font-family="'IBM Plex Serif', Georgia, serif" font-style="italic" font-size="22" letter-spacing="6" fill="#3E7CB1" text-anchor="middle">Kvitvikfjorden</text>
+        <text x="86" y="276" font-family="'IBM Plex Sans Condensed', sans-serif" font-weight="600" font-size="12" letter-spacing="3" fill="#14213D" text-anchor="middle">HAVNA</text>
+        <text x="884" y="26" font-family="'IBM Plex Sans Condensed', sans-serif" font-weight="600" font-size="12" letter-spacing="3" fill="#14213D" text-anchor="middle">KYSTFORTET</text>
+        <!-- compass rose -->
+        <g transform="translate(940 214)" stroke="#2B3A55" stroke-width="1">
+          <circle r="26"/><circle r="22"/>
+          <path d="M0-22 4-4 0 0-4-4z" fill="#D7262E" stroke="none"/><path d="M0 22 4 4 0 0-4 4z" fill="#2B3A55" stroke="none"/>
+          <path d="M-22 0-4-4 0 0-4 4zM22 0 4-4 0 0 4 4z" fill="#EDE6D6"/>
+          <text y="-30" font-family="'Big Shoulders Display', sans-serif" font-weight="800" font-size="12" fill="#14213D" stroke="none" text-anchor="middle">N</text>
+        </g>
+      </svg>
+      <!-- progress overlay: only the course line and the boat repaint while loading -->
+      <svg class="prog" viewBox="0 0 1000 300" preserveAspectRatio="xMidYMid meet" xmlns="http://www.w3.org/2000/svg" fill="none" stroke-linecap="round" stroke-linejoin="round">
+        <!-- the course (progress) and the boat -->
+        <path id="course" d="M100 222C190 214 230 168 320 160S470 196 560 178 700 118 780 112 870 82 900 66" stroke="#14213D" stroke-width="1.6" stroke-dasharray="2 7"/>
+        <path class="done" d="M100 222C190 214 230 168 320 160S470 196 560 178 700 118 780 112 870 82 900 66" stroke="#D7262E" stroke-width="2.6" stroke-dasharray="0 2000"/>
+        <circle cx="100" cy="222" r="4.5" fill="#EDE6D6" stroke="#14213D" stroke-width="1.6"/>
+        <circle cx="900" cy="66" r="5" fill="#EDE6D6" stroke="#D7262E" stroke-width="2"/>
+        <g class="boat" transform="translate(100 222)"><g>
+          <path d="M-16 0h30l-6 7h-19z" fill="#14213D"/>
+          <path d="M-8 0v-8h11l3 8" fill="#F6F1E6" stroke="#14213D" stroke-width="1.5"/>
+          <path d="M-3-8v-7M-3-15h6" stroke="#14213D" stroke-width="1.5"/>
+          <path d="M-22 9c4-2 8-2 12 0" stroke="#3E7CB1" stroke-width="1.2"/>
+        </g></g>
+      </svg>
+      </div>
+      <div class="foot">
+        <div class="tip"><small>FRA KARTET · FROM THE CHART</small><span>Kvitvika's harbour freezes over for only a few days each winter — the Gulf Stream keeps the fjord open.</span></div>
+        <div class="row"><span class="pct">0%</span><span class="bstatus">Loading game files</span></div>
+      </div>
     </div>
     <script type="module" src="/src/main.ts"></script>
   </body>
