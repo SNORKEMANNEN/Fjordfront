@@ -7,7 +7,7 @@ const { chromium } = require('playwright');
   const p = await b.newPage({ viewport: { width: 960, height: 540 } });
   p.on('pageerror', (e) => console.log('[pageerror] ' + e.message));
   p.on('console', (m) => { if (m.type() === 'error') console.log('[err] ' + m.text()); });
-  await p.goto('http://localhost:5173/?test&weather=clear&time=' + (process.env.T || 'day'), { timeout: 180000 });
+  await p.goto('http://127.0.0.1:5173/?test&weather=clear&time=' + (process.env.T || 'day'), { timeout: 180000 });
   await p.waitForFunction(() => window.__ready || document.querySelector('.fatal'), null, { timeout: 300000, polling: 500 });
   const url = await p.evaluate(async (spec) => {
     const g = window.game;

@@ -290,6 +290,40 @@ URL options: `?quality=low|medium|high|ultra`, `?weather=clear|overcast|rain|sno
 - **Rifle:** support hand moved so it no longer shows through the optic window.
 - **Pistol:** hold reworked.
 
+## Update 37: Real optics, magazine-specific reloads, further iron sights
+
+### Optics replace the iron sights
+- **Removable iron sights.** Every gun with a rail now builds its iron sights (front and rear) as a separate part:
+  - K416: the folded front sight;
+  - MP7: rear leaf and front post;
+  - KS-17: protected sights;
+  - HVAL-47: rear leaf, notch block and front post;
+  - Stille-9: diopter drum and hooded front;
+  - AS-20: carry-handle rear and front tower;
+  - pump shotgun: ghost ring.
+- **Fitting an optic takes the irons off the gun**, so nothing sticks up in the sight picture.
+- **Optics sit on the gun's real rail** (measured per gun). Each has a clamp with jaws and a cross-bolt around the rail. The aim point moves onto the optic's own axis.
+
+### The optics, redesigned
+New, clean models inspired by modern-warfare shooters (and your reference images): thin frames, large clear windows, small bright reticles and simple housings.
+- **Vind Mini Reflex:** a low, soft housing with a thin arched hood at the front, a brightness knob and two flush buttons. Fine dot.
+- **Fjord Round Dot:** a compact body with a thin, perfectly round ring hood on a short neck. Dot inside a fine circle. This is now the K416's standard optic.
+- **Nordlys Holographic:** a long, low body and a square window with rounded top corners in a thin frame, with two white index marks on the rear deck. Ring-and-dot reticle.
+- **Fjell 3× Prism:** a cleaner squared prism housing with an objective bell and an eye guard. Chevron reticle.
+
+All reticles are collimated (they stay on target as your head moves). Eye relief is set per optic so the window fills about a quarter of the view.
+
+### Reloads that depend on the magazine
+The authored reload clips now adapt to the fitted magazine. Hands, magazine handling and timing all change:
+- **Extended mag:** the hand holds the longer mag lower, pulls it further out, and lines the fresh one up further below the well. The gun rolls a little more.
+- **Fast mag:** a **speed reload**. The hand pinches the pull tab under the mag, rips it straight out and flings it away (the gun lifts with the yank). A fresh mag comes from the pouch and goes home with one push and a tap. No retention.
+- **Drum:** heavy. The palm cups the drum from below. The release lets the weight drop out of the gun, and the drum is rocked forward and out, then swung down to the pouch. The fresh drum is hooked on its front lip and rocked home with a short wiggle before it locks (a hard camera beat). Then the hand pulls away and **slaps it up** to make sure.
+- **Standard mags** keep each gun's own authored reload.
+- **Timing:** reload speed follows the magazine's stats (fast mag −24%, extended +12%, drum +38%). The tactical and empty versions are both adapted.
+
+### Iron sights further from the eye
+Aiming down iron sights now holds the gun further out on every rifle, SMG, shotgun and LMG. You see more of the front sight against the target and less receiver. Pistols move out slightly. The hip-fire pose is unchanged, because it's taken from each gun's authored aim point and not from the optic.
+
 ## Update 36: Gunsmith and a new loadout screen
 
 ### Gunsmith
@@ -303,10 +337,7 @@ Every gun now has up to **five attachment slots**: optic, muzzle, underbarrel, m
 | **Magazine** | Extended, Fast Mag, Drum, Extended Tube (pump shotgun) | More rounds against slower aiming and reloading, or quicker reloads with fewer rounds. |
 | **Stock** | Lightweight, Tactical | Move and aim faster but kick harder, or steadier shots with slower handling. |
 
-- **Optics move the aim point onto the optic.** Each optic has a real collimated reticle that stays on target as you move:
-  - the reflex and red dot show a dot;
-  - the holographic shows a ring and dot;
-  - the 3× shows a chevron with a stadia line.
+- **Optics move the aim point onto the optic.** Each optic has a real collimated reticle that stays on target as you move (see Update 37 for the redesigned optics).
 - **Guns without a rail get a riser mount** (HVAL-47, Stille-9, pump shotgun).
 - **Locked slots say why:** integrated scopes on the sniper and DMR, the cover optic on the LMG, iron sights only on the KR-98k, the integral suppressor on the Stille-9.
 - **Builds are saved per loadout** for both the primary and the secondary.

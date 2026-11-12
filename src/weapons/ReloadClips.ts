@@ -183,9 +183,14 @@ export class ReloadClip {
 // ---------------------------------------------------------------- per-weapon authoring
 export type ReloadKind = 'rifle' | 'pdw' | 'pistol' | 'sniper' | 'dmr' | 'boxsg' | 'scar' | 'ump';
 
+/** the fitted magazine (gunsmith): its type, how much longer it is, its base and drum (mag space) */
+export interface MagStyle { type: 'ext' | 'fast' | 'drum'; len: number; base: THREE.Vector3; drum?: { c: THREE.Vector3; r: number } }
+
 export interface ClipContext {
   kind: ReloadKind;
   empty: boolean;
+  /** non-standard magazine: the clip adapts its grips, travel, beats and handling */
+  mag?: MagStyle;
   /** magazine pose in the gun (weapon space) */
   magHome: Pose;
   /** support-hand wrist pose on the weapon (weapon space) */
@@ -289,7 +294,36 @@ export const SPECS: Record<ReloadKind, Spec> = {
 
 /** Build the clip for one weapon kind (tactical or empty). Times are normalised 0..1. */
 export function buildReloadClip(c: ClipContext): ReloadClip {
-  const s = SPECS[c.kind];
+  const s0 = SPECS[c.kind];
+  // a per-clip copy of the spec, adapted to the fitted magazine
+  const s: Spec = {
+    ...s0,
+    magGrip: { ...s0.magGrip, a: s0.magGrip.a.clone() },
+    out: s0.out.clone(),
+    pouch: s0.pouch.clone(),
+    gunTilt: { p: s0.gunTilt.p.clone(), r: s0.gunTilt.r.clone() },
+  };
+  const style = c.mag?.type ?? 'std';
+  let approach = 0.09; // how far below the well the fresh mag lines up
+  if (style === 'ext' && c.mag) {
+    // longer mag: held lower, pulled further, lined up further down, a touch more roll
+    s.magGrip.a.y *= c.mag.len;
+    s.pull *= 1.32;
+    s.pouch.y -= 0.03;
+    s.gunTilt.r.multiplyScalar(1.08);
+    approach = 0.125;
+  } else if (style === 'drum' && c.mag?.drum) {
+    // drum: palm cupped under the drum, fingers round its front; a heavy, rocking insert
+    s.magGrip = { a: c.mag.drum.c.clone(), r: c.mag.drum.r, fingers: V(0.3, 0.05, -0.95), palm: V(0.4, 1, 0) };
+    s.hook = Math.min(s.hook, 0) * 0.7 - 0.16;
+    s.pull *= 0.95;
+    s.pouch.add(V(-0.02, -0.07, 0.03));
+    s.gunTilt.r.multiplyScalar(1.22);
+    s.gunTilt.p.add(V(0.0, 0.02, 0.02));
+    approach = 0.12;
+  } else if (style === 'fast') {
+    approach = 0.075;
+  }
   const clip = new ReloadClip(c.magHome);
   const home = c.magHome;
   const gq = handFrame(s.magGrip.fingers, s.magGrip.palm);
@@ -314,14 +348,25 @@ export function buildReloadClip(c: ClipContext): ReloadClip {
   const ev = (t: number, n: string) => clip.events.push([t, n]);
 
   // carried old magazine: tucked under the fresh one, pinched by the little fingers, canted back
-  const carry: Pose = mul(K, T(-0.004, -(c.kind === 'pdw' ? 0.186 : 0.212), 0.018, 0.42, 0, 0.05));
+  const carry: Pose = mul(K, T(-0.004, -(c.kind === 'pdw' ? 0.186 : 0.212) * (c.mag?.len ?? 1), 0.018, 0.42, 0, 0.05));
 
   const rifleLike = c.kind === 'rifle' || c.kind === 'pdw';
   const hook = s.hook;
   // insertion: approach under the well, (hook the front lip,) rock / push home
   const insert = (t0: number, t1: number) => {
     const dt = t1 - t0;
-    key(t0, handFor(magOut(0.09, T(-0.012, 0, 0.006, hook * 1.3))));
+    key(t0, handFor(magOut(approach, T(-0.012, 0, 0.006, hook * 1.3))));
+    if (style === 'drum') {
+      // drum: catch the front lip, rock the heavy drum back, a short wiggle before it locks
+      key(t0 + dt * 0.45, handFor(magOut(0.02, T(0, 0, -0.006, hook))));
+      key(t0 + dt * 0.68, handFor(magOut(0.008, T(0.002, 0, -0.002, hook * 0.55))));
+      key(t0 + dt * 0.82, handFor(magOut(0.006, T(-0.002, 0, 0, hook * 0.25))));
+      key(t1, handFor(home), true);
+      ev(t0 + dt * 0.45, 'touch');
+      ev(t1, 'seat');
+      ev(t1, 'camSeatHard');
+      return;
+    }
     if (hook) {
       key(t0 + dt * 0.55, handFor(magOut(0.014, T(0, 0, -0.004, hook))));
       key(t0 + dt * 0.78, handFor(magOut(0.004, T(0, 0, 0, hook * 0.4))));
@@ -331,7 +376,87 @@ export function buildReloadClip(c: ClipContext): ReloadClip {
     ev(t1, 'seat');
   };
 
-  if (!c.empty && rifleLike) {
+  const boxFed = rifleLike || c.kind === 'scar' || c.kind === 'ump' || c.kind === 'dmr' || c.kind === 'boxsg';
+  if (!c.empty && style === 'fast' && boxFed && c.mag) {
+    // ---------------- fast mag: a speed reload. Pinch the pull tab, rip the mag straight out and
+    // fling it, fresh one from the pouch, drive it home with one push and a tap. No retention.
+    const tabQ = handFrame(V(0.15, -0.25, -0.95), V(0.25, 1, 0));
+    const tabA = c.mag.base.clone().add(V(0, -0.011, 0));
+    const Gt: Pose = { p: c.wristFor(tabA, tabQ, 0.002, false), q: tabQ };
+    const Kt = inv(Gt);
+    const tabFor = (m: Pose) => mul(m, Gt);
+    gkey(0, g(0));
+    gkey(0.08, g(1));
+    gkey(0.15, g(1.06, V(0, 0.012, 0), V(0.06, 0, -0.07))); // the yank lifts the gun
+    gkey(0.22, g(1.02, V(0, -0.004, 0), V(-0.02, 0, 0.03)));
+    gkey(0.34, g(0.9));
+    gkey(0.46, g(1.05, V(0, 0.006, 0), V(0.03, 0, -0.04)));
+    gkey(0.54, g(1, V(0, -0.006, 0.004), V(-0.04, 0, 0.03)));
+    gkey(0.6, g(1, V(0, 0.005, 0), V(0.02, 0, -0.01)));
+    gkey(0.84, g(0.12, V(0, -0.002, 0), V(-0.01, 0, 0.005)));
+    gkey(1, g(0));
+    key(0, S);
+    key(0.07, tabFor(magOut(0.03, T(-0.01, 0, 0.01))));
+    key(0.115, tabFor(home), true);
+    ev(0.12, 'release');
+    key(0.165, tabFor(magOut(s.pull * 1.15, T(-0.02, 0, 0.02, 0.18))));
+    ev(0.17, 'camDrop');
+    // the flick: the hand opens and throws it down and away
+    key(0.2, tabFor(magOut(s.pull * 1.6, T(-0.06, 0, 0.05, 0.6))));
+    ev(0.2, 'drop');
+    key(0.27, pouch(0.04, 0.12, -0.04));
+    key(0.31, pouch(), true);
+    ev(0.3, 'pouch');
+    key(0.38, handFor(magOut(0.15, T(-0.04, 0, 0.02, hook * 1.4))));
+    insert(0.42, 0.54);
+    ev(0.54, 'camSeat');
+    key(0.58, handFor(magOut(-0.004)), true);
+    ev(0.58, 'tap');
+    ev(0.58, 'camTap');
+    key(0.68, below(-0.03, -0.06, 0.03));
+    key(0.84, S, true);
+    key(1, S);
+    clip.oldMag = [{ t: 0, mode: 'gun' }, { t: 0.115, mode: 'hand', k: Kt }, { t: 0.205, mode: 'hidden' }];
+    clip.newMag = [{ t: 0, mode: 'hidden' }, { t: 0.32, mode: 'hand', k: K }, { t: 0.54, mode: 'gun' }];
+    fk = [[0, 'support'], [0.06, 'open'], [0.11, 'pinch'], [0.19, 'pinch'], [0.215, 'open'], [0.31, 'hold'], [0.54, 'hold'], [0.6, 'open'], [0.84, 'support'], [1, 'support']];
+  } else if (!c.empty && style === 'drum' && boxFed) {
+    // ---------------- drum: heavy. Palm under the drum, thumb the release, rock it forward and
+    // out, swing it down to the pouch; bring the fresh drum up, hook, rock home, then a firm
+    // upward palm slap to make sure it's locked.
+    gkey(0, g(0));
+    gkey(0.1, g(1));
+    gkey(0.16, g(1, V(0, 0.004, 0), V(0.03, 0, -0.03)));
+    gkey(0.26, g(1.05, V(0, 0.014, 0.004), V(0.07, 0, 0.03))); // the weight leaves the gun
+    gkey(0.4, g(0.88));
+    gkey(0.58, g(1.02));
+    gkey(0.66, g(1.08, V(0, -0.01, 0.004), V(-0.05, 0, 0.04))); // the drum goes home: the gun dips
+    gkey(0.74, g(1.04, V(0, 0.012, 0), V(0.06, 0, -0.03))); // slap drives it up
+    gkey(0.8, g(0.95));
+    gkey(0.93, g(0.18));
+    gkey(1, g(0));
+    key(0, S);
+    key(0.08, handFor(magOut(0.05, T(-0.03, -0.01, 0.01))));
+    key(0.15, handFor(home), true);
+    ev(0.16, 'release');
+    key(0.21, handFor(magOut(0.015, T(0, 0, 0, -hook * 0.8))));
+    key(0.29, handFor(magOut(s.pull, T(-0.02, 0, 0.01, -hook * 1.3))));
+    key(0.37, pouch(0.05, 0.1, -0.06));
+    key(0.44, pouch(), true);
+    ev(0.43, 'pouch');
+    key(0.52, handFor(magOut(0.19, T(-0.04, 0, 0.02, hook * 1.5))));
+    insert(0.56, 0.68);
+    // pull the palm away and slap it back up
+    key(0.71, handFor(magOut(0.035, T(-0.004, 0, 0, 0))));
+    key(0.74, handFor(magOut(-0.005)), true);
+    ev(0.74, 'tap');
+    ev(0.74, 'camSlap');
+    key(0.82, below(-0.03, -0.07, 0.03));
+    key(0.93, S, true);
+    key(1, S);
+    clip.oldMag = [{ t: 0, mode: 'gun' }, { t: 0.15, mode: 'hand', k: K }, { t: 0.435, mode: 'hidden' }];
+    clip.newMag = [{ t: 0, mode: 'hidden' }, { t: 0.455, mode: 'hand', k: K }, { t: 0.68, mode: 'gun' }];
+    fk = [[0, 'support'], [0.07, 'open'], [0.15, 'hold'], [0.43, 'hold'], [0.68, 'hold'], [0.71, 'open'], [0.74, 'open'], [0.85, 'open'], [0.93, 'support'], [1, 'support']];
+  } else if (!c.empty && rifleLike) {
     // ---------------- tactical, mag-to-mag: pull & keep the old mag, fetch a fresh one, insert, stow the old one
     gkey(0, g(0));
     gkey(0.1, g(1));
@@ -596,7 +721,7 @@ export function buildReloadClip(c: ClipContext): ReloadClip {
       clip.newMag = [{ t: 0, mode: 'hidden' }, { t: 0.21, mode: 'hand', k: K }, { t: 0.37, mode: 'gun' }];
       fk = [[0, 'support'], [0.04, 'open'], [0.21, 'hold'], [0.37, 'hold'], [0.4, 'open'], [0.47, 'open'], [0.53, 'pinch'], [0.66, 'pinch'], [0.675, 'open'], [0.73, 'open'], [0.86, 'support'], [1, 'support']];
     }
-  } else if (c.kind === 'scar' && !c.empty) {
+  } else if (c.kind === 'scar' && !c.empty && style === 'std') {
     // ---------------- mag-to-mag: the fresh mag is brought straight up beside the seated one and
     // gripped together with it; the old one is released and stripped, the hand slides across and
     // the fresh one goes home in the same motion; the old mag rides out in the fingers to the pouch

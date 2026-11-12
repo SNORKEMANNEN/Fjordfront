@@ -402,7 +402,9 @@ export function buildCarbine(mats: WeaponMats): WeaponModel {
   const sightAxis = redDot(ob, 0.045, 0.0715, mats, optic);
   optic.add(ob.build(mats, 'optic'));
   // back-up iron front sight (folded) on rail
+  b.ironsOn();
   b.add('metal', rbox(0.44, 0.465, bore + 0.0234, bore + 0.029, -0.009, 0.009, 0.002));
+  b.ironsOff();
 
   root.add(b.build(mats, 'body'), bolt, charge, trigger, mag, optic);
   const sockets = addSockets(root, [
@@ -523,6 +525,7 @@ export function buildMP7(mats: WeaponMats): WeaponModel {
   b.add('metal', rbox(-0.24, -0.224, 0.0365, 0.0435, 0.0172, 0.0182, 0.0015));
   b.add('rubber', rbox(-0.333, -0.327, -0.05, 0.047, -0.0182, 0.0182, 0.003));
 
+  b.ironsOn();
   // ---- rear sight: spring-loaded base block + flat leaf with a square notch ----
   {
     // base block (chamfered top corners) clamped on the rail
@@ -558,6 +561,7 @@ export function buildMP7(mats: WeaponMats): WeaponModel {
   b.add('metal', rbox(frontU - 0.004, frontU + 0.004, 0.0705, 0.074, -0.0035, 0.0035, 0.001));
   b.add('steel', rbox(frontU - 0.0014, frontU + 0.0014, 0.072, sightV, -0.0009, 0.0009, 0.0003));
   for (const sgn of [1, -1]) b.add('metal', rbox(frontU - 0.0045, frontU + 0.0045, 0.0705, sightV - 0.004, sgn * 0.0075 - 0.0015, sgn * 0.0075 + 0.0015, 0.0007));
+  b.ironsOff();
 
   // ---- moving parts ----
   const pb = new PartBuilder();
@@ -618,8 +622,10 @@ export function buildShotgun(mats: WeaponMats): WeaponModel {
   b.add('dark', rbox(0.02, 0.11, -0.013, -0.011, -0.012, 0.012, 0.001)); // loading port
   b.add('steel', pin(-0.04, 0.02, 0.0175, 0.003));
   b.add('steel', pin(0.11, 0.02, 0.0175, 0.003));
+  b.ironsOn();
   b.add('steel', rbox(-0.06, -0.04, 0.056, 0.062, -0.005, 0.005, 0.002)); // ghost ring base
   b.add('steel', lathe([[-0.052, 0.0035], [-0.052, 0.006], [-0.048, 0.006], [-0.048, 0.0035], [-0.052, 0.0035]], 0.068, 0, 16));
+  b.ironsOff();
   // trigger group
   b.add('metal', profile([[-0.05, -0.012], [0.04, -0.012], [0.036, -0.03], [-0.046, -0.03]], 0.024, { round: 0.004, bevel: 0.0015 }));
   b.add('metal', profile([[-0.046, -0.044], [0.028, -0.044], [0.032, -0.04], [0.032, -0.03], [0.027, -0.03], [0.026, -0.039], [-0.04, -0.039], [-0.046, -0.032]], 0.011, { bevel: 0.001 }));
@@ -1186,10 +1192,12 @@ export function buildAutoShotgun(mats: WeaponMats): WeaponModel {
   b.add('dark', rbox(-0.02, 0.06, 0.03, 0.056, 0.026, 0.0282, 0.001)); // ejection port (right)
   // full-length top rail, low rear sight and a tall front post on the shroud
   for (const g of picatinny(-0.118, 0.3, 0.07, 0, 0.021)) b.add('metal', g);
+  b.ironsOn();
   // carry-handle style rear sight: two ears on a raised block, aperture between them
   b.add('metal', rbox(-0.112, -0.076, 0.077, 0.096, -0.013, 0.013, 0.003));
   for (const w of [-1, 1]) b.add('metal', rbox(-0.104, -0.088, 0.096, 0.112, w * 0.0085 - 0.003, w * 0.0085 + 0.003, 0.0015));
   b.add('dark', rbox(-0.1, -0.092, 0.096, 0.1, -0.0055, 0.0055, 0.0008));
+  b.ironsOff();
   // ---- barrel shroud with vents, barrel and a squared muzzle device ----
   b.add('metal', cyl(0.021, 0.32, 0.52, bore, 0, 24));
   for (let i = 0; i < 6; i++) for (const a of [0, Math.PI / 2, Math.PI, -Math.PI / 2]) {
@@ -1198,10 +1206,12 @@ export function buildAutoShotgun(mats: WeaponMats): WeaponModel {
   b.add('steel', cyl(0.0112, 0.52, 0.575, bore, 0, 20, 0.0104));
   b.add('metal', rbox(0.548, 0.582, bore - 0.014, bore + 0.014, -0.014, 0.014, 0.004));
   for (const w of [-1, 1]) b.add('dark', rbox(0.556, 0.574, bore - 0.006, bore + 0.006, w * 0.0142 - 0.001, w * 0.0142 + 0.001, 0.001));
+  b.ironsOn();
   b.add('metal', rbox(0.47, 0.49, bore + 0.018, bore + 0.064, -0.006, 0.006, 0.002)); // front sight tower
   for (const w of [-1, 1]) b.add('metal', rbox(0.472, 0.488, bore + 0.058, bore + 0.084, w * 0.009 - 0.0018, w * 0.009 + 0.0018, 0.0008)); // post guards
   b.add('steel', rbox(0.476, 0.484, bore + 0.06, bore + 0.077, -0.0016, 0.0016, 0.0006));
   b.add('tritium', cyl(0.0016, 0.476, 0.482, bore + 0.0775, 0, 8));
+  b.ironsOff();
   // ---- under-barrel handguard (support hand) ----
   b.add('blackPoly', profile([[0.15, -0.016], [0.15, -0.042], [0.165, -0.05], [0.31, -0.05], [0.322, -0.04], [0.322, -0.016]], 0.05, { round: 0.008, bevel: 0.003 }));
   for (let i = 0; i < 6; i++) b.add('dark', rbox(0.18 + i * 0.022, 0.19 + i * 0.022, -0.052, -0.049, -0.016, 0.016, 0.0008));
@@ -1477,6 +1487,7 @@ export function buildKS17(mats: WeaponMats): WeaponModel {
   // ---- iron sights (protected style): the eye looks OVER a low, wide rear block whose two chunky
   // ears frame the bottom of the view, at a slim front tower carrying a small ring hood around
   // the post — the hood centred on the crosshair, the post tip level with the sight line ----
+  b.ironsOn();
   b.add('metal', rbox(-0.122, -0.08, railTop, railTop + 0.007, -0.0175, 0.0175, 0.0025)); // clamp base
   b.add('metal', rbox(-0.114, -0.09, railTop + 0.006, aim - 0.017, -0.0155, 0.0155, 0.0025)); // body
   for (const w of [-1, 1]) {
@@ -1491,6 +1502,7 @@ export function buildKS17(mats: WeaponMats): WeaponModel {
   b.add('metal', new THREE.TorusGeometry(0.0088, 0.00062, 6, 40).translate(0, aim, -0.283));
   b.add('metal', rbox(0.2815, 0.2845, aim - 0.0115, aim - 0.0088, -0.0009, 0.0009, 0.0003)); // hood foot
   b.add('steel', rbox(0.2822, 0.2838, aim - 0.0075, aim, -0.00055, 0.00055, 0.0002)); // post
+  b.ironsOff();
   // ---- moving parts ----
   const pb = new PartBuilder();
   pb.add('steel', rbox(-0.02, 0.055, 0.032, 0.052, 0.0128, 0.0168, 0.0012));
@@ -1893,6 +1905,7 @@ export function buildStille9(mats: WeaponMats): WeaponModel {
   b.add('metal', cyl(0.0128, 0.288, 0.302, tv, 0, 20));
   b.add('dark', rbox(0.19, 0.27, tv - 0.0035, tv + 0.0035, -0.0124, -0.0112, 0.0006));
   b.add('dark', rbox(0.19, 0.2, tv - 0.0035, tv + 0.009, -0.0122, -0.0108, 0.0006)); // the notch at the rear of the slot
+  b.ironsOn();
   // ---- front sight: base on the tube end, hood ring with a post ----
   b.add('metal', rbox(0.272, 0.302, tv + 0.006, tv + 0.018, -0.008, 0.008, 0.002));
   b.add('metal', lathe([[0.276, 0.0128], [0.276, 0.0158], [0.298, 0.0158], [0.298, 0.0128], [0.276, 0.0128]], sv, 0, 32));
@@ -1909,6 +1922,7 @@ export function buildStille9(mats: WeaponMats): WeaponModel {
   b.add('steel', cyl(0.0115, -0.124, -0.11, 0.045, 0, 20)); // drum (axis fore-aft, top just under the sight line)
   b.add('dark', cyl(0.0035, -0.11, -0.109, 0.045, 0, 10));
   b.add('steel', cyl(0.0022, -0.118, -0.116, 0.058, 0.0, 8)); // windage screw head
+  b.ironsOff();
   // ---- polymer trigger group: enclosed guard, finger-grooved grip, selector ----
   b.add('blackPoly', profile([[-0.15, -0.032], [0.03, -0.032], [0.034, -0.04], [0.03, -0.044], [-0.03, -0.044], [-0.15, -0.04]], 0.038, { round: 0.003, bevel: 0.002 }));
   b.add('blackPoly', profile([[-0.034, -0.044], [0.032, -0.044], [0.036, -0.05], [0.032, -0.074], [0.024, -0.08], [-0.016, -0.08], [-0.03, -0.072]], 0.014, { round: 0.003, bevel: 0.0015, holes: [[[-0.022, -0.048], [0.026, -0.048], [0.026, -0.07], [0.018, -0.074], [-0.012, -0.074], [-0.02, -0.066]]] }));
@@ -2126,21 +2140,25 @@ export function buildHval47(mats: WeaponMats): WeaponModel {
   // ---- rear sight: base with spring housings, leaf, the wide notch block ----
   b.add('blued', rbox(0.11, 0.178, 0.024, 0.05, -0.0115, 0.0115, 0.003));
   for (const w of [-1, 1]) b.add('blued', cyl(0.0062, 0.112, 0.176, 0.042, w * 0.0142, 16));
+  b.ironsOn();
   b.add('blued', rbox(0.126, 0.178, 0.05, 0.0545, -0.008, 0.008, 0.0012)); // leaf
   for (const w of [-1, 1]) b.add('blued', rbox(0.118, 0.13, 0.05, sv, w * 0.0012, w * 0.0112, 0.0008)); // notch block halves
   b.add('blued', rbox(0.118, 0.13, 0.05, sv - 0.003, -0.0013, 0.0013, 0.0004)); // notch floor
   b.add('steel', rbox(0.148, 0.156, 0.0545, 0.059, -0.0092, 0.0092, 0.001)); // range slider
+  b.ironsOff();
   // ---- barrel, muzzle nut, front sight (post between hooked ears), gas block, bayonet lug ----
   b.add('blued', cyl(0.0088, 0.172, 0.525, bore, 0, 18));
   b.add('blued', lathe([[0.525, 0.0], [0.525, 0.0102], [0.548, 0.0102], [0.552, 0.009], [0.552, 0.0]], bore, 0, 18));
   b.add('dark', cyl(0.0044, 0.551, 0.553, bore, 0, 12));
   b.add('blued', lathe([[0.474, 0.0], [0.474, 0.0128], [0.51, 0.0128], [0.51, 0.0]], bore, 0, 20)); // ring base
   b.add('blued', rbox(0.48, 0.505, bore + 0.01, bore + 0.02, -0.0065, 0.0065, 0.002)); // post tower
+  b.ironsOn();
   b.add('steel', rbox(0.489, 0.4925, bore + 0.02, sv, -0.0011, 0.0011, 0.0003)); // post
   for (const w of [-1, 1]) {
     b.add('blued', rbox(0.484, 0.497, bore + 0.006, sv + 0.009, w * 0.0092 - 0.0015, w * 0.0092 + 0.0015, 0.0006)); // ear
     b.add('blued', rbox(0.484, 0.497, sv + 0.0055, sv + 0.009, w * 0.006, w * 0.0104, 0.0012)); // inward hook
   }
+  b.ironsOff();
   b.add('blued', rbox(0.38, 0.428, bore - 0.014, bore + 0.026, -0.0115, 0.0115, 0.003)); // gas block
   b.add('blued', rbox(0.43, 0.452, bore - 0.024, bore - 0.008, -0.004, 0.004, 0.0015)); // bayonet lug
   b.add('blued', cyl(0.0088, 0.172, 0.385, bore + 0.02, 0, 16)); // gas tube

@@ -981,8 +981,10 @@ export class Viewmodel {
     const sp = new THREE.Vector3(), sq = new THREE.Quaternion(), ss = new THREE.Vector3();
     rel.decompose(sp, sq, ss);
     this.anchorWrist('L', sock, sp, sq);
+    const ms = m.parts.mag?.userData.magStyle as { type: 'ext' | 'fast' | 'drum'; len: number; base: number[]; drum?: { c: number[]; r: number } } | undefined;
     return buildReloadClip({
       kind, empty,
+      mag: ms ? { type: ms.type, len: ms.len, base: new THREE.Vector3(...ms.base), drum: ms.drum ? { c: new THREE.Vector3(...ms.drum.c), r: ms.drum.r } : undefined } : undefined,
       magHome: { p: this.magHome.clone(), q: this.magHomeQ.clone() },
       support: { p: sp, q: sq },
       wristFor: (a, q, r, fist) => this.wristFor(a, q, r, fist),
@@ -1166,7 +1168,8 @@ export class Viewmodel {
 
     // ---------------- base pose ----------------
     const adsP = this.adsPose(new THREE.Vector3());
-    const hip = new THREE.Vector3(...def.hip).add(adsP);
+    // hip pose relative to the gun's authored aim point (optics and eye relief don't move it)
+    const hip = new THREE.Vector3(...def.hip).add((this.model.root.userData.hipRef as THREE.Vector3 | undefined) ?? adsP);
     const pos = hip.clone().lerp(adsP, ads);
     const rot = new THREE.Vector3(this.pose.hipR[0] * nonAds, this.pose.hipR[1] * nonAds, this.pose.hipR[2] * nonAds);
     // crouch: tuck slightly

@@ -75,23 +75,42 @@ export function patchWeaponMaterial(m: THREE.Material, kind: 'metal' | 'polymer'
 
 export class PartBuilder {
   private geos = new Map<string, THREE.BufferGeometry[]>();
+  private ironGeos = new Map<string, THREE.BufferGeometry[]>();
+  private toIrons = false;
+  /** iron sights: geometry added between ironsOn() and ironsOff() is built into a separate child
+   *  group named 'irons', so the gunsmith can take the sights off when an optic goes on the rail */
+  ironsOn() {
+    this.toIrons = true;
+    return this;
+  }
+  ironsOff() {
+    this.toIrons = false;
+    return this;
+  }
 
   add(mat: string, g: THREE.BufferGeometry) {
-    if (!this.geos.has(mat)) this.geos.set(mat, []);
+    const geos = this.toIrons ? this.ironGeos : this.geos;
+    if (!geos.has(mat)) geos.set(mat, []);
     // ensure consistent attributes for merging
     if (!g.getAttribute('uv')) {
       const n = g.getAttribute('position').count;
       g.setAttribute('uv', new THREE.BufferAttribute(new Float32Array(n * 2), 2));
     }
-    this.geos.get(mat)!.push(g.index ? g.toNonIndexed() : g);
+    geos.get(mat)!.push(g.index ? g.toNonIndexed() : g);
     return this;
   }
 
   /** Build an Object3D with one mesh per material. */
   build(mats: Record<string, THREE.Material>, name = 'part'): THREE.Group {
+    const grp = this.buildMap(this.geos, mats, name);
+    if (this.ironGeos.size) grp.add(this.buildMap(this.ironGeos, mats, 'irons'));
+    return grp;
+  }
+
+  private buildMap(geos: Map<string, THREE.BufferGeometry[]>, mats: Record<string, THREE.Material>, name: string): THREE.Group {
     const grp = new THREE.Group();
     grp.name = name;
-    for (const [m, list] of this.geos) {
+    for (const [m, list] of geos) {
       const clean = list.map((g) => {
         const c = new THREE.BufferGeometry();
         c.setAttribute('position', g.getAttribute('position'));
