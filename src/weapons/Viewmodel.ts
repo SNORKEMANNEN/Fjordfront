@@ -6,6 +6,7 @@ import { ReloadClip, ReloadKind, buildReloadClip, SPECS } from './ReloadClips';
 import { breakAction, BreakData } from './BreakAction';
 import { lmgReload } from './LmgAnim';
 import { sd9Reload, mp18Reload, AnimCtx } from './SmgAnims';
+import { mp7Reload, mp7Inspect } from './Mp7Anims';
 import { akReload, karReload, karCycle, RifleCtx, KarPlan } from './RifleAnims';
 import { lethalGrenade, lethalKnife, lethalC4, tacticalThrow, detPress, knifePickup, EqCtx } from './EquipAnims';
 import { knifeAction, knifeCarry } from './KnifeAnim';
@@ -470,6 +471,15 @@ export class Viewmodel {
   detonatorOut = false;
   private detBlend = 0;
   private noWrapLFrame = false;
+  /** context for the authored SMG anims (Stille-9, MP-18, MP7) */
+  private smgCtx(parts: Record<string, THREE.Object3D | undefined>, h: any): AnimCtx {
+    return {
+      parts, h, magHome: this.magHome, chargeHome: this.chargeHome, slideHome: this.slideHome,
+      wristFor: (an, q, r) => this.wristFor(an, q, r),
+      ev: (n) => (n.startsWith('cam') ? this.clipEvent(n) : this.onEvent(n)),
+      fired: this.reloadFired, jolt: (u, r, b) => this.jolt(u, r, b), mem: this.animMem,
+    };
+  }
   private eqCtx(a: { data?: any }): EqCtx {
     a.data ??= {};
     return {
@@ -1654,6 +1664,12 @@ export class Viewmodel {
         break;
       }
       case 'inspect': {
+        if (def.id === 'mp7') {
+          if (t < 0.02) this.reloadFired.clear();
+          mp7Inspect(t, pos, rot, this.smgCtx(parts, h));
+          this.camRoll = rot.z * 0.02;
+          break;
+        }
         // per-weapon inspect: each class shows itself off differently (see INSPECT below)
         const spec = INSPECT[def.cls] ?? INSPECT['Assault Rifle'];
         pos.add(kv(t, spec.pos));
@@ -2155,14 +2171,10 @@ export class Viewmodel {
         if (def.id === 'hval47') {
           akReload(t, a.type === 'reloadEmpty', pos, rot, this.rifleCtx(parts, h));
           this.camRoll = rot.z * 0.035;
-        } else if (def.id === 'stille9' || def.id === 'mp18') {
-          const ctx: AnimCtx = {
-            parts, h, magHome: this.magHome, chargeHome: this.chargeHome, slideHome: this.slideHome,
-            wristFor: (an, q, r) => this.wristFor(an, q, r),
-            ev: (n) => (n.startsWith('cam') ? this.clipEvent(n) : this.onEvent(n)),
-            fired: this.reloadFired, jolt: (u, r, b) => this.jolt(u, r, b), mem: this.animMem,
-          };
-          (def.id === 'stille9' ? sd9Reload : mp18Reload)(t, a.type === 'reloadEmpty', pos, rot, ctx);
+        } else if (def.id === 'stille9' || def.id === 'mp18' || def.id === 'mp7') {
+          const ctx = this.smgCtx(parts, h);
+          (def.id === 'stille9' ? sd9Reload : def.id === 'mp7' ? mp7Reload : mp18Reload)(t, a.type === 'reloadEmpty', pos, rot, ctx);
+          if (def.id === 'mp7' && a.type === 'reloadEmpty' && t > 0.8) this.boltLocked = false;
           this.camRoll = rot.z * 0.035;
         } else if (def.id === 'lmg') {
           lmgReload(t, a.type === 'reloadEmpty', pos, rot, parts, h, this.magHome, this.chargeHome, (an, q, r) => this.wristFor(an, q, r),

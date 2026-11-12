@@ -290,6 +290,21 @@ URL options: `?quality=low|medium|high|ultra`, `?weather=clear|overcast|rain|sno
 - **Rifle:** support hand moved so it no longer shows through the optic window.
 - **Pistol:** hold reworked.
 
+## Update 32: MP7 handling rebuilt
+
+The MP7's inspect and both reloads were rebuilt from scratch in a new module, `src/weapons/Mp7Anims.ts`, and keyed by hand for this game. They replace the shared PDW clip and the generic SMG inspect. The rebuild follows how the real gun works: the magazine lives in the pistol grip, so the firing hand never lets go, and the gun has a T-shaped charging handle at the rear. Nothing is taken from another game's animation.
+
+- **Tactical reload, two mags in one hand.** The gun tips muzzle-up and rolls so the base of the grip swings across to the support hand.
+  - The fresh mag comes up off the rig and is held alongside the one in the gun.
+  - The thumb presses the paddle and the hand strips the old mag down out of the grip, then shifts across a mag's width.
+  - It drives the fresh mag up into the grip and seats it with the heel of the hand, then carries the old one away.
+- **Empty reload.** Paddle, and the empty drops free, tumbling. The fresh mag goes in with a palm push.
+  - Then the muzzle swings up and right, so the rear of the gun comes round to the support hand.
+  - Two fingers hook the T-handle either side of its stem, rip it back and let it fly home, and the bolt runs forward off the hold-open.
+- **Inspect.** The gun comes up and turns over to show its left side, cradled from underneath while the fingers slide back along it. Then it turns across to show the right side, tips up for a look down the top, and goes back to the ready.
+- **Model:** a second magazine part for the swap. The rest of the MP7 model is unchanged.
+- **Tested:** `tools/mp7shots.cjs` renders 12-frame contact sheets of each action. In-game reloads refill the magazine, and the empty reload clears the bolt lock.
+
 ## Update 31: equipment, from pin to blast
 
 Every grenade, charge and gadget was reworked: how you pull and throw it, how it flies and lands, what it does to the room, and how it sounds. Every equipment sound is now a real recording.

@@ -555,6 +555,7 @@ export function buildMP7(mats: WeaponMats): WeaponModel {
   const trigger = tb.build(mats, 'trigger');
   trigger.position.set(0, -0.001, -0.016);
   // magazine: slim 4.6 mm double stack; the visible part hangs below the grip, foot extends forward
+  const magBuild = (name: string) => {
   const mb = new PartBuilder();
   const mF = -0.002, mB = -0.041, mTop = 0.0, mBody = -0.156, mBot = -0.173;
   mb.add('blackPoly', profile([[mF, mTop], [mF, mBody], [mB, mBody], [mB, mTop]], 0.021, { round: 0.003, bevel: 0.0018 }));
@@ -565,10 +566,16 @@ export function buildMP7(mats: WeaponMats): WeaponModel {
   }
   mb.add('brass', cyl(0.0028, -0.034, -0.012, 0.0024, 0.0, 10));
   mb.add('copper', lathe([[-0.012, 0.0], [-0.012, 0.0028], [-0.006, 0.0012], [-0.004, 0.0]], 0.0024, 0, 10));
-  const mag = mb.build(mats, 'mag');
-  mag.position.set(0, -0.006, 0);
+  const m = mb.build(mats, name);
+  m.position.set(0, -0.006, 0);
+  return m;
+  };
+  const mag = magBuild('mag');
+  // the fresh magazine for the swap reloads (Mp7Anims)
+  const mag2 = magBuild('mag2');
+  mag2.visible = false;
 
-  root.add(b.build(mats, 'body'), bolt, charge, trigger, mag);
+  root.add(b.build(mats, 'body'), bolt, charge, trigger, mag, mag2);
   const sockets = addSockets(root, [
     socket('muzzle', 0.213, bore, 0),
     socket('eject', -0.005, 0.034, W),
@@ -580,7 +587,7 @@ export function buildMP7(mats: WeaponMats): WeaponModel {
   sockets.rightHand = rs;
   sockets.leftHand = ls;
   addLaser(root, sockets, mats, 0.092, 0.045, W);
-  return { root, parts: { bolt, charge, trigger, mag }, sockets, adsDist: 0.1, reloadPose: { p: [-0.03, 0.1, -0.16], r: [0.16, 0.02, -0.7] } };
+  return { root, parts: { bolt, charge, trigger, mag, mag2 }, sockets, adsDist: 0.1, reloadPose: { p: [-0.03, 0.1, -0.16], r: [0.16, 0.02, -0.7] } };
 }
 
 // ======================================================================
