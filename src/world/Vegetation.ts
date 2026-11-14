@@ -4,21 +4,24 @@ import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js
 import { MaterialLib } from '../render/Materials';
 import { Physics } from '../core/Physics';
 import { RNG, clamp, smoothstep, fbm2 } from '../core/math';
-import { forestDensity, nearestRoad, PLAY_HALF, TUNNEL, MAP_ID, shoreDist, capHeightAt, isWater } from './MapLayout';
+import { forestDensity, nearestRoad, PLAY_HALF, TUNNEL, MAP_ID, shoreDist, capHeightAt, isWater, inTunnel } from './MapLayout';
 import { Terrain } from './Terrain';
 
 const WIND_GLSL = /* glsl */ `
 uniform float uTime;
+uniform float uWindAmp;
 attribute float aWind;
 vec3 windOffset(vec3 p, float w, vec3 ip){
   float ph = dot(ip.xz, vec2(0.11, 0.07));
   float gust = 0.6 + 0.4 * sin(uTime * 0.35 + ip.x * 0.01);
   float s1 = sin(uTime * 1.7 + ph) * 0.6 + sin(uTime * 2.9 + ph * 1.7) * 0.25;
   float s2 = sin(uTime * 4.1 + p.y * 1.3 + ph) * 0.15;
-  return vec3(s1 + s2, 0.0, (s1 * 0.6 - s2)) * w * gust;
+  return vec3(s1 + s2, 0.0, (s1 * 0.6 - s2)) * w * gust * uWindAmp;
 }`;
 
 export const windUniform = { value: 0 };
+/** foliage sway strength: follows the weather's wind (gusty rain and storms bend everything harder) */
+export const windAmpUniform = { value: 1 };
 
 function patchWind(m: THREE.Material, strength: number) {
   const prev = m.onBeforeCompile;
@@ -27,6 +30,7 @@ function patchWind(m: THREE.Material, strength: number) {
   m.onBeforeCompile = (sh, r) => {
     prev.call(m, sh, r);
     sh.uniforms.uTime = windUniform;
+    sh.uniforms.uWindAmp = windAmpUniform;
     sh.vertexShader = sh.vertexShader
       .replace('#include <common>', '#include <common>\n' + WIND_GLSL)
       .replace(
@@ -727,6 +731,7 @@ export class Vegetation {
         if (h < 1.0) continue;
         // never inside the tunnel bore / galleries (the terrain there is carved under the rock cap)
         if (Math.abs(jx - TUNNEL.x) < TUNNEL.width / 2 + 7 && jz > TUNNEL.z0 - 1.5 && jz < TUNNEL.z1 + 1.5) continue;
+        if (inTunnel(jx, h + 0.5, jz)) continue;
         const [f, g, dirt] = this.terrain.splatAt(jx, jz);
         const grassy = 1 - Math.max(g, dirt * 0.8, f * 0.6);
         if (grassy < 0.35 || j > grassy + 0.2) continue;

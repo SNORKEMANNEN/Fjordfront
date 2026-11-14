@@ -16,7 +16,7 @@ import { World } from '../world/World';
 import { PlayerController } from '../player/PlayerController';
 import { CameraRig } from '../player/CameraRig';
 import { Settings } from './Settings';
-import { SPAWNS, PLAY_HALF, landmarkAt, LANDMARKS, TUNNEL, TUNNEL_EXIT, tunnelShafts, BUILDINGS, MAP_ID, MAPS, MapId, shoreDist, inTunnel, isWet, capHeightAt } from '../world/MapLayout';
+import { SPAWNS, PLAY_HALF, landmarkAt, LANDMARKS, TUNNEL, TUNNEL_EXIT, tunnelShafts, BUILDINGS, MAP_ID, MAPS, MapId, shoreDist, inTunnel, isWet, capHeightAt, forestDensity, isWater } from '../world/MapLayout';
 import { tunnelFloorAt } from '../world/maps/Brosund';
 import { Viewmodel, ActionType } from '../weapons/Viewmodel';
 import { WeaponSystem, ShotRequest } from '../weapons/WeaponSystem';
@@ -1912,7 +1912,9 @@ export class Game {
     this.audio.indoor = this.indoor;
     this.audio.setListener(this.camera);
     const p = this.player.pos;
-    this.audio.ambience(dt, this.camera.position, Math.max(0, shoreDist(p.x, p.z)), this.env.weather, inTunnel(p.x, p.y, p.z) ? 30 : p.y);
+    const sd = Math.max(0, shoreDist(p.x, p.z));
+    const tunnelNow = inTunnel(p.x, p.y, p.z);
+    this.audio.ambience(dt, this.camera.position, sd, this.env.weather, tunnelNow ? 30 : p.y, this.rainSurfaces(p, sd, tunnelNow, dt));
     this.worldAmbience(dt);
     this.audio.loop('slide', Math.max(this.slideAudio * 0.55, this.world.zips.ride ? 0.35 + 0.25 * this.zipAudio : this.zipAudio * 0.5));
     this.damageFeedback(dt);
@@ -2500,6 +2502,28 @@ export class Game {
   impostors: Impostors | null = null;
   governor!: PerfGovernor;
   hw!: HardwareInfo;
+  /** what the rain around you is landing on (sampled 4×/s): leaves/forest, open water (sea,
+   *  canals, harbour basins) and whether you are in the tunnel — drives the dynamic rain mix */
+  private rainMixCache = { leaves: 0, water: 0, tunnel: 0 };
+  private rainMixT = 0;
+  private rainSurfaces(p: THREE.Vector3, sd: number, tunnel: boolean, dt: number) {
+    const m = this.rainMixCache;
+    m.tunnel = tunnel ? 1 : 0;
+    if ((this.rainMixT -= dt) > 0) return m;
+    this.rainMixT = 0.25;
+    let water = 0, leaves = 0, n = 0;
+    for (const r of [5, 11, 18]) for (let k = 0; k < 8; k++) {
+      const a = (k / 8) * Math.PI * 2 + r * 0.3, x = p.x + Math.cos(a) * r, z = p.z + Math.sin(a) * r;
+      const h = this.terrain.heightAt(x, z), w = r === 5 ? 1.4 : r === 11 ? 1 : 0.6;
+      if (isWater(x, z, h)) water += w;
+      leaves += forestDensity(x, z, h) * w;
+      n += w;
+    }
+    m.water = Math.min(1, Math.max(water / n * 1.6, 1 - sd / 22));
+    m.leaves = Math.min(1, (leaves / n) * 1.8);
+    return m;
+  }
+
   private nvgFrame(dt: number) {
     const w = this.weapons;
     // night prompt + an occasional HQ reminder while you play without goggles
@@ -2540,8 +2564,14 @@ export class Game {
     u.uHasDepth.value = u.tDepth.value ? 1 : 0;
     u.uNear.value = this.camera.near;
     u.uFar.value = this.camera.far;
-    this.pipeline.bloom.strength = 0.35 + 0.45 * this.nvg.vis * Math.min(1.2, this.nvg.power);
+    // rain outdoors (Update 41): lights bloom wider and softer through the wet air
+    const rainOut = this.env.weather === 'rain' ? 1 - this.indoor : 0;
+    this.rainFx += (rainOut - this.rainFx) * (1 - Math.exp(-dt * 0.8));
+    this.pipeline.bloom.strength = 0.35 + 0.45 * this.nvg.vis * Math.min(1.2, this.nvg.power) + 0.32 * this.rainFx;
+    this.pipeline.bloom.threshold = 2.2 - 0.85 * this.rainFx;
+    this.weather.rainLight = Math.max(0.15, this.env.day);
   }
+  private rainFx = 0;
 
   // ---------------------------------------------------------------- doors: use (E) and peek (ADS)
   private doorFocusF = -1;
@@ -4520,7 +4550,7 @@ export class Game {
       boltOpen: 'boltOpen', boltClose: 'boltClose', pumpBack: 'pumpBack', pumpForward: 'pumpForward', shellIn: 'shellIn',
       rattle: 'rattle', fireMode: 'click', draw: 'cloth', holster: 'cloth', inspect1: 'cloth', inspect2: 'rattle', reloadStart: 'cloth',
       adsIn: 'adsIn', adsOut: 'adsOut', lowAmmo: 'lowAmmo', breathIn: 'breathIn', breathOut: 'breathOut',
-      boltBack: 'boltBack', slideBack: 'slideBack', dry: 'dry',
+      boltBack: 'boltBack', slideBack: 'slideBack', dry: 'dry', reloadCancel: 'cloth',
       // revolver
       cylOpen: 'cylOpen', cylClose: 'cylClose', cylFlipOpen: 'cylFlipOpen', cylFlipClose: 'cylFlipClose', ejectRod: 'eject', insert: 'insert', spin: 'spin', hammer: 'hammer',
     };
@@ -5117,6 +5147,8 @@ export class Game {
     const dist = victim.position().distanceTo(this.player.pos);
     this.ui.hitmarker(true, headshot, 100);
     this.audio.play(headshot ? 'killHead' : 'kill', { gain: 0.95, bus: 'ui', reverb: 0.02, vary: 0.015, prio: 3 });
+    // a headshot kill lands with a distinct crunch (snapped stick + wet squelch foley)
+    if (headshot) this.audio.play('killCrunch', { gain: 0.62, bus: 'ui', reverb: 0, vary: 0.04, prio: 3 });
     this.rig.killPunch(headshot ? 1.1 : 0.8);
     const vdir = victim.position().clone().sub(this.player.pos).setY(0).normalize();
     this.fx.killBurst(victim.chest(new THREE.Vector3()), vdir, headshot, victim.position().y);

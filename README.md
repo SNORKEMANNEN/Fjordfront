@@ -290,6 +290,36 @@ URL options: `?quality=low|medium|high|ultra`, `?weather=clear|overcast|rain|sno
 - **Rifle:** support hand moved so it no longer shows through the optic window.
 - **Pistol:** hold reworked.
 
+## Update 41: Rain, hit feedback, sprint-cancel reload
+
+**Rain, rebuilt**
+- **Lighter rain particles.** Thin, soft streaks, each a motion-blurred drop. They are never thinner than about a pixel, so they read at any resolution.
+- **Wind.** The drops lean with the wind. Gusts push denser sheets of rain across the street. Trees, bushes and grass now sway harder as the wind picks up.
+- **Splashes.** Small rings bloom wherever the rain lands: ground, roofs, car tops and quays.
+- **No rain indoors or in the tunnels.** Rain stops under roofs, eaves, bridges and in the undersea tunnel. It uses the map's sky-occlusion height map, so you see it fall right up to the edge of a portal or doorway and no further.
+- **A soft bloom haze outside in the rain.** Lights and bright sky glow a little wider and softer while you are out in it. The effect fades when you step inside.
+- **Fix:** the stray grass that grew inside the tunnel entrance is gone.
+
+**Rain sound that knows where it's landing**
+- **Open ground:** steady rain on hard surfaces.
+- **Near trees:** rain pattering on leaves and canopy.
+- **By the sea, canals and harbour basins:** the hiss of rain on water, with a few bubbles.
+- **Indoors:** the outside rain fades away. In its place you hear rain drumming on the roof above you, cozy and muffled.
+- **In the tunnel:** only a faint, distant wash from the portals.
+- **Heavy rain:** distant thunder rolls in now and then, muffled when you are indoors.
+- Everything crossfades smoothly as you move between them.
+
+**Bigger hit feedback**
+- **Directional blood on hits.** Each hit spits a small puff back toward you and sprays a cone out of the far side along the bullet's path, leaving a fine mist hanging in the air. It scales with the damage, and headshots spray harder.
+- **Bots react more to hits.** A solid hit shoves them visibly and makes them stagger for a moment, slowed down while they regain their footing. The flinch is stronger too.
+- **Headshot kills crunch.** A distinct crunch plays on headshot kills: a snapped stick and a wet squelch, real foley recordings, the classic bone-break trick.
+
+**Sprint cancels reload**
+- **Sprinting cancels a reload,** CoD-style. You can bail out of a reload to get to cover.
+- **Ammo:** the rounds count only if the new magazine was already seated, which is the last stretch of the animation. Otherwise the mag stays as it was.
+- **Shotguns** keep the shells they already loaded.
+- **Empty guns** don't auto-reload while you're sprinting. The reload starts as soon as you stop.
+
 ## Update 40: Map vote
 
 - **No more map switching in the menu.** The map cards are gone; press Domination and you're straight into the game.
@@ -2293,7 +2323,7 @@ The environment this was built in could only reach GitHub and npm. Sketchfab, Po
 - **Music:** the menu theme, the tension underscore and the victory sting were generated for this game with **Stable Audio 2.5** through the Stability AI API (original text prompts, no reference material; see `tools/music_build.py`). Use them under Stability AI's terms for API outputs. The defeat sting, the night-vision power-up / power-down, the glass crack / shatter sounds, the three door-breach impacts and the ten death screams were made with **ElevenLabs sound generation**, under the same free-plan terms as the voices (attribution, non-commercial).
 - **Hitmarker and elimination sounds** (`public/assets/sounds/ui/hitmarker.ogg`, `killsound.ogg`) were supplied by the project owner.
 - **Real-recording bank** (Update 35, `tools/real_sfx_build.py`): tactical-sprint rattle, bullet impacts, bipod, footsteps on gravel / metal / water, cloth and gear foley, breathing, bullet whiz, mortar whistle, fire, interface and match stings, radio, gulls, songbirds and the wind / waves / rain / snow-wind / slide / helicopter loops. Nothing is synthesized any more. Sources:
-  - **CC BY 4.0:** **Oculus Audio Pack 1** by **Oculus VR, LLC** (via `facebookincubator/Meta-open-sound`). Used for clothing and gear movement, shoe footsteps and landings on metal / dirt / concrete / wood, metal surface hits, punches, glass, male breathing, lever pulls, whooshes, interface clicks / alerts / bell trees / power-ups, the fan, machine and car-engine loops (helicopter), ocean waves, city rain, flag flapping and forest birds. Credit: "Oculus Audio Pack 01" by Oculus VR, LLC, licensed under CC BY 4.0. Changes: trimmed, filtered, layered, pitched, looped and normalised.
+  - **CC BY 4.0:** **Oculus Audio Pack 1** by **Oculus VR, LLC** (via `facebookincubator/Meta-open-sound`). Used for clothing and gear movement, shoe footsteps and landings on metal / dirt / concrete / wood, metal surface hits, punches, glass, male breathing, lever pulls, whooshes, interface clicks / alerts / bell trees / power-ups, the fan, machine and car-engine loops (helicopter), ocean waves, city rain, forest rain, rain on a cabin roof (heard indoors), water bubbles, flag flapping and forest birds. Credit: "Oculus Audio Pack 01" by Oculus VR, LLC, licensed under CC BY 4.0. Changes: trimmed, filtered, layered, pitched, looped and normalised.
   - **CC0:**
     - Freesound recordings via **Tidewater** (`dgreenheck/tidewater`): gulls by **squashy555** (#353416) and **Soojay** (#462462); "strong wind on coastal path" by **bruno.auzet** (#706471); "WavesOnTheShore" by **richardemoore** (#260263); wading steps by **Nox_Sound** (#490951) and **ryansitz** (#342932); splashes by **qubodup** / blaukreuz (#212143) and **Nox_Sound** (#585744).
     - Freesound recordings via **Kraken Isles** (`DanWahlin/kraken-isles`): fly-by whizzes by **modusmogulus** (#789222, #789389) and **agaudiodesigns** (#500559); wood breaking by **SoundCollectah** (#109359), **TheLittleCrow** (#589866) and **kevinkace** (#66772); falling stones by **iwanPlays** (#567249); rain on leaves by **newtad1** (#836411); "Small Bell #2" by **steffcaffrey** (#452379).
@@ -2318,7 +2348,7 @@ The environment this was built in could only reach GitHub and npm. Sketchfab, Po
     - **"Heart Beating"** by **michorvath** (#273150), via `briossant/ombres`.
     - **"tinnitus"** by **tnturner** (#377205), via `SpeedyVelcro/advanced-invasion`.
     - **"Fall debris"** by **xkeril** (#703247 / #703248), via `AnthonE/Gates`.
-    - **rubberduck**'s "75 CC0 breaking / falling / hit sfx", "40 CC0 water / splash / slime SFX" and "100 CC0 SFX #2", plus **OwlishMedia**'s "202 More Sound Effects" (velcro, nasal spray), all from OpenGameArt via `1993velezpadilla-source/config-old-3`.
+    - **rubberduck**'s "75 CC0 breaking / falling / hit sfx", "40 CC0 water / splash / slime SFX" and "100 CC0 SFX #2" (including the distant thunder, and the stick snaps and squelches layered into the headshot-kill crunch), plus **OwlishMedia**'s "202 More Sound Effects" (velcro, nasal spray), all from OpenGameArt via `1993velezpadilla-source/config-old-3`.
     - **Nox_Sound** "Footsteps – Essentials" (landing thuds on snow, grass, mud, gravel), via `helzpont/home4`.
     - **MATRIXXX_** beep (#657948) and **qubodup** mine / water-mine explosions, via `OpenHV/OpenHV`.
 - **fps_arms.glb**: "fps arms" by DJMaesen (https://sketchfab.com/bumstrum), licensed **CC BY 4.0**. Changes: its material was rebuilt for three.js, and its textures were re-encoded from PNG to JPEG (the unused specular-glossiness map was replaced by a stub) to cut the download (`tools/glb_compress.py`).

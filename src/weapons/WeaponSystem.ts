@@ -61,6 +61,7 @@ export class WeaponSystem {
   sprintBlock = 0; // time until we may fire after sprint
   switching = false;
   reloading = false;
+  private prevSprint = false;
   private shellsToLoad = 0;
   private reloadInterrupt = false;
   private wantFire = false;
@@ -232,6 +233,33 @@ export class WeaponSystem {
     });
   }
 
+  /** Abort the reload in progress (sprint). Ammo is granted only once the mag is home. */
+  cancelReload() {
+    if (!this.reloading) return;
+    const s = this.cur, d = s.def, a = this.vm.action;
+    const t = a ? a.t : 0;
+    const seated = a && (a.type === 'reload' || a.type === 'reloadEmpty') ? t >= (a.type === 'reloadEmpty' ? 0.86 : 0.8)
+      : a && (a.type === 'breakReload' || a.type === 'karReload') ? t >= 0.88 : false;
+    this.vm.cancelAction();
+    this.reloading = false;
+    this.reloadInterrupt = false;
+    this.shellsToLoad = 0;
+    if (seated) {
+      if (a!.type === 'breakReload' || a!.type === 'karReload') {
+        const take = a!.type === 'breakReload' ? Math.min((a!.data as { slots: unknown[] }).slots.length, s.reserve) : Math.min((a!.data as { n: number }).n, s.reserve);
+        s.mag += take;
+        s.reserve -= take;
+      } else {
+        const take = Math.min(d.mag - s.mag, s.reserve);
+        s.mag += take;
+        s.reserve -= take;
+      }
+      s.chambered = true;
+      this.vm.boltLocked = false;
+    }
+    this.hooks.onSound('reloadCancel', d);
+  }
+
   private loadShell(wasEmpty: boolean) {
     const s = this.cur;
     if (this.reloadInterrupt || this.shellsToLoad <= 0 || s.reserve <= 0 || s.mag >= s.def.mag) {
@@ -327,6 +355,13 @@ export class WeaponSystem {
       }
     }
 
+    // ---- sprinting cancels a reload (CoD-style) ----
+    // breaking into a sprint drops the reload on the spot; the rounds only count if the new
+    // magazine was already seated (the last stretch of the animation)
+    const sprintStart = p.sprinting && !this.prevSprint;
+    this.prevSprint = p.sprinting;
+    if (sprintStart && this.reloading && !this.switching) this.cancelReload();
+
     // ---- ADS ----
     if (Settings.data.toggleAds) {
       if (inp.wasPressed('ads')) this.adsHeld = !this.adsHeld;
@@ -404,7 +439,8 @@ export class WeaponSystem {
     }
     if (!trig) this.burstCount = 0;
     // auto reload when empty after a short beat
-    if (d.cls !== 'Melee' && s.mag === 0 && !this.reloading && this.sinceShot > 0.35 && s.reserve > 0 && !this.switching && !this.vm.action) this.startReload();
+    // (an empty gun reloads by itself — but not mid-sprint: sprinting is how you cancel one)
+    if (d.cls !== 'Melee' && s.mag === 0 && !this.reloading && !p.sprinting && this.sinceShot > 0.35 && s.reserve > 0 && !this.switching && !this.vm.action) this.startReload();
 
     // ---- recoil application & recovery ----
     const apply = 1 - Math.exp(-34 * dt);

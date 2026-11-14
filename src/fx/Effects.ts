@@ -373,6 +373,27 @@ export class Effects {
     this.smoke.spawn(p, v, col, 0.85, size, life, { drag: 0.9, grav: -0.05, grow: 0.35 });
   }
 
+  /** Hit on a soldier, read from where you stand: a small dark entry puff back toward the
+   *  shooter, a fast cone of droplets out the far side along the bullet, and a fine red mist that
+   *  hangs and drifts with the shot. Scales with the damage; a headshot sprays harder and higher. */
+  fleshHit(p: THREE.Vector3, dir: THREE.Vector3, head: boolean, amount: number) {
+    const k = Math.min(1.6, 0.55 + amount / 45) * (head ? 1.35 : 1);
+    const rnd = (s: number) => new THREE.Vector3((Math.random() - 0.5) * s, (Math.random() - 0.5) * s, (Math.random() - 0.5) * s);
+    const back = dir.clone().negate();
+    // entry: a short spit back toward the shooter
+    for (let i = 0; i < Math.round(4 * k); i++) this.dust.spawn(p, back.clone().multiplyScalar(0.8 + Math.random() * 1.2).add(rnd(1.4)), [0.3, 0.02, 0.02], 0.85, 0.025 + Math.random() * 0.03, 0.25 + Math.random() * 0.2, { drag: 3.5, grav: 5 });
+    this.dust.spawn(p, back.clone().multiplyScalar(0.35), [0.34, 0.03, 0.03], 0.5, 0.1 * k, 0.32, { grow: 0.9, drag: 4 });
+    // exit: the directional spray (a tight cone along the shot, heavy droplets falling out of it)
+    const out = p.clone().addScaledVector(dir, 0.18);
+    for (let i = 0; i < Math.round(11 * k); i++) {
+      const v = dir.clone().multiplyScalar(3.2 + Math.random() * 3.5 * k).add(rnd(1.8)).setY(dir.y * 3 + 0.4 + Math.random() * (head ? 1.6 : 0.9));
+      this.dust.spawn(out, v, [0.28 + Math.random() * 0.06, 0.012, 0.012], 0.92, 0.022 + Math.random() * 0.04, 0.4 + Math.random() * 0.35, { drag: 2.2, grav: 9 });
+    }
+    // the mist: two soft puffs carried a little way down the shot line, then hanging
+    this.dust.spawn(out, dir.clone().multiplyScalar(1.6), [0.36, 0.03, 0.03], 0.42, 0.16 * k, 0.75, { grow: 1.3, drag: 3, grav: 0.4 });
+    this.dust.spawn(out.clone().addScaledVector(dir, 0.15), dir.clone().multiplyScalar(2.4).add(rnd(0.5)), [0.3, 0.025, 0.025], 0.28, 0.12 * k, 1.0, { grow: 1.6, drag: 2.6, grav: 0.3 });
+  }
+
   /** Elimination burst at the victim: heavier mist, a few droplets and a dust kick at the feet. */
   killBurst(chest: THREE.Vector3, dir: THREE.Vector3, headshot: boolean, feetY: number) {
     const rnd = (s: number) => new THREE.Vector3((Math.random() - 0.5) * s, (Math.random() - 0.5) * s, (Math.random() - 0.5) * s);

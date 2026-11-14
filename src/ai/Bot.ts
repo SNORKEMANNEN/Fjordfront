@@ -338,6 +338,7 @@ export class Bot implements Combatant {
   private flinchAxis = new THREE.Vector3(1, 0, 0);
   private deathStyle = 0;
   private lastHitPart: HitPart = 'body';
+  private stagger = 0;
 
   onDamaged(from: Combatant | null, amount = 20, dir?: THREE.Vector3, part: HitPart = 'body') {
     if (this.netPuppet) {
@@ -351,9 +352,10 @@ export class Bot implements Combatant {
       // torso twists away from the impact, head snaps on headshots, body is shoved
       const h = dir.clone().setY(0).normalize();
       this.flinchAxis.set(h.z, 0, -h.x);
-      this.flinch.impulse(clamp(amount / 25, 0.3, 2.2) * 3.2 * (part === 'limb' ? 0.5 : 1));
+      this.flinch.impulse(clamp(amount / 25, 0.3, 2.2) * 4.2 * (part === 'limb' ? 0.55 : 1));
       if (part === 'head') this.headSnap.impulse(9);
-      this.vel.addScaledVector(h, clamp(amount / 30, 0.2, 1.4) * 1.6);
+      this.vel.addScaledVector(h, clamp(amount / 30, 0.25, 1.5) * (part === 'limb' ? 1.5 : 2.6));
+      this.stagger = Math.max(this.stagger, clamp(amount / 60, 0.12, 0.4));
       this.aimErr.x += (this.rng.next() - 0.5) * 0.08;
       this.aimErr.y += this.rng.next() * 0.05;
       this.burstPause = Math.max(this.burstPause, 0.12);
@@ -1080,6 +1082,8 @@ export class Bot implements Combatant {
       this.burstPause = Math.max(this.burstPause, 0.3);
     }
     if (this.stunT > 0) speed *= 0.45;
+    // hit stagger: a beat of lost footing after a solid hit (the shove carries them meanwhile)
+    if (this.stagger > 0) { this.stagger -= dt; speed *= 0.4; }
     // heavy suppression keeps heads down
     if (this.suppression > 0.7 && wantStance === 'stand' && it !== 'evade' && speed < 4) wantStance = 'crouch';
     // local avoidance (computed for everyone by the game) and the unstuck side-step

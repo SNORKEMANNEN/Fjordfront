@@ -54,7 +54,8 @@ export class Combat {
       }
       // a replayed remote shot: looks the same, deals nothing (its owner already resolved it)
       if (visualOnly && best) {
-        this.fx.impact(best.point, dir.clone().negate(), 'flesh', dir, best.part === 'head');
+        if (best.c.isPlayer) this.fx.impact(best.point, dir.clone().negate(), 'flesh', dir, best.part === 'head');
+        else this.fx.fleshHit(best.point, dir, best.part === 'head', def.damage[0]);
         return { victim: null, part: null, point: best.point, killed: false, damage: 0, worldHit: null, end: best.point };
       }
       const veh = visualOnly ? null : this.vehicleHit?.(o, dir, best ? best.dist : wDist, shooter);
@@ -76,7 +77,10 @@ export class Combat {
         best.c.health = Math.max(0, best.c.health - dmg);
         best.c.onDamaged(shooter, dmg, dir, best.part);
         this.ev.onDamage(best.c, shooter, dmg, best.part, dir, penetrations > 0);
-        this.fx.impact(best.point, dir.clone().negate(), 'flesh', dir, best.part === 'head');
+        // (a full directional spray on everyone else; your own hits stay a small puff that
+        // never clouds your view)
+        if (best.c.isPlayer) this.fx.impact(best.point, dir.clone().negate(), 'flesh', dir, best.part === 'head');
+        else this.fx.fleshHit(best.point, dir, best.part === 'head', dmg);
         const killed = before > 0 && best.c.health <= 0;
         if (killed) {
           best.c.alive = false;

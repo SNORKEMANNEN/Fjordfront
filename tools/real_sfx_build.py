@@ -170,6 +170,22 @@ BANK = {
     'loop_wind': ([[L('tw_wind.ogg', 2.0, 21.0, 'highpass=f=60')]], {'loop': 1.5, 'peak': -3}),
     'loop_waves': ([[L('tw_pier_lap.ogg', 0.0, 19.0), L('WATRWave_OceanWaves_LOOP_01.ogg', 0.0, 19.0, 'lowpass=f=3000', -9)]], {'loop': 1.5, 'peak': -3}),
     'loop_rain': ([[L('RAIN_CityRain_LOOP_01.ogg', 0.0, 17.0), L('ki_rain_canopy.ogg', 3.0, 17.0, '', -6)]], {'loop': 1.5, 'peak': -1}),
+    # rain by surface (Update 41): through leaves and grass, hissing on water, and the cozy indoor
+    # one — rain on the roof and the windows, heard from inside a cabin
+    'loop_rainLeaves': ([[L('RAINVege_ForestRain_LOOP_01.ogg', 2.0, 18.0), L('ki_rain_canopy.ogg', 20.0, 18.0, '', -5)]], {'loop': 1.5, 'peak': -1}),
+    'loop_rainWater': ([[L('RAIN_CityRain_LOOP_01.ogg', 20.0, 18.0, 'highpass=f=1400'), L('ki_rain_canopy.ogg', 5.0, 18.0, 'highpass=f=2400', -6), L('WATRBubl_WaterBubbles_LOOP_01.ogg', 0.0, 18.0, 'lowpass=f=1800', -16)]], {'loop': 1.5, 'peak': -2}),
+    'loop_rainRoof': ([[L('RAINInt_ForestCabinRain_LOOP_01.ogg', 4.0, 22.0)]], {'loop': 2.0, 'peak': -1}),
+    # headshot-kill crunch (Update 41): a short snapped-stick crack pitched down (the classic foley
+    # bone break), a wet squelch under it and a dull thump for weight — rubberduck CC0 packs
+    'killCrunch': ([
+        [L('bfh1_wood_breaking_02.ogg', 0.0, 0.24, P(0.82) + ',lowpass=f=5200'), L('slime_06.ogg', 0.0, 0.32, 'highpass=f=180', -8, 0.012), L('bfh1_hit_02.ogg', 0.0, 0.2, P(0.7) + ',lowpass=f=900', -7)],
+        [L('bfh1_wood_breaking_01.ogg', 0.0, 0.26, P(0.78) + ',lowpass=f=5000'), L('slime_02.ogg', 0.0, 0.3, 'highpass=f=180', -8, 0.015), L('bfh1_hit_03.ogg', 0.0, 0.2, P(0.7) + ',lowpass=f=900', -7)],
+        [L('bfh1_wood_breaking_04.ogg', 0.0, 0.26, P(0.85) + ',lowpass=f=5200'), L('slime_06.ogg', 0.05, 0.3, 'highpass=f=180', -9, 0.01), L('bfh1_hit_01.ogg', 0.0, 0.2, P(0.72) + ',lowpass=f=900', -7)],
+    ], {'peak': -3}),
+    'thunder': ([
+        [L('sfx100v2_thunder_01.ogg', 0.0, 5.2), L('sfx100v2_thunder_01.ogg', 0.0, 5.2, P(0.7) + ',lowpass=f=600', -3, 0.25)],
+        [L('sfx100v2_thunder_01.ogg', 0.0, 5.2, P(0.82) + ',lowpass=f=1800'), L('sfx100v2_thunder_01.ogg', 0.4, 4.6, P(0.6) + ',lowpass=f=400', -2, 0.5)],
+    ], {'peak': -2}),
     'loop_snowwind': ([[L('tw_wind.ogg', 28.0, 21.0, P(0.85) + ',lowpass=f=2200'), L('CLOTHFlp_FlagFlapping_LOOP_01.ogg', 0.0, 18.0, 'highpass=f=300,lowpass=f=3000', -14)]], {'loop': 1.5, 'peak': -3}),
     # sliding / zipline: gravel scraping under you, cloth dragging
     'loop_slide': ([[L('ki_rock_tumble.ogg', 0.0, 2.6, 'lowpass=f=3500'), L('ki_rock_tumble.ogg', 1.4, 2.6, 'lowpass=f=3500,' + P(0.9), -3), L(CLOTH % 3, 0.0, 1.2, '', -8, 0.4)]], {'loop': 0.4, 'peak': -3}),

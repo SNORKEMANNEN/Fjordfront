@@ -9,7 +9,7 @@ const fs = require('fs');
   const b = await chromium.launch({ args: ['--use-angle=swiftshader', '--enable-unsafe-swiftshader', '--ignore-gpu-blocklist'] });
   const p = await b.newPage({ viewport: { width: 1280, height: 720 } });
   p.on('pageerror', (e) => console.log('[pageerror] ' + e.message + ' ' + (e.stack || '').split('\n').slice(1, 3).join(' | ')));
-  p.on('console', (m) => { if (m.type() === 'error') console.log('[console] ' + m.text()); });
+  p.on('console', (m) => { if (m.type() === 'error' || m.type() === 'warning') console.log('[console] ' + m.text()); });
   const t0 = Date.now();
   await p.goto('http://127.0.0.1:5173/?test&level=brosund&' + query, { timeout: 180000 });
   await p.waitForFunction(() => window.__ready, null, { timeout: 400000, polling: 500 });

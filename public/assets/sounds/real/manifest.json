@@ -521,6 +521,48 @@
    "loop": true
   }
  ],
+ "loop_rainLeaves": [
+  {
+   "file": "loop_rainLeaves_0.ogg",
+   "loop": true
+  }
+ ],
+ "loop_rainWater": [
+  {
+   "file": "loop_rainWater_0.ogg",
+   "loop": true
+  }
+ ],
+ "loop_rainRoof": [
+  {
+   "file": "loop_rainRoof_0.ogg",
+   "loop": true
+  }
+ ],
+ "killCrunch": [
+  {
+   "file": "killCrunch_0.ogg",
+   "loop": false
+  },
+  {
+   "file": "killCrunch_1.ogg",
+   "loop": false
+  },
+  {
+   "file": "killCrunch_2.ogg",
+   "loop": false
+  }
+ ],
+ "thunder": [
+  {
+   "file": "thunder_0.ogg",
+   "loop": false
+  },
+  {
+   "file": "thunder_1.ogg",
+   "loop": false
+  }
+ ],
  "loop_snowwind": [
   {
    "file": "loop_snowwind_0.ogg",

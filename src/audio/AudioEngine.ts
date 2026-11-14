@@ -1555,7 +1555,10 @@ export class AudioEngine {
   }
 
   /** Ambience director: wind, waves near the shore, birds, gulls by the harbour, rain. */
-  ambience(dt: number, cam: THREE.Vector3, shoreDist: number, weather: string, elevation: number) {
+  /** rain loudness 0..1 (eases in and out with the weather) */
+  private rainLevel = 0;
+  private thunderT = 30;
+  ambience(dt: number, cam: THREE.Vector3, shoreDist: number, weather: string, elevation: number, rainMix: { leaves: number; water: number; tunnel: number } = { leaves: 0, water: 0, tunnel: 0 }) {
     this.watchdog(dt);
     if (!this.ready || this.ctx.state !== 'running') return;
     {
@@ -1581,7 +1584,26 @@ export class AudioEngine {
     this.loop('wind', windG * (1 - this.indoor * 0.6));
     const shore = Math.max(0, 1 - shoreDist / 70);
     this.loop('waves', 0.6 * shore * (1 - this.indoor * 0.5), new THREE.Vector3(cam.x - Math.min(shoreDist, 40), 0, cam.z));
-    this.loop('rain', weather === 'rain' ? 0.5 * (1 - this.indoor * 0.4) : 0);
+    // rain (Update 41): what it lands on around you sets the sound — leaves and grass, open water,
+    // hard ground and roofs — and inside it becomes rain on the roof and the windows, muffled and
+    // close (the cozy one); the tunnel only hears a faint hiss from the portals
+    this.rainLevel += ((weather === 'rain' ? 1 : 0) - this.rainLevel) * (1 - Math.exp(-dt * 0.5));
+    const rl = this.rainLevel, out = 1 - this.indoor, tun = rainMix.tunnel;
+    const lv = Math.min(1, rainMix.leaves), wt = Math.min(1, rainMix.water);
+    const hard = Math.max(0, 1 - lv * 0.7 - wt * 0.6);
+    this.loop('rain', rl * (0.5 * out * hard * (1 - tun) + 0.1 * tun));
+    this.loop('rainLeaves', rl * 0.6 * out * lv * (1 - tun));
+    this.loop('rainWater', rl * 0.55 * out * wt * (1 - tun));
+    this.loop('rainRoof', rl * 0.7 * Math.min(1, this.indoor * 1.15) * (1 - tun));
+    // distant thunder rolls now and then in heavy rain
+    if (rl > 0.6) {
+      this.thunderT -= dt;
+      if (this.thunderT <= 0) {
+        this.thunderT = 35 + Math.random() * 60;
+        const a = Math.random() * Math.PI * 2;
+        this.play('thunder', { pos: new THREE.Vector3(cam.x + Math.cos(a) * 400, cam.y + 120, cam.z + Math.sin(a) * 400), gain: 0.9 * (0.4 + 0.6 * out) * (1 - tun * 0.7), ref: 400, bus: 'amb', reverb: 0.6, lowpass: this.indoor > 0.5 ? 900 : 2600, vary: 0.08 });
+      }
+    }
     this.loop('snowwind', weather === 'snow' ? (0.22 + this.windGust * 0.25) * (1 - this.indoor * 0.75) : 0);
     this.birdT -= dt;
     if (this.birdT <= 0) {
