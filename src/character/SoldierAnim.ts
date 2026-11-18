@@ -16,7 +16,7 @@ import { REST } from './SoldierRig';
  * swings a downward limb backwards; about +Z tilts +Y towards the soldier's right.
  */
 
-export type ActionKind = 'none' | 'reload' | 'throw' | 'melee' | 'knife' | 'switch' | 'bolt' | 'plant' | 'throwL' | 'stim' | 'detonate' | 'place';
+export type ActionKind = 'none' | 'reload' | 'throw' | 'melee' | 'knife' | 'switch' | 'bolt' | 'plant' | 'throwL' | 'stim' | 'detonate' | 'place' | 'sabPlant' | 'sabDefuse';
 /**
  * What is in the hand (Update 31): shown on bots and online players so an incoming grenade reads
  * before it leaves the hand. +32 = a cooking frag (fuse burning).
@@ -586,6 +586,30 @@ export class SoldierAnimator {
       out.gunPos.x += 0.12 * b;
       out.gunRot.x -= 1.1 * b;
       out.gunRot.z += 0.5 * b;
+    } else if (act === 'sabPlant' || act === 'sabDefuse') {
+      // Sabotasje (Update 43): down on a knee over the charge on the ground in front (t is the real
+      // plant / defuse progress). The gun is slung away; the left hand steadies the case, the right
+      // works — planting: lid, then quick taps across the keypad, then the arm button; defusing:
+      // pinch, work and draw each cap in turn, then the button.
+      const b = sm(Math.min(1, t * 12 + 0.2));
+      out.leftFree = Math.max(out.leftFree, b);
+      out.rightFree = Math.max(out.rightFree, b);
+      out.leftTarget.set(0.17, 0.42, 0.5);
+      if (act === 'sabPlant') {
+        const typing = t > 0.22 && t < 0.7;
+        const tap = typing ? Math.abs(Math.sin(t * 7 / 0.48 * Math.PI)) : 0;
+        const lid = bell(t, 0.02, 0.2);
+        out.rightTarget.set(-0.06 + (typing ? 0.05 * Math.sin(t * 23) : 0) + 0.12 * lid, 0.46 + 0.035 * tap + 0.08 * lid, 0.48 + (typing ? 0.03 * Math.cos(t * 17) : 0));
+        if (t > 0.78 && t < 0.88) out.rightTarget.y -= 0.03 * bell(t, 0.79, 0.87);
+      } else {
+        const k = (t * 3.5) % 1;
+        const pull = t < 0.88 ? seg(k, 0.55, 0.85) : 0;
+        out.rightTarget.set(-0.1 + 0.02 * Math.sin(this.time * 9) * (1 - pull), 0.44 + 0.12 * pull, 0.47 + 0.01 * Math.sin(this.time * 13));
+      }
+      out.leftTarget.y -= 0.01 * Math.sin(this.time * 2);
+      // the gun goes on the sling across the back: both hands are on the charge
+      out.slung = Math.max(out.slung, b);
+      out.spineTwist = 0.05 * Math.sin(this.time * 1.3);
     } else if (act === 'melee') {
       // rifle butt-stroke
       const b = bell(t, 0.05, 0.75), hit = seg(t, 0.25, 0.42);

@@ -10,6 +10,7 @@ import { mp7Reload, mp7Inspect } from './Mp7Anims';
 import { akReload, karReload, karCycle, RifleCtx, KarPlan } from './RifleAnims';
 import { lethalGrenade, lethalKnife, lethalC4, tacticalThrow, detPress, knifePickup, EqCtx } from './EquipAnims';
 import { knifeAction, knifeCarry } from './KnifeAnim';
+import { chargePlant, chargeDefuse, ChargeCtx } from './ChargeAnims';
 import { WeaponModel } from './WeaponModels';
 import { WeaponDef } from './WeaponDefs';
 import { newRevState, revolverAction, revolverIdle, revolverLate, revolverReset, revolverShot } from './RevolverAnim';
@@ -195,7 +196,8 @@ function localBox(o: THREE.Object3D) {
 export type ActionType = 'reload' | 'reloadEmpty' | 'inspect' | 'inspectMag' | 'draw' | 'holster' | 'pump' | 'bolt' | 'shellStart' | 'shell' | 'shellEnd' | 'melee' | 'throw' | 'stim' | 'uav' | 'designate' | 'nvg' | 'breakReload' | 'knifeSlash' | 'knifeStab' | 'knifeKill'
   | 'claymore' | 'c4Throw' | 'detonate' | 'stickyThrow' | 'snapshotThrow' | 'decoyThrow' | 'trophy'
   | 'karReload' | 'karCycle'
-  | 'lethalFrag' | 'lethalSticky' | 'lethalKnife' | 'lethalC4' | 'tactical' | 'detPress' | 'knifePickup';
+  | 'lethalFrag' | 'lethalSticky' | 'lethalKnife' | 'lethalC4' | 'tactical' | 'detPress' | 'knifePickup'
+  | 'sabPlant' | 'sabDefuse';
 
 export interface Action {
   type: ActionType;
@@ -344,6 +346,7 @@ export class Viewmodel {
     for (const [k, build] of Object.entries(EQUIP_BUILDERS)) this.items[k] = build();
     this.items.claymore.userData.twoHand = true;
     this.items.trophy.userData.twoHand = true;
+    this.items.charge.userData.twoHand = true;
     for (const it of Object.values(this.items)) {
       it.visible = false;
       this.root.add(it);
@@ -785,6 +788,9 @@ export class Viewmodel {
   }
   /** free firing-hand target (ladders) */
   private freeR = { b: 0, p: new THREE.Vector3(), q: new THREE.Quaternion() };
+  /** measured wrist → index fingertip / pinch point offsets of the right hand (wrist frame) */
+  reachR = 0;
+  private tipR = { index: new THREE.Vector3(0.01, -0.02, -0.17), pinch: new THREE.Vector3(-0.01, -0.03, -0.13) };
   private freeRPose: FingerPose = POSES.hold;
   /** Wrist pose that puts a palm on `anchor` (root space) with orientation q, r off the surface. */
   private wristAt(side: 'L' | 'R', anchor: THREE.Vector3, q: THREE.Quaternion, r: number) {
@@ -841,7 +847,7 @@ export class Viewmodel {
       };
       if (dims[k]) return cylSDF(g.matrixWorld, dims[k][0], dims[k][1]);
       const boxes: Record<string, [number, number, number, number]> = {
-        c4: [0, 0.055, 0.017, 0.028], detonator: [0, 0.018, 0.046, 0.012], claymore: [0, 0.108, 0.042, 0.022], trophy: [0.04, 0.085, 0.04, 0.085],
+        c4: [0, 0.055, 0.017, 0.028], detonator: [0, 0.018, 0.046, 0.012], claymore: [0, 0.108, 0.042, 0.022], trophy: [0.04, 0.085, 0.04, 0.085], charge: [0.036, 0.2, 0.036, 0.13],
       };
       const bx = boxes[k];
       if (bx) return boxSDF(g.matrixWorld, new THREE.Vector3(0, bx[0], 0), new THREE.Vector3(bx[1], bx[2], bx[3]));
@@ -1487,7 +1493,10 @@ export class Viewmodel {
     if (a) {
       // actions can pause at a point while a button is held (cooking a grenade)
       const holdAt = a.data?.holdAt as number | undefined;
-      if (holdAt !== undefined && a.t >= holdAt && a.data.hold?.()) {
+      // ... or be driven from outside (planting / defusing follow the real progress)
+      const driven = typeof a.data?.drive === 'function' ? (a.data.drive as () => number)() : -1;
+      if (driven >= 0) a.t = driven;
+      else if (holdAt !== undefined && a.t >= holdAt && a.data.hold?.()) {
         a.t = holdAt;
         a.data.heldT = (a.data.heldT ?? 0) + dt;
       } else a.t += dt / a.dur;
@@ -1540,9 +1549,17 @@ export class Viewmodel {
     if (this.rig) {
       this.rig.solve('R', wr.distanceTo(this.shoulderR) > 0.56 ? this.shoulderR.clone().lerp(wr, (wr.distanceTo(this.shoulderR) - 0.56) / wr.distanceTo(this.shoulderR)) : this.shoulderR, wr, wq, poleR);
       // fingers wrap the actual grip; the trigger finger keeps its authored place
-      const heldR = this.freeR.b > 0.5 && this.grenade.visible && (this.grenade.userData.twoHand || this.grenade.userData.hand === 'R') ? this.heldSDF() : null;
+      const heldR = this.freeR.b > 0.5 && this.grenade.visible && !this.action?.data?.noWrapR && (this.grenade.userData.twoHand || this.grenade.userData.hand === 'R') ? this.heldSDF() : null;
       const wrapR = this.freeR.b > 0.5 ? (heldR ? this.rig.wrapPose('R', heldR, this.freeRPose) : poseR) : { ...this.cachedWrap('R', sockR, poseR, ['index']), index: poseR.index };
       this.rig.pose('R', wrapR, rightFree > 0 ? (this.rightActionPose ?? POSES.pinch) : undefined, rightFree);
+      if (this.freeR.b > 0.3) {
+        // where the fingertip really ended up, in the wrist frame (fingertip-targeting actions use it next frame)
+        const iq = wq.clone().invert();
+        const wa = this.rig.wristWorld('R').applyMatrix4(toRoot);
+        this.tipR.index.copy(this.rig.tipWorld('R', 'index')).applyMatrix4(toRoot).sub(wa).applyQuaternion(iq);
+        this.tipR.pinch.copy(this.rig.tipWorld('R', 'pinch')).applyMatrix4(toRoot).sub(wa).applyQuaternion(iq);
+        this.reachR = wa.distanceTo(wr);
+      }
     } else {
       this.right.solve(this.shoulderR, wr, wq, poleR);
       this.right.hand.setPose(poseR, rightFree > 0 ? POSES.pinch : undefined, rightFree);
@@ -2179,6 +2196,17 @@ export class Viewmodel {
       case 'knifePickup':
         knifePickup(t, pos, rot, this.eqCtx(a));
         break;
+      case 'sabPlant':
+      case 'sabDefuse': {
+        const cc: ChargeCtx = Object.assign(this.eqCtx(a), {
+          tip: (w: 'index' | 'pinch') => this.tipR[w].clone(),
+          grip: (side: 'L' | 'R', item: THREE.Object3D, mk: string, f: THREE.Vector3, n: THREE.Vector3, r: number, p: FingerPose, slide?: THREE.Vector3) => this.gripItem(side, item, mk, f, n, r, p, slide),
+          items: this.items,
+        });
+        if (a.type === 'sabPlant') chargePlant(t, pos, rot, cc);
+        else chargeDefuse(t, pos, rot, cc);
+        break;
+      }
       case 'karReload':
       case 'karCycle': {
         if (t < 0.02 && !a.data?.started) {

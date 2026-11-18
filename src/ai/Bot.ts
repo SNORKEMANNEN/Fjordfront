@@ -17,7 +17,7 @@ import { AimController, CoverMap, detectRate, Exposure, Order, SKILL } from './B
 
 /** replicated / recorded pose: see Bot.replayState */
 export const POSE_N = 20;
-const ACTIONS: ActionKind[] = ['none', 'reload', 'throw', 'melee', 'knife', 'switch', 'bolt', 'plant', 'throwL', 'stim', 'detonate', 'place'];
+const ACTIONS: ActionKind[] = ['none', 'reload', 'throw', 'melee', 'knife', 'switch', 'bolt', 'plant', 'throwL', 'stim', 'detonate', 'place', 'sabPlant', 'sabDefuse'];
 export function actionCode(a: ActionKind) {
   return Math.max(0, ACTIONS.indexOf(a));
 }
@@ -1381,7 +1381,12 @@ export class Bot implements Combatant {
     a.lean = this.lean;
     a.ready = this.state === 'engage' || this.state === 'search' || (this.target !== null && this.lastSeenT < 3);
     a.calm = this.state === 'roam' && !this.target;
-    if (this.reloadT > 0) {
+    if (this.busyAct) {
+      // planting / defusing (set by the Sabotasje mode each frame): kneel over the charge
+      a.action = this.busyAct;
+      a.actionT = this.busyT;
+      a.stance = Math.max(1, a.stance);
+    } else if (this.reloadT > 0) {
       a.action = 'reload';
       a.actionT = THREE.MathUtils.clamp(1 - this.reloadT / this.reloadDur, 0, 1);
     } else if (this.throwT >= 0) {
@@ -1396,6 +1401,9 @@ export class Bot implements Combatant {
     this.poseFromAnim(dt);
   }
 
+  /** an externally driven kneeling action (Sabotasje plant / defuse) and its progress */
+  busyAct: ActionKind | null = null;
+  busyT = 0;
   private lastThrowLethal = true;
   private heldItem = 'frag';
   /** begin the pull-cook-throw (the grenade leaves the hand at the release point) */

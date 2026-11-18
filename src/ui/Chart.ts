@@ -403,6 +403,58 @@ export function inkDiamond(c: CanvasRenderingContext2D, x: number, y: number, s:
   c.arc(x, y, 1.8, 0, Math.PI * 2);
   c.fill();
 }
+/**
+ * The Sabotasje charge (Update 43): a little case with its antenna and status lamp, inked.
+ *  dropped  gold ring around it (lying loose)
+ *  carried  small, riding on a carrier's marker (gold outline)
+ *  planted  red, with a pulsing ring
+ */
+export function inkCharge(c: CanvasRenderingContext2D, x: number, y: number, s: number, state: 'dropped' | 'carried' | 'planted', t: number) {
+  const w = s * 1.7, h = s * 1.05;
+  const body = state === 'planted' ? INK.red : INK.ink;
+  if (state !== 'carried') {
+    const pulse = state === 'planted' ? (t * 1.6) % 1 : 0;
+    c.save();
+    c.strokeStyle = state === 'planted' ? INK.red : INK.gold;
+    if (state === 'planted') c.globalAlpha *= 1 - pulse;
+    c.lineWidth = 2;
+    c.beginPath();
+    c.arc(x, y, s * (1.45 + 0.9 * pulse), 0, Math.PI * 2);
+    c.stroke();
+    c.restore();
+  }
+  // paper halo so it reads on any chart colour
+  c.fillStyle = INK.paper;
+  c.beginPath();
+  c.roundRect(x - w / 2 - 2, y - h / 2 - 2, w + 4, h + 4, 3);
+  c.fill();
+  c.fillStyle = body;
+  c.beginPath();
+  c.roundRect(x - w / 2, y - h / 2, w, h, 2);
+  c.fill();
+  if (state === 'carried') {
+    c.strokeStyle = INK.gold;
+    c.lineWidth = 1.6;
+    c.stroke();
+  }
+  // the panel half and the bricks half
+  c.fillStyle = INK.paper;
+  c.fillRect(x - w / 2 + w * 0.12, y - h * 0.22, w * 0.3, h * 0.44);
+  c.fillStyle = state === 'planted' ? '#f6c3c0' : '#d9c79a';
+  c.fillRect(x + w * 0.06, y - h * 0.3, w * 0.32, h * 0.6);
+  // antenna + lamp
+  c.strokeStyle = body;
+  c.lineWidth = 1.6;
+  c.beginPath();
+  c.moveTo(x + w * 0.38, y - h / 2);
+  c.lineTo(x + w * 0.5, y - h / 2 - s * 0.55);
+  c.stroke();
+  const lit = state === 'planted' ? Math.sin(t * 12) > 0 : true;
+  c.fillStyle = lit ? (state === 'planted' ? '#ff3b30' : INK.gold) : INK.ink2;
+  c.beginPath();
+  c.arc(x - w * 0.24, y - h * 0.02, Math.max(1.4, s * 0.16), 0, Math.PI * 2);
+  c.fill();
+}
 /** waypoint: an inked pennant on a staff */
 export function inkFlag(c: CanvasRenderingContext2D, x: number, y: number, color: string, seed: number) {
   c.strokeStyle = color;

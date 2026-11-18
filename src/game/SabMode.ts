@@ -8,7 +8,7 @@ import { SabBrain } from '../ai/SabBrain';
 import { SV_SPAWNS, SV_SITES, AREA, Rect } from '../world/maps/Solvik';
 import { WEAPONS, WeaponDef } from '../weapons/WeaponDefs';
 import { WEAPON_BUILDERS, WeaponId } from '../weapons/WeaponModels';
-import { makeCharge } from '../weapons/EquipmentModels';
+import { makeCharge, setLed } from '../weapons/EquipmentModels';
 import { bakeFlat } from '../render/Batch';
 import { NETF } from '../net/NetFlags';
 
@@ -54,6 +54,8 @@ export class SabMode {
   private sel: { lethal: Nade | null; tactical: Nade | null } = { lethal: null, tactical: null };
   private deadT = 0;
   private useHeld = false;
+  /** the first-person plant / defuse animation in progress (driven from here) */
+  private vmAct: { kind: 'plant' | 'defuse'; data: any } | null = null;
   private sentHold = false;
   private lastPhase = '';
   /** a soldier who joined mid-round sits out until the next one */
@@ -236,7 +238,14 @@ export class SabMode {
     const g = this.g;
     this.chargeMesh.visible = true;
     this.chargeMesh.position.copy(p).setY(this.groundY(p) + 0.02);
-    this.chargeMesh.rotation.set(0, Math.random() * Math.PI * 2, 0);
+    // facing the way the planter knelt, lid and guard up, the LCD running
+    this.chargeMesh.rotation.set(0, c instanceof Bot ? c.yaw : g.player.yaw, 0);
+    // (the case lies a step in front of where the planter knelt)
+    const fy = c instanceof Bot ? c.yaw : g.player.yaw;
+    this.chargeMesh.position.x -= Math.sin(fy) * 0.45;
+    this.chargeMesh.position.z -= Math.cos(fy) * 0.45;
+    this.chargeMesh.position.y = this.groundY(this.chargeMesh.position) + 0.02;
+    this.chargeState('armed');
     g.audio.play('place', { pos: p, gain: 0.8, ref: 4 });
     g.audio.play('armChirp', { pos: p, gain: 0.9, ref: 6 });
     const mine = c.team === g.avatar.team;
@@ -256,7 +265,7 @@ export class SabMode {
     g.audio.play('claymoreClick', { pos: this.sab.charge.pos, gain: 1, ref: 5 });
     g.audio.play('beepLow', { pos: this.sab.charge.pos, gain: 0.8, ref: 5, rate: 0.7 });
     g.audio.stopEmitter('sabBeep');
-    this.led && setLed(this.led, 0);
+    this.chargeState('defused', gamble ? this.sab.charge.wire : -1);
     this.ui.say(gamble ? 'RIKTIG LEDNING!' : 'DESARMERT', `${c === g.avatar ? 'DU' : c.name.toUpperCase()} ${gamble ? 'KUTTET RIKTIG · CUT THE RIGHT WIRE' : 'DESARMERTE LADNINGEN · DEFUSED THE CHARGE'}`, 'defused', 3);
   }
   private exploded(p: THREE.Vector3, by: Combatant | null) {
@@ -273,6 +282,33 @@ export class SabMode {
     g.audio.play('explosionFar', { pos: p, gain: 1.2, ref: 40, reverb: 0.8, rate: 0.8 });
     void by;
   }
+  /** the world charge's look: shut (carried / dropped), armed (planted), defused */
+  private chargeState(st: 'shut' | 'armed' | 'defused', cutWire = -1) {
+    const m = this.chargeMesh;
+    m.userData.reset?.();
+    const led = this.led;
+    if (led) {
+      led.userData.red ??= (led.userData.base as THREE.Color).clone();
+      led.userData.base = st === 'defused' ? new THREE.Color(0.4, 4.5, 0.8) : led.userData.red;
+      setLed(led, st === 'defused' ? 1 : 0.05);
+    }
+    if (st === 'shut') return;
+    m.getObjectByName('lid')!.rotation.z = 2.0;
+    m.getObjectByName('armGuard')!.rotation.x = -1.95;
+    const disp = m.userData.setDisplay as (s: string, mode: string) => void;
+    if (st === 'defused') {
+      disp('DESARMERT', 'defused');
+      if (cutWire >= 0) (m.userData.cut as (i: number) => void)(cutWire);
+      else for (let i = 0; i < 3; i++) {
+        const cap = m.getObjectByName('cap' + i)!;
+        cap.position.copy(cap.userData.rest as THREE.Vector3).add(new THREE.Vector3(0.012, 0.055, 0));
+        cap.rotation.set(0, 0, -0.35);
+      }
+    } else disp(String(FUSE), 'armed');
+  }
+  private dispT = 0;
+  private otherPlant = false;
+  private capsOut = false;
   private badWire(c: Combatant) {
     const g = this.g;
     g.audio.play('claymoreClick', { pos: this.sab.charge.pos, gain: 1, ref: 5 });
@@ -290,6 +326,7 @@ export class SabMode {
       }
     } else if (st === 'carried') {
       this.chargeMesh.visible = false;
+      this.chargeState('shut');
       if (c === g.avatar && this.sab.phase !== 'buy') g.ui.notify('DU HAR LADNINGEN', 'YOU HAVE THE CHARGE · [F] HOLD ON A SITE');
     }
   }
@@ -490,6 +527,7 @@ export class SabMode {
     if (inp.wasPressed('streak1')) this.cycleNade('lethal');
     if (inp.wasPressed('streak2')) this.cycleNade('tactical');
     if (!a.alive) {
+      if (this.vmAct) this.vmAct.data.abort = true;
       this.deadT += dt;
       if (this.deadT > 2.4 && !g.spectating) this.spectateTeam();
       this.useHeld = false;
@@ -500,7 +538,7 @@ export class SabMode {
     // drop your gun for a teammate ([J])
     if (inp.wasPressed('drop')) this.playerDrop();
     // plant / defuse: hold F
-    const holding = inp.isDown('spot');
+    const holding = inp.isDown('spot') || !!(this.vmAct?.data.cut && !this.vmAct.data.snipped);
     const moving = g.player.horizSpeed() > 0.6;
     let r: 'plant' | 'defuse' | null;
     if (this.client) {
@@ -511,9 +549,11 @@ export class SabMode {
       }
       r = want && sab.planting?.c === a ? 'plant' : want && sab.defusing?.c === a ? 'defuse' : want && (sab.charge.holder === a || sab.phase === 'planted') ? (sab.charge.holder === a ? 'plant' : 'defuse') : null;
     } else r = sab.use(a, holding, dt, moving);
+    this.driveVm(r, dt);
     if (r) {
       // planting / defusing roots you (crouched, the gun lowered)
       g.player.frozen = true;
+      g.player.forceCrouch?.(dt);
       g.weapons.enabled = false;
       if (!this.useHeld) g.playerVoice?.(r === 'plant' ? 'planting' : 'defusing', 0.9);
       this.useHeld = true;
@@ -553,11 +593,73 @@ export class SabMode {
       this.wireT = Math.min(this.wireT, 0.6);
       return;
     }
-    if (this.sab.defusing?.c === g.avatar) {
-      if (this.client) this.net?.sabSend({ t: 'sabIn', k: 'cut', w });
-      else this.sab.cut(g.avatar, w);
-      g.audio.play('claymoreClick', { gain: 0.8, reverb: 0, rate: 1.3 });
+    if (this.sab.defusing?.c === g.avatar && this.sab.defusing!.t >= WIRE_OPEN) {
+      const doCut = () => {
+        if (this.client) this.net?.sabSend({ t: 'sabIn', k: 'cut', w });
+        else this.sab.cut(g.avatar, w);
+      };
+      // the cutters come out and the snip is the moment it is decided
+      const act = this.vmAct;
+      if (act?.kind === 'defuse' && !act.data.cut && !act.data.abort && g.vm.action?.data === act.data) {
+        act.data.cut = { w };
+        act.data.onSnip = doCut;
+      } else if (!act?.data.cut) doCut();
     }
+  }
+  /** first-person plant / defuse: start, feed the real progress, finish or abort */
+  private driveVm(r: 'plant' | 'defuse' | null, dt: number) {
+    const g = this.g;
+    const a = g.avatar;
+    const sab = this.sab;
+    let act = this.vmAct;
+    if (act && g.vm.action?.data !== act.data) act = this.vmAct = null; // something else took the hands
+    if (r && (!act || act.kind !== r || act.data.abort)) {
+      if (g.weapons.reloading) g.weapons.cancelReload();
+      const data: any = {
+        p: 0,
+        code: Array.from({ length: 7 }, () => Math.floor(Math.random() * 10)).join(''),
+        timer: () => sab.timer,
+        sfx: (n: string) => this.vmSfx(n),
+      };
+      data.drive = () => (data.finished ? 1 : Math.min(0.999, Math.max(0, data.p)));
+      g.vm.play(r === 'plant' ? 'sabPlant' : 'sabDefuse', 1, [], () => {
+        if (this.vmAct?.data === data) this.vmAct = null;
+      }, data);
+      act = this.vmAct = { kind: r, data };
+    }
+    if (!act) return;
+    const d = act.data;
+    if (act.kind === 'plant') {
+      if (sab.planting?.c === a) d.p = sab.planting!.t / PLANT_TIME;
+      if (sab.charge.state === 'planted' && sab.charge.planter === a) {
+        d.p = 1;
+        d.done = true;
+      }
+    } else {
+      const df = sab.defusing;
+      if (df?.c === a) d.p = df!.t / (df!.kit ? DEFUSE_KIT : DEFUSE_TIME);
+      if (sab.charge.state === 'defused') d.done = true;
+    }
+    if (!r && !d.done && !(d.cut && !d.snipped)) d.abort = true;
+    if (!a.alive) d.abort = true;
+    // the view tips down onto the charge while defusing
+    if (act.kind === 'defuse' && !d.abort && !d.done && g.player.pitch > -0.62) g.player.pitch += (-0.62 - g.player.pitch) * Math.min(1, dt * 3.5);
+  }
+  private vmSfx(n: string) {
+    const au = this.g.audio;
+    const o = { gain: 0.5, reverb: 0 };
+    if (n === 'keyBeep') au.play('beep', { ...o, gain: 0.32, rate: 1.5 + Math.random() * 0.2 });
+    else if (n === 'lidOpen') au.play('coverFlip', { ...o, rate: 0.8 });
+    else if (n === 'guardFlip') au.play('coverFlip', { ...o, gain: 0.4, rate: 1.3 });
+    else if (n === 'armChirp') au.play('armChirp', { ...o, gain: 0.6 });
+    else if (n === 'placeDown') au.play('place', { ...o, gain: 0.7 });
+    else if (n === 'capPull') au.play('pin', { ...o, gain: 0.45, rate: 0.85 + Math.random() * 0.15 });
+    else if (n === 'snip') au.play('clack', { ...o, gain: 0.8, rate: 1.5 });
+  }
+  /** a local defuser sees the charge in their hands; the world copy hides meanwhile */
+  private vmHidesCharge() {
+    const act = this.vmAct;
+    return !!act && act.kind === 'defuse' && !act.data.finished && !act.data.abort;
   }
   private spectateTeam() {
     const g = this.g;
@@ -575,6 +677,58 @@ export class SabMode {
   private updateCharge(dt: number) {
     const g = this.g;
     const ch = this.sab.charge;
+    const pl = this.sab.planting, df = this.sab.defusing;
+    // bots kneel over the charge while they plant / defuse (the pose code goes out to clients too)
+    for (const c of this.players) {
+      if (!(c instanceof Bot) || c.netPuppet) continue;
+      c.busyAct = pl?.c === c ? 'sabPlant' : df?.c === c ? 'sabDefuse' : null;
+      c.busyT = pl?.c === c ? Math.min(1, pl.t / PLANT_TIME) : df?.c === c ? Math.min(1, df.t / (df.kit ? DEFUSE_KIT : DEFUSE_TIME)) : 0;
+    }
+    // someone else planting: the case is on the ground in front of them, lid coming open, code going in
+    if (pl && pl.c !== g.avatar && ch.state === 'carried') {
+      const c = pl.c;
+      const k = Math.min(1, pl.t / PLANT_TIME);
+      const yaw = c instanceof Bot ? c.yaw : 0;
+      const p = c.position();
+      const m = this.chargeMesh;
+      if (!this.otherPlant) {
+        this.otherPlant = true;
+        this.chargeState('shut');
+      }
+      m.visible = c instanceof Bot ? c.root.visible : true;
+      m.position.set(p.x - Math.sin(yaw) * 0.45, 0, p.z - Math.cos(yaw) * 0.45);
+      m.position.y = this.groundY(m.position) + 0.02;
+      m.rotation.set(0, yaw, 0);
+      m.getObjectByName('lid')!.rotation.z = 2 * Math.min(1, Math.max(0, (k - 0.03) / 0.17));
+      m.getObjectByName('armGuard')!.rotation.x = k > 0.76 ? -1.95 : 0;
+      const n = Math.max(0, Math.min(7, Math.floor((k - 0.22) / 0.48 * 7)));
+      (m.userData.setDisplay as (s: string, mode: string) => void)(k > 0.83 ? 'ARMERT' : '*'.repeat(n).padEnd(7, '-'), k > 0.83 ? 'armed' : 'type');
+      return;
+    }
+    if (this.otherPlant && !(pl && pl.c !== g.avatar)) {
+      this.otherPlant = false;
+      if (ch.state === 'carried') this.chargeMesh.visible = false;
+    }
+    // someone else defusing: the caps come out one by one
+    if (df && ch.state === 'planted') {
+      const k = Math.min(1, df.t / (df.kit ? DEFUSE_KIT : DEFUSE_TIME));
+      const W = [0.33, 0.6, 0.86];
+      for (let i = 0; i < 3; i++) {
+        const cap = this.chargeMesh.getObjectByName('cap' + i)!;
+        const u = Math.max(0, Math.min(1, (k - W[i] + 0.12) / 0.1));
+        cap.position.copy(cap.userData.rest as THREE.Vector3).add(new THREE.Vector3(0.012 * u, 0.055 * u, 0));
+        cap.rotation.z = -0.35 * u;
+      }
+      this.capsOut = true;
+    } else if (this.capsOut && ch.state === 'planted') {
+      this.capsOut = false;
+      // a defuse given up: the caps go back in (as the rules reset the progress)
+      for (let i = 0; i < 3; i++) {
+        const cap = this.chargeMesh.getObjectByName('cap' + i)!;
+        cap.position.copy(cap.userData.rest as THREE.Vector3);
+        cap.rotation.z = 0;
+      }
+    }
     if (ch.state === 'planted') {
       // beeps speed up as the fuse runs down (real recorded beeps), the LED blinks with them
       const left = Math.max(0, this.sab.timer);
@@ -585,7 +739,14 @@ export class SabMode {
         g.audio.play(left < 2 ? 'beepLow' : 'beep', { pos: ch.pos, gain: 0.7, ref: 5, reverb: 0.2, rate: left < 5 ? 1.15 : 1 });
         if (this.led) setLed(this.led, 1);
       } else if (this.led && this.beepT < period - 0.08) setLed(this.led, 0.05);
-      this.chargeMesh.visible = true;
+      this.chargeMesh.visible = !this.vmHidesCharge();
+      // the LCD counts down (a few times a second is plenty for the world copy)
+      this.dispT -= dt;
+      if (this.dispT <= 0) {
+        this.dispT = 0.1;
+        const l = Math.max(0, left);
+        (this.chargeMesh.userData.setDisplay as (s: string, m: string) => void)(l >= 10 ? String(Math.ceil(l)) : l.toFixed(1), 'armed');
+      }
     } else if (ch.state === 'carried' && ch.holder && ch.holder !== g.avatar) {
       // on the carrier's back
       const h = ch.holder;
@@ -1013,6 +1174,25 @@ export class SabMode {
     }
   }
   /** F belongs to the mode right now (plant / defuse / a gun at your feet), not to doors / spotting */
+  /**
+   * Where the charge shows on the radar / the map for this player: planted — everyone; dropped
+   * or carried — the attackers only (who has it is their business).
+   */
+  chargeView(): { x: number; z: number; state: 'dropped' | 'carried' | 'planted'; who?: string; timer?: number } | null {
+    const g = this.g;
+    const s = this.sab;
+    const ch = s.charge;
+    if (s.phase === 'ended') return null;
+    const atk = g.avatar.team === s.atk;
+    if (ch.state === 'planted') return { x: ch.pos.x, z: ch.pos.z, state: 'planted', timer: s.timer };
+    if (!atk) return null;
+    if (ch.state === 'dropped') return { x: ch.pos.x, z: ch.pos.z, state: 'dropped' };
+    if (ch.state === 'carried' && ch.holder) {
+      const p = ch.holder.position();
+      return { x: p.x, z: p.z, state: 'carried', who: ch.holder === g.avatar ? 'DEG' : ch.holder.name };
+    }
+    return null;
+  }
   usesF() {
     const g = this.g;
     const a = g.avatar;
@@ -1100,6 +1280,12 @@ export class SabMode {
       const s = proj(ch.pos.clone().setY(ch.pos.y + 0.6));
       if (s) marks.push({ ...s, label: ch.state === 'planted' ? `${Math.ceil(Math.max(0, sab.timer))}` : 'LADNING', cls: ch.state === 'planted' ? 'planted' : 'dropped', ico: 'charge', dist: ch.pos.distanceTo(cam.position) });
     }
+    // the carrier, for their own side: the charge icon over their head
+    if (ch.state === 'carried' && ch.holder && ch.holder !== g.avatar && ch.holder.team === me && ch.holder.alive) {
+      const hp = ch.holder.position();
+      const s = proj(hp.clone().setY(hp.y + 2.25));
+      if (s) marks.push({ ...s, label: ch.holder.name.toUpperCase(), cls: 'carrier', ico: 'charge', dist: hp.distanceTo(cam.position) });
+    }
     if (sab.phase === 'buy' || (sab.phase === 'live' && sab.liveT < 20)) {
       for (const st of SV_SITES) {
         const s = proj(new THREE.Vector3(st.x, g.terrain.heightAt(st.x, st.z) + 2.5, st.z));
@@ -1112,10 +1298,5 @@ export class SabMode {
 }
 
 const r2 = (v: number) => Math.round(v * 100) / 100;
-function setLed(led: THREE.Mesh, k: number) {
-  const m = led.material as THREE.MeshBasicMaterial;
-  if (!m.userData.base) m.userData.base = m.color.clone();
-  m.color.copy(m.userData.base as THREE.Color).multiplyScalar(k);
-}
 export type { Kit, Seat };
 export { NADES };

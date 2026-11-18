@@ -1,8 +1,8 @@
 import { Terrain } from '../world/Terrain';
 import { PLAY_HALF } from '../world/MapLayout';
-import { chartRaster, B, INK, FONT, View, drawRoads, drawBuildings, inkObjective, inkLine, inkCircle, inkArrow } from './Chart';
+import { chartRaster, B, INK, FONT, View, drawRoads, drawBuildings, inkObjective, inkLine, inkCircle, inkArrow, inkCharge } from './Chart';
 
-export interface RadarBlip { x: number; z: number; kind: 'ally' | 'enemy' | 'spotted' | 'ping' | 'flag' | 'heli' | 'heliFoe'; alpha: number; label?: string; color?: string }
+export interface RadarBlip { x: number; z: number; kind: 'ally' | 'enemy' | 'spotted' | 'ping' | 'flag' | 'heli' | 'heliFoe' | 'charge'; alpha: number; label?: string; color?: string }
 
 /**
  * Rotating minimap, drawn as a cut-out of the paper chart: the same raster as the tactical map,
@@ -79,6 +79,16 @@ export class Radar {
         c.rotate(-yaw);
         const col = /5aa8ff/i.test(b.color ?? '') ? INK.friend : /ff4a3a/i.test(b.color ?? '') ? INK.foe : INK.ink2;
         inkObjective(c, 0, 0, 14, b.label ?? '', col, null, 0, seed * 7);
+        c.restore();
+        continue;
+      }
+      if (b.kind === 'charge') {
+        // the charge: lying loose, planted (pulsing) or riding on its carrier's dot
+        c.save();
+        c.translate(x, z);
+        c.rotate(-yaw);
+        const st = (b.label ?? 'dropped') as 'dropped' | 'carried' | 'planted';
+        inkCharge(c, 0, st === 'carried' ? -13 : 0, st === 'carried' ? 6.5 : 8, st, performance.now() / 1000);
         c.restore();
         continue;
       }

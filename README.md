@@ -290,6 +290,50 @@ URL options: `?quality=low|medium|high|ultra`, `?weather=clear|overcast|rain|sno
 - **Rifle:** support hand moved so it no longer shows through the optic window.
 - **Pistol:** hold reworked.
 
+## Update 43: The charge, reworked
+
+**A new charge, built from scratch**
+- **An olive hard case** with rubber bumpers, a carry handle and a stencilled label.
+- **The left half is the control panel**, under a lid hinged on its left edge. It has:
+  - an LCD that shows live text,
+  - a 3 × 4 keypad whose keys really press in,
+  - a red arm button under a flip-up orange guard,
+  - a status lamp.
+- **The right half is the explosive:** four bricks, taped and strapped down, with three detonator caps pushed into them.
+- **The red, blue and yellow wires** run from the panel terminals to the caps. They are the wire gamble you can see. A cut wire springs apart with bare copper ends.
+- **Wire cutters** with red dipped grips come out for the gamble.
+
+**Planting (first person)**
+- **The animation follows the real plant timer**, so the hands are always where the progress is.
+- **Step by step:**
+  1. The gun drops away and the left hand brings the charge up by its end.
+  2. The right hand hooks the lid and swings it open to the side.
+  3. The index finger types a random 7-digit code. It moves from key to key, each key goes down under the fingertip, and the LCD fills in one digit at a time with a key beep.
+  4. The finger flips the guard up and presses the arm button. The lamp goes solid and the LCD reads ARMERT.
+  5. Both hands lower the charge to the ground before the gun comes back.
+- **Let go of F early** and it all winds back out smoothly. You also kneel while planting.
+- **The fingertip really lands on the key.** The arms now measure where the posed index fingertip (or the thumb–index pinch point) actually is, and they place the wrist so that point lands on the key, the lid edge or the cap.
+
+**Defusing (first person)**
+- **The view tips down onto the charge.** Its LCD runs the real countdown and the lamp blinks with the beeps.
+- **The left hand steadies the case.** The right hand pinches each detonator cap in turn, works it loose and draws it out, then presses the arm button to cut the circuit. The lamp turns green and the LCD reads DESARMERT.
+- **The wire gamble is animated.** Pick a wire ([1] [2] [3]) and the cutters come out and open on that wire. **The snip itself is the moment the gamble is decided**: the wire springs apart, then the round is won or the charge goes off.
+- **The wire panel has moved to the right side** of the screen, so it no longer covers the charge.
+
+**Third person and the world**
+- **Bots and online players kneel over the charge** to plant and defuse. The gun goes onto the sling and both hands work at the case on the ground.
+  - **While someone plants**, the case sits in front of them: the lid comes open, the code fills in as dots, the guard flips up and the LCD reads ARMERT.
+  - **While someone defuses**, the caps come out one by one, and go back in if they give up.
+- **The planted charge lies a step in front of where the planter knelt**, facing them, with the lid and guard up and a live countdown on its LCD.
+- **A defused charge** shows its green lamp and either its pulled caps or the cut wire.
+
+**The charge on the map**
+- **A new charge icon**, an inked case with its antenna and lamp, appears on the minimap and on the tactical map (M):
+  - **Dropped:** with a gold ring, where it lies. Only attackers see it.
+  - **Carried:** riding on the carrier's marker, with their name on the tactical map. Only attackers see it.
+  - **Planted:** in red with a pulsing ring and the time left. Everyone sees it.
+- **Attackers also see the charge icon over the carrier's head** in the world, with their name and distance.
+
 ## Update 42: Sabotasje 6v6 and a new map, Solvik
 
 **Solvik: a new map**

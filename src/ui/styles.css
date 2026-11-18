@@ -1030,16 +1030,16 @@ body.sab-mode .hud .top { top: 74px; }
 .sab-prog .pl { margin-top: -62px; display: flex; flex-direction: column; align-items: center; gap: 30px; }
 .sab-prog .pl .ico { width: 28px; height: 28px; }
 .sab-prog .pl b { font-size: 11px; letter-spacing: .16em; white-space: nowrap; background: var(--plate-2); padding: 3px 8px; }
-.sab-wires { position: absolute; left: 50%; top: 70%; transform: translateX(-50%); pointer-events: auto; background: var(--plate-2); padding: 12px 16px; text-align: center; min-width: 380px; border-top: 3px solid var(--hud-gold); }
+.sab-wires { position: absolute; right: 3%; top: 34%; pointer-events: auto; background: var(--plate-2); padding: 12px 14px; text-align: center; width: 252px; border-top: 3px solid var(--hud-gold); }
 .sab-wires .wh { font-size: 12px; letter-spacing: .2em; color: var(--hud-gold); }
 .sab-wires .wl { display: flex; gap: 10px; justify-content: center; margin: 10px 0 8px; }
-.sab-wires .w { all: unset; cursor: pointer; display: flex; flex-direction: column; align-items: center; gap: 4px; width: 96px; padding: 6px 0; background: rgba(255,255,255,.06); }
-.sab-wires .w i { display: block; width: 72px; height: 8px; border-radius: 4px; background: var(--wc); box-shadow: 0 0 10px var(--wc); }
+.sab-wires .w { all: unset; cursor: pointer; display: flex; flex-direction: column; align-items: center; gap: 4px; width: 72px; padding: 6px 0; background: rgba(255,255,255,.06); }
+.sab-wires .w i { display: block; width: 54px; height: 8px; border-radius: 4px; background: var(--wc); box-shadow: 0 0 10px var(--wc); }
 .sab-wires .w b { font-family: var(--f-display); font-size: 22px; }
 .sab-wires .w span { font-size: 10px; letter-spacing: .14em; color: var(--hud-dim); }
 .sab-wires .w.ruled { opacity: .45; } .sab-wires .w.ruled i { background: repeating-linear-gradient(90deg, var(--wc) 0 8px, transparent 8px 12px); box-shadow: none; }
 .sab-wires .w.chosen { outline: 2px solid var(--hud); }
-.sab-wires .ws { font-family: var(--f-sans); font-size: 11px; color: var(--hud-dim); max-width: 380px; margin: 0 auto; }
+.sab-wires .ws { font-family: var(--f-sans); font-size: 11px; color: var(--hud-dim); max-width: 230px; margin: 0 auto; }
 .sab-center { position: absolute; left: 50%; top: 25%; transform: translate(-50%, -10px); text-align: center; opacity: 0; transition: opacity .3s, transform .3s; }
 .sab-center.show { opacity: 1; transform: translate(-50%, 0); }
 .sab-center b { display: block; font-family: var(--f-display); font-size: 44px; font-weight: 800; letter-spacing: .06em; }
@@ -1053,6 +1053,7 @@ body.sab-mode .hud .top { top: 74px; }
 .sab-marks .mk b { font-family: var(--f-display); font-size: 15px; font-weight: 800; }
 .sab-marks .mk small { font-family: var(--f-mono); font-size: 9.5px; color: var(--hud-dim); }
 .sab-marks .mk.planted { color: var(--foe); } .sab-marks .mk.dropped { color: var(--hud-gold); }
+.sab-marks .mk.carrier { color: var(--hud-gold); } .sab-marks .mk.carrier .ico { width: 18px; height: 18px; } .sab-marks .mk.carrier b { font-size: 10px; }
 .sab-marks .mk.site b { font-size: 26px; width: 34px; height: 34px; line-height: 34px; text-align: center; border: 2px solid var(--hud); background: var(--plate); }
 .sab-spec { position: absolute; left: 50%; bottom: 120px; transform: translateX(-50%); text-align: center; background: var(--plate); padding: 6px 18px; }
 .sab-spec small { display: block; font-size: 9.5px; letter-spacing: .24em; color: var(--hud-dim); }

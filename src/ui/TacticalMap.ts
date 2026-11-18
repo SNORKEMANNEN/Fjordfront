@@ -2,7 +2,7 @@ import { Terrain } from '../world/Terrain';
 import { PLAY_HALF, TUNNEL, TUNNEL_EXIT, tunnelShafts, LADDERS, landmarkAt, MAP_ID, MAP_NAME } from '../world/MapLayout';
 import { tunnelPath, TUN } from '../world/maps/Brosund';
 import type { Input } from '../core/Input';
-import { chartRaster, B, INK, FONT, View, drawRoads, drawBuildings, drawSoundings, drawLandmarkLabels, compassRose, scaleBar, inkObjective, inkDiamond, inkFlag, inkArrow, inkLine, inkCircle } from './Chart';
+import { chartRaster, B, INK, FONT, View, drawRoads, drawBuildings, drawSoundings, drawLandmarkLabels, compassRose, scaleBar, inkObjective, inkDiamond, inkFlag, inkArrow, inkLine, inkCircle, inkCharge } from './Chart';
 
 /**
  * Full-screen tactical map [M], in the spirit of the big battle-royale maps: the whole play area
@@ -34,6 +34,8 @@ export interface MapState {
   team: number;
   timeLeft: string;
   mode: string;
+  /** the Sabotasje charge, when this side may see it */
+  charge?: { x: number; z: number; state: 'dropped' | 'carried' | 'planted'; who?: string; timer?: number };
 }
 
 const COLS = 'ABCDEFGH';
@@ -231,6 +233,7 @@ export class TacticalMap {
     drawLandmarkLabels(c, v, this.zoom, landmarkAt(s.px, s.pz), s.flags.map((f) => ({ x: this.sx(f.x), y: this.sy(f.z) })));
     this.drawFlags(s);
     this.drawIntel(s);
+    this.drawCharge(s);
     this.drawPlayer(s);
     this.drawPanel(s);
     this.drawCursor(s);
@@ -458,6 +461,21 @@ export class TacticalMap {
       inkArrow(c, x, y, a.yaw, 7, INK.friend);
       if (this.zoom > 2.2) this.halo(a.name.toUpperCase(), x + 9, y, INK.sea);
     }
+  }
+
+  private drawCharge(s: MapState) {
+    const ch = s.charge;
+    if (!ch) return;
+    const c = this.c;
+    const x = this.sx(ch.x), y = this.sy(ch.z);
+    inkCharge(c, x, ch.state === 'carried' ? y - 15 : y, ch.state === 'carried' ? 8 : 10, ch.state, this.t);
+    c.font = `600 11px ${FONT.cond}`;
+    c.textAlign = 'center';
+    c.textBaseline = 'top';
+    (c as any).letterSpacing = '1.5px';
+    const label = ch.state === 'planted' ? `LADNING · ${Math.ceil(Math.max(0, ch.timer ?? 0))} s` : ch.state === 'dropped' ? 'LADNING · MISTET' : `LADNING · ${(ch.who ?? '').toUpperCase()}`;
+    this.halo(label, x, y + (ch.state === 'carried' ? 6 : 16), ch.state === 'planted' ? INK.red : INK.gold);
+    (c as any).letterSpacing = '0px';
   }
 
   private drawPlayer(s: MapState) {

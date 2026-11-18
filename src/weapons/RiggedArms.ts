@@ -325,6 +325,28 @@ export class RiggedArms {
     return out;
   }
 
+  /** World position of the wrist joint as solved. */
+  wristWorld(side: Side, out = new THREE.Vector3()) {
+    this.rigs[side].wrist.updateMatrixWorld(true);
+    return this.rigs[side].wrist.getWorldPosition(out);
+  }
+  /** World position of the index fingertip, or of the thumb–index pinch point (call after pose()). */
+  tipWorld(side: Side, which: 'index' | 'pinch', out = new THREE.Vector3()) {
+    const r = this.rigs[side];
+    r.wrist.updateMatrixWorld(true);
+    const tipOf = (f: Finger, o: THREE.Vector3) => {
+      const last = r.fingers[f][2].bone;
+      const end = last.children.find((c) => (c as THREE.Bone).isBone);
+      if (end) return end.getWorldPosition(o);
+      const a = last.getWorldPosition(o);
+      const b = r.fingers[f][1].bone.getWorldPosition(_v2);
+      return a.add(_v1.copy(a).sub(b).multiplyScalar(0.8));
+    };
+    tipOf('index', out);
+    if (which === 'pinch') out.add(tipOf('thumb', new THREE.Vector3())).multiplyScalar(0.5);
+    return out;
+  }
+
   /** Palm centre in world space (for "is this hand near that surface" tests). */
   palmWorld(side: Side, out = new THREE.Vector3()) {
     const r = this.rigs[side];

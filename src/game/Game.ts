@@ -2317,9 +2317,11 @@ export class Game {
       code = ty.startsWith('reload') || ty === 'breakReload' || ty === 'karReload' || ty.startsWith('shell') ? 1
         : ty.startsWith('lethal') || ty === 'throw' || ty.endsWith('Throw') ? 2
         : ty === 'tactical' ? 8 : ty === 'stim' ? 9 : ty === 'detonate' || ty === 'detPress' ? 10 : ty === 'claymore' ? 11
+        : ty === 'sabPlant' ? 12 : ty === 'sabDefuse' ? 13
         : ty === 'melee' ? 3 : ty === 'knifePickup' ? 0 : ty.startsWith('knife') ? 4 : ty === 'draw' || ty === 'holster' ? 5 : ty === 'bolt' || ty === 'karCycle' || ty === 'pump' ? 6 : ty === 'trophy' ? 7 : 0;
       // down on a knee while setting the claymore
       if (ty === 'claymore' && act.t > 0.38 && act.t < 0.72) a[o + 11] = Math.max(1, a[o + 11]);
+      if (ty === 'sabPlant' || ty === 'sabDefuse') a[o + 11] = Math.max(1, a[o + 11]);
     }
     a[o + 14] = code;
     a[o + 15] = act ? act.t : 0;
@@ -4165,6 +4167,10 @@ export class Game {
     }
     for (const hl of this.streaks.helis) st.helis.push({ x: hl.pos.x, z: hl.pos.z, friendly: hl.team === team });
     for (const pg of this.worldPings) if (pg.until > this.time) st.pings.push({ x: pg.pos.x, z: pg.pos.z, t: pg.until - this.time });
+    if (this.sab) {
+      st.mode = 'Sabotasje';
+      st.charge = this.sab.chargeView() ?? undefined;
+    }
     this.tmap.draw(st, dt);
   }
 
@@ -4309,6 +4315,8 @@ export class Game {
     if (this.sab) {
       const s = this.sab.sab;
       for (const st of SV_SITES) blips.push({ x: st.x, z: st.z, kind: 'flag', alpha: 1, label: st.letter, color: s.charge.state === 'planted' && s.charge.site === st.letter ? '#ff4a3a' : '#f2b544' });
+      const cv = this.sab.chargeView();
+      if (cv) blips.push({ x: cv.x, z: cv.z, kind: 'charge', alpha: 1, label: cv.state });
     }
     for (const hl of this.streaks.helis) blips.push({ x: hl.pos.x, z: hl.pos.z, kind: hl.team === this.avatar.team ? 'heli' : 'heliFoe', alpha: 1 });
     for (const pg of this.worldPings) {

@@ -399,6 +399,13 @@ export class PlayerController {
     this.eyeHeight = damp(this.eyeHeight, eyeT, this.sliding ? 14 : 11, dt);
   }
 
+  /** kneel where you stand (planting / defusing roots you crouched, even while frozen) */
+  forceCrouch(dt: number) {
+    this.wantStance = 'crouch';
+    if (this.body.stance === 'stand' && this.body.setStance('crouch')) this.ev.onStance('crouch');
+    this.eyeHeight = damp(this.eyeHeight, EYE_HEIGHT[this.body.stance], 9, dt);
+  }
+
   ladder: LadderDef | null = null;
   private ladderStep = 0;
   private ladderLatch = false;
