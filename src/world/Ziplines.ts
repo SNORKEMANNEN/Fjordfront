@@ -44,7 +44,7 @@ export class Ziplines {
     };
     const ground = (x: number, z: number) => new THREE.Vector3(x, heightAt(x, z), z);
     // roof network (Lager 1, harbour office, fuel tank, crane) + hillside runs into the village
-    const cands: [THREE.Vector3, THREE.Vector3][] = MAP_ID === 'brosund' ? this.searchLines(ground) : [
+    const cands: [THREE.Vector3, THREE.Vector3][] = MAP_ID === 'solvik' ? [] : MAP_ID === 'brosund' ? this.searchLines(ground) : [
       [roof(3), roof(0)],
       [roof(0), roof(1)],
       [roof(1), roof(2)],

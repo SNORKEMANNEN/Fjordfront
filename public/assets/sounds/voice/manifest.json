@@ -55,6 +55,27 @@
   ],
   "blind": [
    "bot0a_blind0.ogg"
+  ],
+  "planting": [
+   "bot0a_planting0.ogg"
+  ],
+  "defusing": [
+   "bot0a_defusing0.ogg"
+  ],
+  "charge": [
+   "bot0a_charge0.ogg"
+  ],
+  "rotA": [
+   "bot0a_rotA0.ogg"
+  ],
+  "rotB": [
+   "bot0a_rotB0.ogg"
+  ],
+  "onA": [
+   "bot0a_onA0.ogg"
+  ],
+  "onB": [
+   "bot0a_onB0.ogg"
   ]
  },
  "bot0b": {
@@ -113,6 +134,27 @@
   ],
   "blind": [
    "bot0b_blind0.ogg"
+  ],
+  "planting": [
+   "bot0b_planting0.ogg"
+  ],
+  "defusing": [
+   "bot0b_defusing0.ogg"
+  ],
+  "charge": [
+   "bot0b_charge0.ogg"
+  ],
+  "rotA": [
+   "bot0b_rotA0.ogg"
+  ],
+  "rotB": [
+   "bot0b_rotB0.ogg"
+  ],
+  "onA": [
+   "bot0b_onA0.ogg"
+  ],
+  "onB": [
+   "bot0b_onB0.ogg"
   ]
  },
  "bot1a": {
@@ -171,6 +213,27 @@
   ],
   "blind": [
    "bot1a_blind0.ogg"
+  ],
+  "planting": [
+   "bot1a_planting0.ogg"
+  ],
+  "defusing": [
+   "bot1a_defusing0.ogg"
+  ],
+  "charge": [
+   "bot1a_charge0.ogg"
+  ],
+  "rotA": [
+   "bot1a_rotA0.ogg"
+  ],
+  "rotB": [
+   "bot1a_rotB0.ogg"
+  ],
+  "onA": [
+   "bot1a_onA0.ogg"
+  ],
+  "onB": [
+   "bot1a_onB0.ogg"
   ]
  },
  "bot1b": {
@@ -229,6 +292,27 @@
   ],
   "blind": [
    "bot1b_blind0.ogg"
+  ],
+  "planting": [
+   "bot1b_planting0.ogg"
+  ],
+  "defusing": [
+   "bot1b_defusing0.ogg"
+  ],
+  "charge": [
+   "bot1b_charge0.ogg"
+  ],
+  "rotA": [
+   "bot1b_rotA0.ogg"
+  ],
+  "rotB": [
+   "bot1b_rotB0.ogg"
+  ],
+  "onA": [
+   "bot1b_onA0.ogg"
+  ],
+  "onB": [
+   "bot1b_onB0.ogg"
   ]
  },
  "ann": {
@@ -351,6 +435,51 @@
   ],
   "weatherClear": [
    "ann_weatherClear0.ogg"
+  ],
+  "sabAttack": [
+   "ann_sabAttack0.ogg"
+  ],
+  "sabDefend": [
+   "ann_sabDefend0.ogg"
+  ],
+  "sabPlantedA": [
+   "ann_sabPlantedA0.ogg"
+  ],
+  "sabPlantedB": [
+   "ann_sabPlantedB0.ogg"
+  ],
+  "sabDefused": [
+   "ann_sabDefused0.ogg"
+  ],
+  "sabExploded": [
+   "ann_sabExploded0.ogg"
+  ],
+  "sabRoundWon": [
+   "ann_sabRoundWon0.ogg"
+  ],
+  "sabRoundLost": [
+   "ann_sabRoundLost0.ogg"
+  ],
+  "sabMatchPoint": [
+   "ann_sabMatchPoint0.ogg"
+  ],
+  "sabHalf": [
+   "ann_sabHalf0.ogg"
+  ],
+  "sabOvertime": [
+   "ann_sabOvertime0.ogg"
+  ],
+  "sabLastAlive": [
+   "ann_sabLastAlive0.ogg"
+  ],
+  "sabTen": [
+   "ann_sabTen0.ogg"
+  ],
+  "sabDropped": [
+   "ann_sabDropped0.ogg"
+  ],
+  "sabBounty": [
+   "ann_sabBounty0.ogg"
   ]
  },
  "player": {
@@ -426,6 +555,12 @@
   "knifeKill": [
    "player_knifeKill0.ogg",
    "player_knifeKill1.ogg"
+  ],
+  "planting": [
+   "player_planting0.ogg"
+  ],
+  "defusing": [
+   "player_defusing0.ogg"
   ]
  },
  "pilot": {

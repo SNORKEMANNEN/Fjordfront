@@ -65,6 +65,7 @@ export class Domination {
   setup(home0: THREE.Vector3, home1: THREE.Vector3) {
     for (const f of this.flags) this.root.remove(f.group);
     this.flags = [];
+    if (MAP_ID === 'solvik') return; // (Sabotasje: no flags)
     if (MAP_ID === 'brosund') {
       // Brosund: five fixed flags, two on each side of the sound and one in the tunnel under it
       for (const f of brFlagSites()) {

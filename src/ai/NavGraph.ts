@@ -2,7 +2,7 @@ import * as THREE from 'three';
 import { Physics } from '../core/Physics';
 import { Terrain } from '../world/Terrain';
 import { NavHint } from '../world/Buildings';
-import { PLAY_HALF, inTunnel, capHeightAt } from '../world/MapLayout';
+import { PLAY_HALF, inTunnel, capHeightAt, MAP_ID } from '../world/MapLayout';
 
 export interface NavNode {
   id: number;
@@ -29,7 +29,9 @@ export class NavGraph {
 
   constructor(private physics: Physics, private terrain: Terrain, hints: NavHint[], points: THREE.Vector3[]) {
     const t0 = performance.now();
-    const step = 7;
+    // Solvik's lanes are narrow: a finer grid, shorter links
+    const fine = MAP_ID === 'solvik';
+    const step = fine ? 3.5 : 7;
     const capsule = new Physics.R.Capsule(0.5, 0.3);
     const free = (p: THREE.Vector3) => !physics.overlaps({ x: p.x, y: p.y + 0.9, z: p.z }, capsule);
     // surface height: highest walkable surface below terrain+3 (docks, bridges) — else terrain
@@ -89,7 +91,7 @@ export class NavGraph {
     // connect neighbours with line-of-sight + walkability checks
     const up1 = new THREE.Vector3(0, 0.6, 0), up2 = new THREE.Vector3(0, 1.4, 0);
     for (const n of this.nodes) {
-      for (const m of this.near(n.p, 11)) {
+      for (const m of this.near(n.p, fine ? 6 : 11)) {
         if (m.id <= n.id || n.links.includes(m.id)) continue;
         const d = n.p.distanceTo(m.p);
         const dy = Math.abs(n.p.y - m.p.y);

@@ -290,6 +290,86 @@ URL options: `?quality=low|medium|high|ultra`, `?weather=clear|overcast|rain|sno
 - **Rifle:** support hand moved so it no longer shows through the optic window.
 - **Pistol:** hold reworked.
 
+## Update 42: Sabotasje 6v6 and a new map, Solvik
+
+**Solvik: a new map**
+- **A compact fjord town in the evening sun**, built for round play. Warm sandstone, painted timber and stucco houses with arched doorways, shutters, flower boxes and awnings stand on a terrace above a deep fjord. Across the water a mountain wall rises with waterfalls on it, and snowy peaks stand at the head of the fjord.
+- **Three lanes:**
+  - **A, Steinsmauet:** a lane up to the fortress gate (*Porten*) and the courtyard, *Borggården*.
+  - **Mid, Allmenningen:** a long market street under festoon lights, overlooked by *Vinduet*, a window bay on the church square.
+  - **B, Fiskarbuene:** a lane to the wharf, *Brygga*.
+- **Flank routes:**
+  - *Palasset*, a columned hall and a vaulted corridor into A.
+  - *Smuget*, a narrow laundry alley from mid to A.
+  - *Kjelleren*, a vaulted underpass from top mid to B.
+  - *Loftet*, wharf lofts up a staircase to a balcony over B.
+  - *Kaipromenaden*, a promenade at the waterline with stairs up into B.
+  - *Borgmuren*, a raised rampart inside the fortress.
+  - *Kirketrappa*, the church stairs from the defenders' square down to B.
+- **Landmarks:** a stave church with tiered shingle roofs and dragon heads, red boathouses on the quay, a station with an arcade and a clock tower, a ferry at the berth, and boats in the fjord.
+- **Fixed lighting:** always a clear late-summer evening. There is no weather and no time-of-day change between rounds.
+- **New procedural textures:** cut sandstone, granite setts, flagstones, tarred shingles and striped awning canvas. All of it is built in code; no outside models were used.
+
+**Sabotasje: a new 6 v 6 round mode** (Solvik; *Sabotasje* on the main menu)
+- **Attack and defend.** One attacker carries a demolition charge and plants it on site A or B by holding F for 3.2 s.
+  - Defenders stop the plant, or defuse the charge by holding F for 10 s, or 5 s with wire cutters, before its 40 s fuse runs out.
+  - There are no respawns. A round ends on a wipe, a detonation, a defuse, or the clock running out (the defenders win that).
+- **Match format:** first to 7 rounds. Sides swap after round 6. At 6–6 the match goes to overtime in blocks of four rounds, with 10 000 kr each.
+- **The wire gamble.**
+  - The planter picks the live wire: red, blue or yellow (keys 1/2/3).
+  - Once a defuse is under way, the defender can cut a wire instead of finishing. The right wire defuses at once; a wrong one sets the charge off.
+  - Wire cutters rule out one wrong wire.
+- **Economy, in kroner.** You start with 800 kr.
+  - Kill rewards depend on the weapon class: SMG 600, shotgun 900, sniper 100, knife 1500, others 300.
+  - A round win pays 3250 (3500 for a detonation or defuse).
+  - A loss pays 1400, rising 500 per round lost in a row up to 3400. Attackers who planted get +800 even if they lose.
+  - Plants and defuses pay +300.
+- **Buy menu (B, in your spawn, during the buy phase and the first 18 s of a round).**
+  - Every gun, a vest, a vest plus helmet, wire cutters for defenders, and grenades.
+  - Grenades: HE, flashbang, smoke, decoy and the new **firebomb**, a bottle that bursts into a pool of fire on impact; a smoke puts it out.
+  - You can carry up to four grenades. Keys 3 and 4 cycle which one G and T throw.
+  - You can sell back a misclick, and there is a re-buy button.
+- **Body armour.** A vest takes a share of body damage, more against SMGs and pistols. A helmet does the same for headshots.
+- **Kits:**
+  - Survivors keep their kit into the next round.
+  - The dead drop their best gun. Walk over a gun to take it, or press F to swap.
+  - Press J to drop your gun or the charge for a teammate.
+- **Twists:**
+  - **Bounty:** win your fights three rounds running and there is a price on your head, 1000 kr and rising, paid to whoever kills you.
+  - **Clutch bonus:** the last soldier standing who wins against two or more gets +500 kr per enemy.
+- **Bots play the mode.**
+  - **Team economy:** full buy, force buy or eco, and one sniper when rich.
+  - **Attack plans:** a rush, a default spread that stages at the last corner then collapses on the site, a two-lane split, or a fake on the other site. The carrier plants behind cover, the team takes post-plant spots, and a dropped charge is fetched.
+  - **Defence:** two on A, one mid, two on B and one flex, holding real angles. They rotate when a site is hit, retake together, and one defuses while the rest cover. A defuser out of time cuts a wire.
+- **Squad orders (Y) are mode-specific:** go A, go B, hold, rotate, save, drop me a gun, follow me.
+- **HUD:**
+  - A round bar with a portrait per soldier that greys out on death, the charge carrier marked and bounties shown.
+  - Your money and kit, and a plant / defuse progress ring with the wire panel.
+  - World markers for the charge and the site letters.
+  - A round card: who won and why, the MVP, a clutch if there was one, and what you earned.
+  - Spectating your team after you die.
+  - A match report with kills, deaths, assists, average damage per round, opening kills, clutches and MVPs.
+- **Audio:**
+  - The planted charge beeps faster and faster (real recorded beeps), and the tension music comes in.
+  - New announcer lines for attack / defend, planted on A / B, defused, detonated, round won / lost, match point, halftime, overtime, last one standing, ten seconds, charge dropped and bounty.
+  - New bot and player callouts for planting, defusing, the charge, rotating, and "they're on A / B".
+- **Online:**
+  - The host's map decides the mode, so a room on Solvik plays Sabotasje 6 v 6 with bots filling the empty slots.
+  - The host runs the rules and the bots. Clients see the round state, money and kits live, and buy, plant, defuse, cut wires and pick up guns through the host.
+  - Joining mid-round sits you out until the next round. The room list shows the mode.
+- **Map switching:** pick Sabotasje from Kvitvika or Brosund and the game loads Solvik and starts. Domination from Solvik loads one of the other two maps. The Domination map vote stays between Kvitvika and Brosund.
+
+**Tested**
+- A full match of bots against bots: halftime side swap, plants, detonations, defuses and the match end. A 12 v 12 Domination match on Kvitvika is unchanged.
+- Scripted checks:
+  - A firebomb burns a soldier (100 → 39 health in about 2 s).
+  - A gun is dropped and picked back up.
+  - A plant with a wire choice.
+  - A defuse by cutting the right wire.
+  - Host and client in two tabs: round state, spawns and buying.
+- Solvik simulates in about 4 ms per frame in the headless test (Brosund: 12 ms). Memory stays flat across rounds.
+- **Fix:** opening the buy menu frees the mouse without pausing the game.
+
 ## Update 41: Rain, hit feedback, sprint-cancel reload
 
 **Rain, rebuilt**

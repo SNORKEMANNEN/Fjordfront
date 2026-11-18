@@ -820,6 +820,16 @@ export class NetGame {
       case 'sys':
         this.sys(m.html);
         return;
+      // ---- Sabotasje (Update 42)
+      case 'sabIn': {
+        if (!this.isHost) return;
+        const slot = this.peerSlot.get(from);
+        if (slot !== undefined) g.sab?.netInput(slot, m);
+        return;
+      }
+      case 'sabEv':
+        g.sab?.netEvent(m);
+        return;
       case 'kick':
         this.kicked = true;
         this.onHostGone(m.why || 'You were removed from the room.');
@@ -867,6 +877,21 @@ export class NetGame {
   }
 
   /** Game.onKill on the owner's side: tell everyone */
+  /** Sabotasje: client → host (intents) */
+  sabSend(m: any) {
+    if (this.active && this.isClient) this.net.send(m);
+  }
+  /** Sabotasje: host → everyone (events) */
+  sabBroadcast(m: any) {
+    if (this.active && this.isHost) this.net.broadcast(m);
+  }
+  /** Sabotasje: host → the machine that owns a slot */
+  sabSendTo(slot: number, m: any) {
+    if (!this.active || !this.isHost) return;
+    const peer = this.slotPeer(slot);
+    if (peer) this.net.send(m, peer);
+  }
+
   reportDeath(killer: Combatant, victim: Combatant, weapon: string, hs: boolean, wb: boolean) {
     if (!this.active || !this.owns(victim)) return;
     const m = { t: 'died', v: victim.id, a: killer.id, w: weapon, hs, wb };
@@ -1262,6 +1287,7 @@ export class NetGame {
       uav: g.streaks.uavUntil.map((u: number) => r2(u - g.time)),
     };
     if (this.outShots.length) m.shots = this.outShots.splice(0);
+    if (g.sab) m.sab = g.sab.netState();
     // match state at 10 Hz (shots go out right away)
     const sendJson = !!m.shots || this.seq % 2 === 0;
     this.doorT -= RATE;
@@ -1360,6 +1386,7 @@ export class NetGame {
     }
     g.match.scores = m.sc;
     g.match.timeLeft = m.tl;
+    if (m.sab) g.sab?.applyNet(m.sab);
     g.dom.applyRemote(m.fl, g.time, g.match.players);
     if (m.uav) g.streaks.uavUntil = m.uav.map((u: number) => g.time + u);
     if (m.shots) for (const sh of m.shots) if (sh.s !== this.mySlot) this.replayShot(sh.s, sh);
@@ -1385,6 +1412,7 @@ export class NetGame {
       this.net.send({ ...this.welcome(slot), t: 'match' }, peer);
     }
     this.applyBotCount();
+    this.g.sab?.resync();
   }
   onMatchEnd(w: number) {
     if (!this.isHost) return;
@@ -1498,7 +1526,7 @@ export class NetGame {
     this.reg.announce((): RoomInfo | null => {
       if (!this.isHost || !this.isPublic) return null;
       const g = this.g;
-      return { code: this.net.code, name: `${this.name}'s room`, players: this.roster.filter((s) => s.human).length, max: SLOTS, map: `${MAP_NAME}${MAP_ID === 'kvitvika' ? (g.winter ? ' · Winter' : ' · Autumn') : ''} · Domination`, region: myRegion() };
+      return { code: this.net.code, name: `${this.name}'s room`, players: this.roster.filter((s) => s.human).length, max: SLOTS, map: `${MAP_NAME}${MAP_ID === 'kvitvika' ? (g.winter ? ' · Winter' : ' · Autumn') : ''} · ${MAP_ID === 'solvik' ? 'Sabotasje 6v6' : 'Domination'}`, region: myRegion() };
     });
   }
 
@@ -1542,9 +1570,10 @@ export class NetGame {
   // ================================================================ bots filling the slots
   /** host: /bots N — how many bots fill the empty slots (teams kept even) */
   private applyBotCount() {
-    if (!this.isHost || this.botTarget < 0) return;
+    if (!this.isHost || (this.botTarget < 0 && !this.g.sab)) return;
     const humans = this.roster.filter((s) => s.human);
-    const total = Math.min(SLOTS, humans.length + this.botTarget);
+    // Sabotasje is six a side: bots fill up to twelve
+    const total = this.g.sab ? 12 : Math.min(SLOTS, humans.length + this.botTarget);
     const per: [number, number] = [Math.ceil(total / 2), Math.floor(total / 2)];
     for (const t of [0, 1] as const) {
       let room = per[t] - humans.filter((h) => h.team === t).length;

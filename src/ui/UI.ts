@@ -74,7 +74,7 @@ export interface CompassMark { bearing: number; kind: 'flag' | 'ping' | 'wp' | '
 export interface ScoreRow extends CombatantState { role?: string; assists?: number; captures?: number; bot?: boolean }
 
 export type TacticalId = 'flash' | 'smoke' | 'stun' | 'stim' | 'snapshot' | 'decoy';
-export type LethalId = 'frag' | 'tknife' | 'sticky' | 'claymore' | 'c4';
+export type LethalId = 'frag' | 'tknife' | 'sticky' | 'claymore' | 'c4' | 'molotov';
 export const LETHALS: { id: LethalId; name: string; count: number; desc: string }[] = [
   { id: 'frag', name: 'FRAG GRENADE', count: 2, desc: 'Cookable (hold G). 3.5 s fuse.' },
   { id: 'sticky', name: 'STICKY GRENADE', count: 2, desc: 'Sticks to walls, floors and people. Arms on throw, 2.3 s fuse — no cooking.' },
@@ -98,6 +98,8 @@ export const CALIBRE: Record<string, string> = {
 
 export interface UIHandlers {
   onPlay(): void;
+  /** Sabotasje 6v6 on Solvik (Update 42) */
+  onSabotage?(): void;
   onMultiplayer?(): void;
   onQuickPlay?(): void;
   onResume(): void;
@@ -284,7 +286,7 @@ export class UI {
         <div class="ver">KART<br>NR. 29</div>
       </nav>
       <div class="menu-body">
-        <div class="brand"><div class="wordmark">FJORDFRONT</div><div class="tagline"><i></i>DOMINATION · ${MAP_ID === 'brosund' ? 'BROSUND, SUNNMØRE' : 'KVITVIKA, NORDLAND'}</div></div>
+        <div class="brand"><div class="wordmark">FJORDFRONT</div><div class="tagline"><i></i>${MAP_ID === 'solvik' ? 'SABOTASJE · SOLVIK, VESTLANDET' : `DOMINATION · ${MAP_ID === 'brosund' ? 'BROSUND, SUNNMØRE' : 'KVITVIKA, NORDLAND'}`}</div></div>
         <div class="pane"></div>
         <div class="side">
           <div class="news paper-card"><div class="nh"><b>MELDINGER</b><span class="eyebrow">NEWS · PATCH NOTES</span></div><div class="nl"><div class="ni"><div class="serif-note">Reading the logbook…</div></div></div></div>
@@ -292,7 +294,9 @@ export class UI {
             <div class="bh"><b>OPERASJONSORDRE</b><span class="eyebrow red">OPERATION BRIEF</span></div>
             <div class="chart"><div class="loadingc">Drawing the chart…</div></div>
             <div class="facts"><div><small>VIND</small><span class="f-wind">—</span></div><div><small>SJØ</small><span class="f-sea">—</span></div><div><small>KL.</small><span class="f-time">—</span></div><div><small>SESONG</small><span class="f-season">—</span></div></div>
-            <p>${MAP_ID === 'brosund'
+            <p>${MAP_ID === 'solvik'
+              ? 'Six against six in the fjord town of Solvik. One side carries a demolition charge to the fortress courtyard (<b>A</b>) or the wharf (<b>B</b>); the other holds both — or defuses it. Rounds, no respawns, money for kills and wins. First to seven.'
+              : MAP_ID === 'brosund'
               ? 'Hostile forces of <b class="red">NORDFRONT</b> have crossed the sound into Ellingsøya and the undersea tunnel. Fight through the canal town with the <b class="blue">KYSTJEGERNE</b>, take five objectives and hold Brosund.'
               : 'Hostile forces of <b class="red">NORDFRONT</b> hold the old coastal fort above Kvitvika. Push from the harbour with the <b class="blue">KYSTJEGERNE</b>, take three objectives and hold the fjord.'}</p>
             <div class="sides"><div class="sd k">${emblem(0)}KYSTJEGERNE</div><span class="vs">mot</span><div class="sd n">NORDFRONT${emblem(1)}</div></div>
@@ -336,13 +340,15 @@ export class UI {
     }
     pane.innerHTML = `<div class="ptitle">VELG OPPDRAG<small>CHOOSE A MISSION</small></div>
       <div class="modes">
-        <button class="mode paper-card hot" data-mode="dom"><span class="mi">${icon('domination')}</span><span><b>Domination</b><span>12 v 12 against AI squads. Take and hold ${MAP_ID === 'brosund' ? 'five' : 'three'} flags.</span></span><em>SOLO</em></button>
+        <button class="mode paper-card ${MAP_ID === 'solvik' ? '' : 'hot'}" data-mode="dom"><span class="mi">${icon('domination')}</span><span><b>Domination</b><span>12 v 12 against AI squads. Take and hold the flags on Kvitvika or Brosund.</span></span><em>SOLO</em></button>
+        <button class="mode paper-card ${MAP_ID === 'solvik' ? 'hot' : ''}" data-mode="sab"><span class="mi">${icon('charge')}</span><span><b>Sabotasje <small class="new">NY</small></b><span>6 v 6 rounds on Solvik. Plant or defuse the charge, buy your kit, no respawns. First to 7.</span></span><em>SOLO</em></button>
         <button class="mode paper-card" data-mode="mp"><span class="mi">${icon('multiplayer')}</span><span><b>Multiplayer</b><span>Host a room, join with a code or browse public rooms. Bots fill the empty slots.</span></span><em>ONLINE</em></button>
         <button class="mode paper-card" data-mode="quick"><span class="mi">${icon('quick')}</span><span><b>Quick Play</b><span>Straight into the fullest public room — or open one if there is none.</span></span><em>ONLINE</em></button>
       </div>
       <div class="mapnote"><b>KARTVALG · MAP VOTE</b><span>Deploy and the squads vote between ${MAPS.map((m) => m.name).join(' and ')}.</span></div>
       <div class="kit paper-card" data-a="kit"><span class="eyebrow red">KIT · <span class="kit-preset"></span></span><div class="kn"></div><div class="ks"></div></div>`;
     pane.querySelector('[data-mode=dom]')!.addEventListener('click', () => this.handlers.onPlay());
+    pane.querySelector('[data-mode=sab]')!.addEventListener('click', () => this.handlers.onSabotage?.());
     pane.querySelector('[data-mode=mp]')!.addEventListener('click', () => this.handlers.onMultiplayer?.());
     pane.querySelector('[data-mode=quick]')!.addEventListener('click', () => this.handlers.onQuickPlay?.());
     pane.querySelector('.kit')!.addEventListener('click', () => this.showLoadout('menu'));
@@ -830,14 +836,14 @@ export class UI {
   }
 
   // ---------------------------------------------------------------- end of match
-  showEnd(winner: 0 | 1 | -1, myTeam: 0 | 1, rows: ScoreRow[], scores: [number, number], names: [string, string]) {
+  showEnd(winner: 0 | 1 | -1, myTeam: 0 | 1, rows: ScoreRow[], scores: [number, number], names: [string, string], report = '') {
     const won = winner === myTeam;
     const title = winner === -1 ? 'UAVGJORT' : won ? 'SEIER' : 'NEDERLAG';
     const sub = winner === -1 ? 'DRAW' : won ? 'VICTORY' : 'DEFEAT';
     this.end.innerHTML = `<div class="panel wide"><div class="eyebrow ${won ? '' : 'red'}" style="text-align:center">${sub} · KAMPEN ER OVER</div>
       <div class="ptitle big ${won ? 'win' : winner === -1 ? '' : 'loss'}">${title}</div>
       <div class="final"><span class="blue">${emblem(0)} ${names[0]} ${scores[0]}</span> &nbsp;—&nbsp; <span class="red">${scores[1]} ${names[1]} ${emblem(1)}</span></div>
-      ${this.tableHTML(rows, names)}
+      ${report || this.tableHTML(rows, names)}
       <div class="row"><button class="primary" data-a="again">PLAY AGAIN</button><button data-a="menu">MAIN MENU</button></div></div>`;
     this.end.querySelectorAll('.final .emblem').forEach((e) => ((e as HTMLElement).style.cssText = 'width:30px;height:30px;vertical-align:middle'));
     this.end.classList.remove('hidden');

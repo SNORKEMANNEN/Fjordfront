@@ -3,6 +3,7 @@ import { GeoBuilder } from './GeoBuilder';
 import { Buildings } from './Buildings';
 import { ROADS, BRIDGE, TUNNEL, TUNNEL_EXIT, tunnelShafts, FOOTBRIDGE, PLANK_BRIDGE, LADDERS, coastX, southCoastZ, Road, nearestRoad, MAP_ID } from './MapLayout';
 import { BrosundBuild } from './BrosundBuild';
+import { SolvikBuild } from './SolvikBuild';
 import { Details } from './Details';
 import { signMaterials } from './Signs';
 import { RNG } from '../core/math';
@@ -18,9 +19,14 @@ export class Infrastructure {
   private rng = new RNG(808);
   carCount = 0;
   brosund: BrosundBuild | null = null;
+  solvik: SolvikBuild | null = null;
 
   constructor(public b: GeoBuilder, public bld: Buildings, public terrain: Terrain, public parent: THREE.Object3D, mats: Record<string, THREE.Material>) {
     Object.assign(b.mats, signMaterials());
+    if (MAP_ID === 'solvik') {
+      this.solvik = new SolvikBuild(this, b, bld, terrain, parent, mats);
+      return;
+    }
     if (MAP_ID === 'brosund') {
       for (const r of ROADS) if (r.kind !== 'stairs') this.road(r);
       this.ladders();
@@ -744,6 +750,7 @@ export class Infrastructure {
 
   update(t: number, cam?: THREE.Vector3) {
     this.brosund?.update(t, cam);
+    this.solvik?.update(t, cam);
     for (const f of this.flags) {
       const sh = (f.material as THREE.Material).userData.shader;
       if (sh) sh.uniforms.uTime.value = t;

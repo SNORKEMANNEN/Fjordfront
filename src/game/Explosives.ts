@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import { NETF } from '../net/NetFlags';
 import { Physics } from '../core/Physics';
-import { Combatant } from './Combatant';
+import { Combatant, armorAbsorb } from './Combatant';
 import { WeaponDef } from '../weapons/WeaponDefs';
 import { Effects } from '../fx/Effects';
 import { Viewmodel } from '../weapons/Viewmodel';
@@ -20,9 +20,9 @@ export const CLAYMORE = { id: 'claymore', name: 'Claymore', cls: 'Explosive' } a
 export const BARREL = { id: 'barrel', name: 'Explosive Barrel', cls: 'Explosive' } as unknown as WeaponDef;
 export const VEHICLE = { id: 'vehicle', name: 'Vehicle Explosion', cls: 'Explosive' } as unknown as WeaponDef;
 
-export type GrenadeKind = 'frag' | 'flash' | 'stun' | 'smoke' | 'sticky' | 'snapshot' | 'decoy' | 'c4';
+export type GrenadeKind = 'frag' | 'flash' | 'stun' | 'smoke' | 'sticky' | 'snapshot' | 'decoy' | 'c4' | 'molotov';
 /** fuse per kind (s): flash/stun pop fast, smoke after a short roll, C4 waits for its detonator */
-export const FUSE: Record<GrenadeKind, number> = { frag: 3.5, flash: 1.6, stun: 1.6, smoke: 1.3, sticky: 2.3, snapshot: 1.15, decoy: 1.1, c4: 1e9 };
+export const FUSE: Record<GrenadeKind, number> = { frag: 3.5, flash: 1.6, stun: 1.6, smoke: 1.3, sticky: 2.3, snapshot: 1.15, decoy: 1.1, c4: 1e9, molotov: 2.6 };
 /** kinds that stick to what they hit */
 const STICKS: Partial<Record<GrenadeKind, 'all' | 'world'>> = { sticky: 'all', c4: 'world' };
 
@@ -115,6 +115,8 @@ export interface ExplosionHooks {
   decoyStart?(d: Decoy): void;
   /** a decoy's fake fire: called for each fake shot */
   decoyShot?(d: Decoy): void;
+  /** a firebomb burst (on impact): a pool of fire at p */
+  fire?(p: THREE.Vector3, owner: Combatant, g: Grenade): void;
   /** active-protection systems: return true to shoot this grenade down */
   intercept?(g: Grenade): boolean;
 }
@@ -135,7 +137,7 @@ export class Explosives {
   lastGrenade: Grenade | null = null;
   private protos: Record<GrenadeKind, THREE.Group> = {
     frag: Viewmodel.makeGrenade('frag'), flash: Viewmodel.makeGrenade('flash'), stun: Viewmodel.makeGrenade('stun'), smoke: Viewmodel.makeGrenade('smoke'),
-    sticky: EQUIP_BUILDERS.sticky(), snapshot: EQUIP_BUILDERS.snapshot(), decoy: EQUIP_BUILDERS.decoy(), c4: EQUIP_BUILDERS.c4(),
+    sticky: EQUIP_BUILDERS.sticky(), snapshot: EQUIP_BUILDERS.snapshot(), decoy: EQUIP_BUILDERS.decoy(), c4: EQUIP_BUILDERS.c4(), molotov: EQUIP_BUILDERS.molotov(),
   };
 
   constructor(private scene: THREE.Scene, private physics: Physics, private fx: Effects, private hooks: ExplosionHooks, private players: () => Combatant[]) {
@@ -250,6 +252,9 @@ export class Explosives {
         if (g.kind === 'frag') this.explode(g.pos, g.owner, FRAG, g.wet ? 5.5 : 8.5, g.wet ? 110 : 160);
         else if (g.kind === 'sticky') this.explode(g.pos, g.owner, STICKY, 7.5, 170, g.stuck?.to ?? null);
         else if (g.kind === 'snapshot') this.hooks.snapshot?.(g.pos.clone(), g.owner);
+        else if (g.kind === 'molotov') {
+          if (!g.wet) this.hooks.fire?.(g.pos.clone(), g.owner, g);
+        }
         else if (g.kind === 'flash') this.hooks.flash(g.pos.clone(), g.owner, g);
         else this.hooks.stun(g.pos.clone(), g.owner, g);
         this.lastGrenade = null;
@@ -378,6 +383,20 @@ export class Explosives {
     }
     const surf = this.hooks.surface?.(hit) ?? hit.info.surface;
     g.surface = surf;
+    if (g.kind === 'molotov' && !g.wet) {
+      // the bottle shatters on whatever it hits; the fuel lands on the floor below
+      const n0 = hit.normal.clone();
+      if (n0.dot(dir) > 0) n0.negate();
+      g.pos.copy(hit.point).addScaledVector(n0, 0.05);
+      if (n0.y < 0.5) {
+        const down = this.physics.raycast(g.pos, new THREE.Vector3(0, -1, 0), 6);
+        if (down) g.pos.copy(down.point).setY(down.point.y + 0.05);
+      }
+      g.vel.set(0, 0, 0);
+      g.resting = true;
+      g.fuse = 0;
+      return;
+    }
     if (sticks && !g.wet) {
       // stick flat against the surface, the gel / back side down
       const n = hit.normal.clone();
@@ -486,7 +505,7 @@ export class Explosives {
         if (d > 2.2) continue;
         k *= 0.25;
       }
-      const dmg = maxDmg * k;
+      const dmg = armorAbsorb(c, maxDmg * k, 'body', 'Explosive');
       if (dmg < 2) continue;
       const before = c.health;
       c.health = Math.max(0, c.health - dmg);

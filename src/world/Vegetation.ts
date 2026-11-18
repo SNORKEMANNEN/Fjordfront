@@ -4,6 +4,7 @@ import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js
 import { MaterialLib } from '../render/Materials';
 import { Physics } from '../core/Physics';
 import { RNG, clamp, smoothstep, fbm2 } from '../core/math';
+import { SV_GRASS } from './maps/Solvik';
 import { forestDensity, nearestRoad, PLAY_HALF, TUNNEL, MAP_ID, shoreDist, capHeightAt, isWater, inTunnel } from './MapLayout';
 import { Terrain } from './Terrain';
 
@@ -204,6 +205,14 @@ export class Vegetation {
    *  tree of one material in a single call with per-tree culling */
   static multiDraw = false;
   group = new THREE.Group();
+  /** trees placed by a map builder (built before the vegetation) */
+  /** Solvik: grass only in the planted patches (courtyard beds, the churchyard) */
+  static grassPatches: { x0: number; z0: number; x1: number; z1: number }[] = SV_GRASS;
+  static grassAt(x: number, z: number) {
+    for (const r of Vegetation.grassPatches) if (x > r.x0 && x < r.x1 && z > r.z0 && z < r.z1) return true;
+    return false;
+  }
+  static extraTrees: { x: number; z: number; s: number; kind: 'birch' | 'pine' }[] = [];
   /** streamed grass: 12 m tiles of instanced clumps around the camera (see updateGrass) */
   grass = new THREE.Group();
   private grassRadius = 28;
@@ -389,6 +398,8 @@ export class Vegetation {
       const p = new THREE.Vector3(x, 0, z);
       for (const b of this.exclude) if (x > b.min.x - margin && x < b.max.x + margin && z > b.min.z - margin && z < b.max.z + margin) return true;
       if (MAP_ID === 'kvitvika' && Math.abs(x - TUNNEL.x) < TUNNEL.width / 2 + 9 && z > TUNNEL.z0 - 10 && z < TUNNEL.z1 + 10) return true;
+      // Solvik: nothing grows in the paved town (its birches are planted by the builder)
+      if (MAP_ID === 'solvik' && x > -77 && x < 79 && z > -85 && z < 83) return true;
       // over a tunnel bore the ground is the cap mesh, not the carved terrain: nothing grows there
       if (MAP_ID !== 'kvitvika' && capHeightAt(x, z) !== null) return true;
       void p;
@@ -426,8 +437,16 @@ export class Vegetation {
         this.treeCount++;
       }
     }
+    // planted trees (Solvik's courtyard and street birches)
+    for (const t of Vegetation.extraTrees) {
+      const h = terrain.heightAt(t.x, t.z);
+      const v = t.kind === 'pine' ? 3 : 4 + (t.s > 1 ? 1 : 0);
+      addInst(t.x, t.z, v, t.s, false);
+      physics.addCylinder(new THREE.Vector3(t.x, h + 2, t.z), 2.5, variants[v].trunkR * t.s + 0.04, { surface: 'wood', penetrable: 0.25 });
+      this.trees.push({ x: t.x, z: t.z, r: variants[v].trunkR * t.s });
+    }
     // scattered trees in the village / along shore & roads
-    for (let i = 0; i < (brosund ? 260 : 70); i++) {
+    for (let i = 0; i < (brosund ? 260 : MAP_ID === 'solvik' ? 0 : 70); i++) {
       const x = brosund ? this.rng.range(-185, 230) : this.rng.range(-80, 70), z = brosund ? this.rng.range(-200, 190) : this.rng.range(-70, 95);
       const h = terrain.heightAt(x, z);
       if (h < 1.6 || blocked(x, z, 4) || shoreDist(x, z) < 8) continue;
@@ -482,7 +501,7 @@ export class Vegetation {
       const n = terrain.normalAt(x, z);
       const f = forestDensity(x, z, h);
       const shore = shoreDist(x, z) < 12 && h > -1.5;
-      if (brosund && n.y < 0.62) continue; // (a rock on a cliff face hangs in the air)
+      if ((brosund || MAP_ID === 'solvik') && n.y < 0.62) continue; // (a rock on a cliff face hangs in the air)
       if (isWater(x, z, h + 0.6) && !shore) continue;
       const chance = (1 - n.y) * 3 + f * (brosund ? 0.6 : 0.25) + (shore ? 0.5 : 0);
       if (this.rng.next() > chance || blocked(x, z, 2.5)) continue;
@@ -732,6 +751,7 @@ export class Vegetation {
         // never inside the tunnel bore / galleries (the terrain there is carved under the rock cap)
         if (Math.abs(jx - TUNNEL.x) < TUNNEL.width / 2 + 7 && jz > TUNNEL.z0 - 1.5 && jz < TUNNEL.z1 + 1.5) continue;
         if (inTunnel(jx, h + 0.5, jz)) continue;
+        if (MAP_ID === 'solvik' && jx > -77 && jx < 79 && jz > -85 && jz < 83 && !Vegetation.grassAt(jx, jz)) continue;
         const [f, g, dirt] = this.terrain.splatAt(jx, jz);
         const grassy = 1 - Math.max(g, dirt * 0.8, f * 0.6);
         if (grassy < 0.35 || j > grassy + 0.2) continue;

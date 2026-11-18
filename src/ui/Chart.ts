@@ -1,5 +1,6 @@
 import type { Terrain } from '../world/Terrain';
 import { ROADS, BUILDINGS, LANDMARKS, PLAY_HALF, BuildingDef, MAP_ID, capHeightAt } from '../world/MapLayout';
+import { AREA, SV_BLOCKS, SV_PALACE, SV_LOFT, SV_KJELLER, SV_CHURCH, SV_SITES } from '../world/maps/Solvik';
 
 /**
  * Sjøkart: the map drawn the way a Norwegian nautical chart is — cream paper land with brown
@@ -156,6 +157,22 @@ export function drawRoads(c: CanvasRenderingContext2D, v: View, zoom = 1) {
 
 /** buildings as solid ink blocks (containers hatched) */
 export function drawBuildings(c: CanvasRenderingContext2D, v: View) {
+  if (MAP_ID === 'solvik') {
+    // Solvik: the paved lanes in pale stone, the blocks and walls in ink, the two sites ringed in red
+    c.fillStyle = '#E8D9B8';
+    for (const r of Object.values(AREA)) c.fillRect(v.sx(r.x0), v.sy(r.z0), (r.x1 - r.x0) * v.ppm, (r.z1 - r.z0) * v.ppm);
+    c.fillStyle = INK.ink;
+    for (const r of [...SV_BLOCKS, SV_PALACE, SV_LOFT, SV_KJELLER, SV_CHURCH]) c.fillRect(v.sx(r.x0), v.sy(r.z0), (r.x1 - r.x0) * v.ppm, (r.z1 - r.z0) * v.ppm);
+    // the fortress walls round A
+    for (const [x0, z0, x1, z1] of [[-76, -76, -70, -18.5], [-74, -76, -21, -66], [-70, -22.5, -60.5, -18.5], [-53.5, -22.5, -50, -18.5], [-24, -66, -20, -56], [-24, -50, -20, -46], [-62, -66, -36, -61.5]])
+      c.fillRect(v.sx(x0), v.sy(z0), (x1 - x0) * v.ppm, (z1 - z0) * v.ppm);
+    c.strokeStyle = INK.red;
+    c.lineWidth = Math.max(1.2, 0.35 * v.ppm);
+    c.setLineDash([4, 3]);
+    for (const s of SV_SITES) c.strokeRect(v.sx(s.zone.x0), v.sy(s.zone.z0), (s.zone.x1 - s.zone.x0) * v.ppm, (s.zone.z1 - s.zone.z0) * v.ppm);
+    c.setLineDash([]);
+    return;
+  }
   for (const b of BUILDINGS) {
     const [w, d] = footprint(b);
     c.save();

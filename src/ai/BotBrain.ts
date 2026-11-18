@@ -221,6 +221,12 @@ export interface Order {
   until: number;
   /** follow / regroup: whom to follow */
   who?: Combatant;
+  /** hold / defend: the angle to watch once there (Sabotasje setups) */
+  look?: THREE.Vector3;
+  /** how close counts as arrived (default 2.5 m) */
+  arrive?: number;
+  /** move quietly (walk) */
+  walk?: boolean;
 }
 
 export interface Fireteam {

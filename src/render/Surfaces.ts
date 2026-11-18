@@ -310,4 +310,101 @@ export const SURF = {
     r = mix(0.5, 0.35, n) - sc*0.15;
     ao = 1.0;
   }`,
+
+  // ---- Solvik (Update 42) ----
+  // 2m tile — granite setts (cobbles) in curved fan rows, sand joints, worn tops
+  cobbles: /* glsl */ `
+  void surf(vec2 uv, out vec3 al, out float r, out float h, out float ao){
+    float rows = 14.0;
+    float ry = uv.y * rows; float ri = floor(ry); float fy = fract(ry);
+    float cols = 12.0;
+    float rx = uv.x * cols + hash12(vec2(ri, 7.0)) * 0.9; float ci = floor(rx); float fx = fract(rx);
+    float var = hash12(vec2(ci, ri));
+    // rounded sett profile
+    float ex = smoothstep(0.0, 0.14, fx) * smoothstep(1.0, 0.86, fx);
+    float ey = smoothstep(0.0, 0.18, fy) * smoothstep(1.0, 0.82, fy);
+    float stone = ex * ey;
+    float n = tfbm(uv*24.0, 24.0, 4);
+    vec3 c = mix(hex(118.,112.,104.), hex(168.,160.,148.), var);
+    c = mix(c, hex(150.,128.,104.), step(0.78, hash12(vec2(ri, ci+3.0)))*0.6);
+    c *= 0.86 + n*0.24;
+    vec3 joint = hex(122.,108.,86.) * (0.7 + tnoise(uv*300.0, vec2(300.0))*0.3);
+    al = mix(joint, c, smoothstep(0.02, 0.25, stone));
+    float worn = smoothstep(0.55, 0.95, stone);
+    h = stone * (0.75 + n*0.25);
+    r = mix(0.95, 0.62, worn);
+    ao = mix(0.35, 1.0, smoothstep(0.0, 0.4, stone));
+  }`,
+  // 4m tile — large sandstone flagstones, random-width courses, thin dark joints
+  flagstone: /* glsl */ `
+  void surf(vec2 uv, out vec3 al, out float r, out float h, out float ao){
+    float rows = 5.0;
+    float ry = uv.y * rows; float ri = floor(ry); float fy = fract(ry);
+    float w = 3.0 + floor(hash12(vec2(ri, 1.0)) * 3.0);
+    float rx = uv.x * w + hash12(vec2(ri, 2.0)); float ci = floor(rx); float fx = fract(rx);
+    float var = hash12(vec2(ci, ri));
+    float jx = smoothstep(0.0, 0.012, fx) * smoothstep(1.0, 0.988, fx);
+    float jy = smoothstep(0.0, 0.02, fy) * smoothstep(1.0, 0.98, fy);
+    float slab = jx * jy;
+    float n = tfbm(uv*10.0 + var*7.0, 10.0, 5);
+    float pit = step(0.86, tnoise(uv*260.0, vec2(260.0)));
+    vec3 c = mix(hex(196.,170.,132.), hex(226.,206.,170.), var);
+    c = mix(c, hex(176.,150.,118.), smoothstep(0.55, 0.8, n) * 0.6);
+    c *= 0.9 + n*0.16 - pit*0.12;
+    al = mix(hex(92.,80.,64.), c, slab);
+    h = slab * (0.8 + n*0.2) - pit*0.1;
+    r = 0.86 - n*0.08;
+    ao = mix(0.45, 1.0, slab);
+  }`,
+  // 3m tile — cut sandstone ashlar: regular courses, chiselled faces, warm golden tones
+  ashlar: /* glsl */ `
+  void surf(vec2 uv, out vec3 al, out float r, out float h, out float ao){
+    float rows = 8.0;
+    float ry = uv.y * rows; float ri = floor(ry); float fy = fract(ry);
+    float rx = uv.x * 4.0 + mod(ri, 2.0) * 0.5 + (hash12(vec2(ri, 9.0)) - 0.5) * 0.2; float ci = floor(rx); float fx = fract(rx);
+    float var = hash12(vec2(ci, ri));
+    float jx = smoothstep(0.0, 0.025, fx) * smoothstep(1.0, 0.975, fx);
+    float jy = smoothstep(0.0, 0.05, fy) * smoothstep(1.0, 0.95, fy);
+    float blk = jx * jy;
+    float tool = tnoise(vec2(uv.x*120.0, uv.y*30.0 + var*13.0), vec2(120.0, 30.0));
+    float n = tfbm(uv*6.0 + var, 6.0, 5);
+    vec3 c = mix(hex(200.,164.,112.), hex(232.,204.,156.), var);
+    c = mix(c, hex(186.,140.,96.), smoothstep(0.5, 0.85, n) * 0.5);
+    c *= 0.9 + tool*0.1;
+    // rain streaks darken the lower courses a little
+    c *= 1.0 - smoothstep(0.6, 1.0, tnoise(vec2(uv.x*30.0, uv.y*2.0), vec2(30.0, 2.0))) * 0.12;
+    al = mix(hex(150.,130.,100.), c, blk);
+    h = blk * (0.7 + tool*0.15 + n*0.15);
+    r = 0.9;
+    ao = mix(0.5, 1.0, blk);
+  }`,
+  // 1m tile — tarred pine shingles (stave church roofs): scalloped rows, near black-brown
+  shingles: /* glsl */ `
+  void surf(vec2 uv, out vec3 al, out float r, out float h, out float ao){
+    float rows = 9.0;
+    float ry = uv.y * rows; float ri = floor(ry); float fy = fract(ry);
+    float rx = uv.x * 6.0 + mod(ri, 2.0) * 0.5; float ci = floor(rx); float fx = fract(rx);
+    // rounded (dragon-scale) shingle ends
+    float scal = fy - 0.25 * (1.0 - pow(abs(fx * 2.0 - 1.0), 2.0));
+    float edge = smoothstep(0.0, 0.08, scal);
+    float var = hash12(vec2(ci, ri));
+    float grain = tnoise(vec2(uv.x*60.0, uv.y*200.0), vec2(60.0, 200.0));
+    vec3 c = mix(hex(44.,30.,22.), hex(76.,52.,34.), var) * (0.85 + grain*0.25);
+    al = c * mix(0.4, 1.0, edge);
+    h = edge * (0.6 + fy*0.4);
+    r = mix(0.55, 0.75, grain);
+    ao = mix(0.45, 1.0, edge);
+  }`,
+  // 1m tile — woven canvas with broad stripes (awnings): white base, tinted by material colour
+  awning: /* glsl */ `
+  void surf(vec2 uv, out vec3 al, out float r, out float h, out float ao){
+    float stripe = step(0.5, fract(uv.x * 4.0));
+    float weave = tnoise(uv*vec2(400.0, 400.0), vec2(400.0)) * 0.5 + tnoise(uv*vec2(180.0, 60.0), vec2(180.0, 60.0)) * 0.5;
+    float dirt = tfbm(uv*3.0, 3.0, 4);
+    vec3 c = mix(hex(236.,232.,222.), hex(255.,255.,255.) * 0.62, stripe);
+    al = c * (0.88 + weave*0.14) * (0.92 + dirt*0.1);
+    h = weave * 0.3;
+    r = 0.9;
+    ao = 1.0;
+  }`,
 };

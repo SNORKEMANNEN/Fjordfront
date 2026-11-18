@@ -299,6 +299,93 @@ export function makeSnapshot() {
   return finish(g);
 }
 
+/**
+ * The demolition charge (Sabotasje, Update 42): a canvas-wrapped block of explosive bricks on a
+ * plywood base plate, a timer box with a red LED display, and three coloured wires (red, blue,
+ * yellow — the wire gamble) looping from the timer into the bricks. ~40 × 25 cm, carried on a back.
+ */
+export function makeCharge() {
+  const g = new THREE.Group();
+  const ply = new THREE.MeshStandardMaterial({ color: 0x9a7a52, roughness: 0.85 });
+  const brick = new THREE.MeshStandardMaterial({ color: 0xc9b98e, roughness: 0.9 });
+  const tape = new THREE.MeshStandardMaterial({ color: 0x2b2e30, roughness: 0.6 });
+  const base = new THREE.Mesh(new THREE.BoxGeometry(0.42, 0.018, 0.27), ply);
+  base.position.y = 0.009;
+  g.add(base);
+  for (let i = 0; i < 3; i++) {
+    const b = new THREE.Mesh(new THREE.BoxGeometry(0.12, 0.075, 0.22), brick);
+    b.position.set(-0.14 + i * 0.125, 0.056, 0);
+    g.add(b);
+  }
+  for (const x of [-0.09, 0.09]) {
+    const t = new THREE.Mesh(new THREE.BoxGeometry(0.03, 0.082, 0.232), tape);
+    t.position.set(x, 0.058, 0);
+    g.add(t);
+  }
+  // the timer box and its display
+  const box = new THREE.Mesh(new THREE.BoxGeometry(0.13, 0.05, 0.085), M.black());
+  box.position.set(0.0, 0.118, -0.04);
+  g.add(box);
+  const disp = new THREE.Mesh(new THREE.BoxGeometry(0.075, 0.002, 0.03), new THREE.MeshBasicMaterial({ color: new THREE.Color(2.2, 0.15, 0.1), toneMapped: false }));
+  disp.position.set(-0.01, 0.144, -0.045);
+  g.add(disp);
+  const l = led(0xff2a1a, 0.006);
+  l.position.set(0.05, 0.146, -0.02);
+  g.add(l);
+  // three wires: arcs from the timer into the bricks
+  const cols = [0xc8202a, 0x2a5aa8, 0xd8a818];
+  cols.forEach((c, i) => {
+    const pts: THREE.Vector3[] = [];
+    for (let k = 0; k <= 8; k++) {
+      const t = k / 8;
+      pts.push(new THREE.Vector3(-0.04 + i * 0.04, 0.12 + Math.sin(t * Math.PI) * 0.05, -0.02 + t * 0.11));
+    }
+    const tube = new THREE.Mesh(new THREE.TubeGeometry(new THREE.CatmullRomCurve3(pts), 10, 0.004, 5), new THREE.MeshStandardMaterial({ color: c, roughness: 0.5 }));
+    g.add(tube);
+  });
+  // a carrying strap
+  const strap = new THREE.Mesh(new THREE.TorusGeometry(0.1, 0.008, 4, 16, Math.PI), new THREE.MeshStandardMaterial({ color: 0x3a3a2a, roughness: 0.9 }));
+  strap.rotation.y = Math.PI / 2;
+  strap.position.set(0.17, 0.02, 0);
+  g.add(strap);
+  return finish(g);
+}
+
+/**
+ * Firebomb (Update 42): a green glass bottle of fuel, a rag stuffed in the neck and tied off with
+ * wire; the rag's end glows (lit before the throw). It bursts into a pool of fire on impact.
+ */
+export function makeMolotov() {
+  const g = new THREE.Group();
+  const glass = new THREE.MeshPhysicalMaterial({ color: 0x2f6a3a, roughness: 0.12, metalness: 0, transmission: 0, transparent: true, opacity: 0.82 });
+  const prof: THREE.Vector2[] = [];
+  const pts: [number, number][] = [[0, -0.075], [0.03, -0.075], [0.032, -0.07], [0.032, 0.02], [0.026, 0.04], [0.012, 0.055], [0.011, 0.085], [0.013, 0.09], [0.0, 0.09]];
+  for (const [r, y] of pts) prof.push(new THREE.Vector2(r, y));
+  g.add(new THREE.Mesh(new THREE.LatheGeometry(prof, 16), glass));
+  // the fuel inside (a darker amber column)
+  const fuel = new THREE.Mesh(new THREE.CylinderGeometry(0.029, 0.029, 0.08, 14), new THREE.MeshStandardMaterial({ color: 0x8a5a14, roughness: 0.2, transparent: true, opacity: 0.6 }));
+  fuel.position.y = -0.033;
+  g.add(fuel);
+  // the label
+  const label = new THREE.Mesh(new THREE.CylinderGeometry(0.0325, 0.0325, 0.04, 16, 1, true), new THREE.MeshStandardMaterial({ color: 0xd8c8a0, roughness: 0.9 }));
+  label.position.y = -0.02;
+  g.add(label);
+  // rag: a twisted strip out of the neck, wire wrap, a lit end
+  const rag = new THREE.Mesh(new THREE.CylinderGeometry(0.008, 0.011, 0.07, 7), new THREE.MeshStandardMaterial({ color: 0xc8b89a, roughness: 1 }));
+  rag.position.set(0.004, 0.115, 0);
+  rag.rotation.z = -0.35;
+  g.add(rag);
+  const wire = new THREE.Mesh(new THREE.TorusGeometry(0.0125, 0.0012, 4, 12), M.steel());
+  wire.rotation.x = Math.PI / 2;
+  wire.position.y = 0.083;
+  g.add(wire);
+  const ember = new THREE.Mesh(new THREE.SphereGeometry(0.011, 8, 6), new THREE.MeshBasicMaterial({ color: new THREE.Color(5, 2.0, 0.4), toneMapped: false }));
+  ember.position.set(0.016, 0.148, 0);
+  ember.name = 'ember';
+  g.add(ember);
+  return finish(g);
+}
+
 /** Decoy grenade: tan canister with a speaker grille, a push button and an LED. */
 export function makeDecoy() {
   const g = new THREE.Group();
@@ -417,5 +504,5 @@ export function makeTrophy() {
 }
 
 export const EQUIP_BUILDERS = {
-  claymore: makeClaymore, c4: makeC4, detonator: makeDetonator, sticky: makeSticky, snapshot: makeSnapshot, decoy: makeDecoy, trophy: makeTrophy,
+  claymore: makeClaymore, c4: makeC4, detonator: makeDetonator, sticky: makeSticky, snapshot: makeSnapshot, decoy: makeDecoy, trophy: makeTrophy, molotov: makeMolotov,
 };

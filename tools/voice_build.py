@@ -55,6 +55,14 @@ BOT_LINES = {
     'breach': ['Breaching!'],
     'clear': ['Clear!'],
     'blind': ["I'm blind!"],
+    # Sabotasje (Update 42)
+    'planting': ['Planting the charge, cover me!'],
+    'defusing': ["Defusing! Cover me!"],
+    'charge': ["I've got the charge."],
+    'rotA': ['Rotating to Alpha!'],
+    'rotB': ['Rotating to Bravo!'],
+    'onA': ["They're hitting Alpha!"],
+    'onB': ["They're on Bravo!"],
 }
 
 PLAYER_LINES = {
@@ -80,6 +88,8 @@ PLAYER_LINES = {
     'pingEnemy': ['Enemy spotted!', 'Contact, right there!', "Enemy, there! I've got eyes on him."],
     'pingSpot': ['Over here.', 'Check that spot.', 'Look there.'],
     'knifeKill': ['Quiet.', 'Shh.'],
+    'planting': ['Planting!'],
+    'defusing': ['Defusing, cover me!'],
 }
 
 ANN_LINES = {
@@ -108,6 +118,22 @@ ANN_LINES = {
     'fogIn': ["Heads up, fog is rolling in off the fjord. Visibility is dropping fast.", 'Fog bank moving in. Expect close contacts.'],
     'snowIn': ['Snowstorm moving in. Whiteout conditions in one minute.', "Storm's hitting the valley. You won't see far, use your ears."],
     'weatherClear': ['Weather is clearing. Long sightlines are back, watch the ridges.'],
+    # Sabotasje (Update 42): the round mode on Solvik
+    'sabAttack': ['Attack. Get the charge onto a site.'],
+    'sabDefend': ['Defend. Hold both sites.'],
+    'sabPlantedA': ['The charge is down on Alpha!'],
+    'sabPlantedB': ['The charge is down on Bravo!'],
+    'sabDefused': ['The charge has been defused.'],
+    'sabExploded': ['The charge has detonated.'],
+    'sabRoundWon': ['Round won.'],
+    'sabRoundLost': ['Round lost.'],
+    'sabMatchPoint': ['Match point.'],
+    'sabHalf': ['Halftime. Switching sides.'],
+    'sabOvertime': ['Overtime.'],
+    'sabLastAlive': ["You're the last one standing."],
+    'sabTen': ['Ten seconds!'],
+    'sabDropped': ['The charge has been dropped!'],
+    'sabBounty': ["There's a bounty on your head."],
 }
 
 PILOT_LINES = {

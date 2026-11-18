@@ -41,7 +41,7 @@ export interface SettingsData {
   /** map variant: autumn, winter (snow-covered), or random per match */
   mapVariant: 'autumn' | 'winter' | 'random';
   /** which map (Update 34): changing it reloads the page */
-  level: 'kvitvika' | 'brosund';
+  level: 'kvitvika' | 'brosund' | 'solvik';
   timeOfDay: 'dynamic' | 'dawn' | 'day' | 'golden' | 'blue' | 'night' | 'midnight';
   godRays: boolean;
   masterVolume: number;
@@ -153,7 +153,7 @@ class SettingsStore {
     const mv = new URLSearchParams(location.search).get('map') as SettingsData['mapVariant'] | null;
     if (mv) this.data.mapVariant = mv;
     const lv = new URLSearchParams(location.search).get('level') as SettingsData['level'] | null;
-    if (lv === 'kvitvika' || lv === 'brosund') this.data.level = lv;
+    if (lv === 'kvitvika' || lv === 'brosund' || lv === 'solvik') this.data.level = lv;
     const tod = new URLSearchParams(location.search).get('time') as SettingsData['timeOfDay'] | null;
     if (tod) this.data.timeOfDay = tod;
   }

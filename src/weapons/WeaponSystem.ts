@@ -124,6 +124,8 @@ export class WeaponSystem {
   }
 
   private buildKey = '';
+  /** Sabotasje: [B] opens the buy menu instead while buying is possible */
+  fireModeBlocked: (() => boolean) | null = null;
   setLoadout(ids: WeaponId[], builds: (Build | undefined)[] = []) {
     const key = ids.map((id, i) => `${id}:${JSON.stringify(builds[i] ?? {})}`).join('|');
     if (this.slots.length === ids.length && key === this.buildKey) {
@@ -312,7 +314,7 @@ export class WeaponSystem {
       if (inp.wasPressed('primary')) this.switchTo(0);
       if (inp.wasPressed('secondary')) this.switchTo(1);
       if (inp.wasPressed('swap') || inp.wheel !== 0) this.switchTo(this.current === 2 ? this.lastGun : this.current === 0 ? 1 : 0);
-      if (inp.wasPressed('fireMode') && d.modes.length > 1) {
+      if (inp.wasPressed('fireMode') && d.modes.length > 1 && !this.fireModeBlocked?.()) {
         const i = d.modes.indexOf(s.mode);
         s.mode = d.modes[(i + 1) % d.modes.length];
         this.hooks.onSound('fireMode', d);

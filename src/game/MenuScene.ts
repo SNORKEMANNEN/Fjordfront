@@ -6,6 +6,7 @@ import { WEAPONS } from '../weapons/WeaponDefs';
 import type { WeaponModel, WeaponId } from '../weapons/WeaponModels';
 import { MAP_ID } from '../world/MapLayout';
 import { BR_MENU } from '../world/maps/Brosund';
+import { SV_MENU } from '../world/maps/Solvik';
 import type { Terrain } from '../world/Terrain';
 
 /**
@@ -40,6 +41,13 @@ export class MenuScene {
    */
   private pickSpot() {
     const t = this.terrain;
+    if (MAP_ID === 'solvik') {
+      // on the B quay by the railing: the fjord, the far wall and its waterfalls behind the soldier
+      this.spot.set(SV_MENU.x, t.heightAt(SV_MENU.x, SV_MENU.z), SV_MENU.z);
+      this.camYaw = SV_MENU.yaw;
+      this.yaw = SV_MENU.yaw - 0.3;
+      return;
+    }
     if (MAP_ID === 'brosund') {
       // the signature view: on Aksla by Fjellstua, the soldier with the town, the canal, the
       // islands, the sound and the white peaks spread out below and behind them. Search the summit

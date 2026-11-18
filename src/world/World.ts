@@ -14,6 +14,7 @@ import { Waterfalls } from './Waterfalls';
 import { CableCar } from './CableCar';
 import { GeoBuilder } from './GeoBuilder';
 import { BR_FALLS, BR_FAR_FALLS, BR_CABLECAR } from './maps/Brosund';
+import { SV_FAR_FALLS } from './maps/Solvik';
 import type { Environment } from './Environment';
 
 /** Builds and owns all static map content for the active map (Kvitvika or Brosund). */
@@ -39,7 +40,7 @@ export class World {
     scene.add(this.group);
     finishLadders();
     // Brosund's dense town: merge static geometry per 90 m cell so views and shadow passes cull it
-    GeoBuilder.cell = MAP_ID === 'brosund' ? 110 : 0;
+    GeoBuilder.cell = MAP_ID === 'brosund' ? 110 : MAP_ID === 'solvik' ? 60 : 0;
     onProgress('Shaping terrain');
     this.terrain = new Terrain(L, physics, heights);
     this.group.add(this.terrain.mesh, this.terrain.cap);
@@ -78,6 +79,10 @@ export class World {
       this.group.add(this.cable.group);
       onProgress('Waterfalls');
       this.falls = new Waterfalls(this.terrain, BR_FALLS.filter((f) => Math.max(Math.abs(f.x), Math.abs(f.z)) > PLAY_HALF + 30), BR_FAR_FALLS, 22, PLAY_HALF + 60);
+      this.group.add(this.falls.group);
+    } else if (MAP_ID === 'solvik') {
+      // the far fjord wall's waterfalls (backdrop only)
+      this.falls = new Waterfalls(this.terrain, [], SV_FAR_FALLS, 0, PLAY_HALF + 60);
       this.group.add(this.falls.group);
     }
   }

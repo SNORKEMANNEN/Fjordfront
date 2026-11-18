@@ -16,7 +16,7 @@ import { World } from '../world/World';
 import { PlayerController } from '../player/PlayerController';
 import { CameraRig } from '../player/CameraRig';
 import { Settings } from './Settings';
-import { SPAWNS, PLAY_HALF, landmarkAt, LANDMARKS, TUNNEL, TUNNEL_EXIT, tunnelShafts, BUILDINGS, MAP_ID, MAPS, MapId, shoreDist, inTunnel, isWet, capHeightAt, forestDensity, isWater } from '../world/MapLayout';
+import { SPAWNS, PLAY_HALF, landmarkAt, LANDMARKS, TUNNEL, TUNNEL_EXIT, tunnelShafts, BUILDINGS, MAP_ID, MAPS, MapId, DOM_MAPS, shoreDist, inTunnel, isWet, capHeightAt, forestDensity, isWater } from '../world/MapLayout';
 import { tunnelFloorAt } from '../world/maps/Brosund';
 import { Viewmodel, ActionType } from '../weapons/Viewmodel';
 import { WeaponSystem, ShotRequest } from '../weapons/WeaponSystem';
@@ -38,6 +38,9 @@ import { SpawnSystem } from './SpawnSystem';
 import { BotDirector } from '../ai/BotDirector';
 import { Match } from './Match';
 import { Domination, Flag, FlagEvent } from './Domination';
+import { SabMode } from './SabMode';
+import { SabBrain } from '../ai/SabBrain';
+import { SV_SITES } from '../world/maps/Solvik';
 import { Explosives, lobVelocity, FRAG, MORTAR, MELEE, HELI, GrenadeKind, FUSE, SmokeCloud, Decoy, BARREL, VEHICLE, BOUNCE, Grenade } from './Explosives';
 import { Deployables } from './Deployables';
 import { Destruction } from '../world/Destruction';
@@ -99,6 +102,9 @@ class PlayerAvatar implements Combatant {
   assists = 0;
   stealth = 0;
   lastHitT = 99;
+  /** body armour / helmet (Sabotasje) */
+  armor = 0;
+  helmet = false;
   onHurt: (from: Combatant | null, amt: number, dir: THREE.Vector3) => void = () => {};
   /** sideways head/shoulder offset while leaning (world m): bots see and shoot the leaned head */
   lean = new THREE.Vector3();
@@ -187,6 +193,12 @@ export class Game {
   private glints: THREE.Sprite[] = [];
   match!: Match;
   dom!: Domination;
+  /** Sabotasje (Update 42): the round mode on Solvik (null in Domination) */
+  sab: SabMode | null = null;
+  /** the match report (Sabotasje) for the end screen */
+  sabReport = '';
+  /** the game released the pointer itself (a menu that needs the mouse): that unlock is not a pause */
+  expectUnlock = false;
   pickups!: Pickups;
   recorder!: KillcamRecorder;
   private ghost!: Bot;
@@ -488,7 +500,8 @@ export class Game {
   // ================================================================ boot
   async boot() {
     this.ui = new UI(this.uiRoot, {
-      onPlay: () => this.startMatch(),
+      onPlay: () => (MAP_ID === 'solvik' ? this.switchMap(DOM_MAPS[Math.random() < 0.5 ? 0 : 1], 'dom') : this.startMatch()),
+      onSabotage: () => (MAP_ID === 'solvik' ? this.startMatch() : this.switchMap('solvik', 'sab')),
       onMultiplayer: () => this.netg.showPanel(),
       onResume: () => this.resume(),
       onQuit: () => this.toMenu(),
@@ -744,6 +757,7 @@ export class Game {
       onKill: (k, v, def, hs, wb) => this.onKill(k, v, def.name, hs, wb),
       onDamage: (v, a, amt, part, dir, through) => {
         this.logDamage(v, a);
+        this.sab?.onDamage(v, a, amt);
         if (a === this.avatar && v.health > 0) {
           // the marker says what you hit: head (gold), limb (small, thin), through cover (grey),
           // and one that leaves them nearly dead (bright, a little bigger)
@@ -894,7 +908,11 @@ export class Game {
     });
     this.input.onLockChange = (locked) => {
       if (!locked) this.setMapOpen(false);
-      if (!locked && this.state === 'playing' && !this.sbCursor) this.pauseGame();
+      // (the Sabotasje buy menu frees the pointer on purpose: no pause; clicking back in closes it)
+      const ours = !locked && this.expectUnlock;
+      if (!locked) this.expectUnlock = false;
+      if (!locked && this.state === 'playing' && !this.sbCursor && !ours && !this.sab?.ui.buyRecent()) this.pauseGame();
+      if (locked && this.sab?.ui.buyOpen) this.sab.ui.closeBuy();
       if (locked && this.sbCursor) this.closeScoreboardCursor();
     };
     window.addEventListener('pointerdown', () => this.audio.resume());
@@ -942,7 +960,7 @@ export class Game {
     } catch {
       /* none */
     }
-    if (auto === 'dom' && !joinCode) {
+    if ((auto === 'dom' || auto === 'sab') && !joinCode) {
       this.ui.hideLoading?.();
       this.startMatch(true);
     }
@@ -1008,11 +1026,12 @@ export class Game {
     const inp = this.input;
     const can = this.state === 'playing' && this.avatar.alive && !this.tmap.open;
     if (can && inp.isDown('orders')) {
+      const ORD = this.sab ? SabBrain.ORDERS : Game.ORDERS;
       if (!this.wheel) {
         const el = document.createElement('div');
         el.className = 'orderwheel';
-        el.innerHTML = '<div class="ring"></div>' + Game.ORDERS.map((o, i) => {
-          const a = (i / Game.ORDERS.length) * Math.PI * 2 - Math.PI / 2;
+        el.innerHTML = '<div class="ring"></div>' + ORD.map((o, i) => {
+          const a = (i / ORD.length) * Math.PI * 2 - Math.PI / 2;
           return `<div class="opt" style="left:${180 + Math.cos(a) * 118}px;top:${180 + Math.sin(a) * 118}px">${o.label}<small>${o.sub}</small></div>`;
         }).join('') + `<div class="hint">SQUAD · ${this.mySquad().length}</div>`;
         this.ui.hudEl.appendChild(el);
@@ -1026,7 +1045,7 @@ export class Game {
         w.x *= 160 / m;
         w.y *= 160 / m;
       }
-      const n = Game.ORDERS.length;
+      const n = ORD.length;
       let sel = -1;
       if (m > 30) {
         let a = Math.atan2(w.y, w.x) + Math.PI / 2;
@@ -1045,7 +1064,13 @@ export class Game {
       const sel = this.wheel.sel;
       this.wheel.el.remove();
       this.wheel = null;
-      if (sel >= 0 && can) this.issueOrder(Game.ORDERS[sel].kind);
+      if (sel >= 0 && can) {
+        if (this.sab) {
+          const r = this.sab.brain.playerOrder(SabBrain.ORDERS[sel].kind);
+          if (r) this.ui.notify('LAGET · SQUAD', r);
+          this.audio.play('radio', { gain: 0.25, bus: 'ui', reverb: 0, rate: 1.2 });
+        } else this.issueOrder(Game.ORDERS[sel].kind as Order['kind'] | 'cancel');
+      }
     }
   }
   /** give your squad an order (the wheel, or a location ping) */
@@ -1332,6 +1357,7 @@ export class Game {
     out.length = 0;
     const brg = (x: number, z: number) => ((Math.atan2(x - p.x, -(z - p.z)) * 180) / Math.PI + 360) % 360;
     for (const f of this.dom.flags) out.push({ bearing: brg(f.pos.x, f.pos.z), kind: 'flag', label: f.letter, rel: f.owner === -1 ? 'n' : f.owner === this.avatar.team ? 'f' : 'e' });
+    if (this.sab) for (const st of SV_SITES) out.push({ bearing: brg(st.x, st.z), kind: 'flag', label: st.letter, rel: 'n' });
     for (const pg of this.worldPings) if (pg.until > this.time) out.push({ bearing: brg(pg.pos.x, pg.pos.z), kind: 'ping' });
     if (this.waypoint) out.push({ bearing: brg(this.waypoint.x, this.waypoint.z), kind: 'wp' });
     for (const b of this.bots) {
@@ -1365,8 +1391,25 @@ export class Game {
    *  squads vote; the loaded map keeps a tie. Same map: straight to live. Other map: deploy there
    *  (it builds, then the match starts on its own — no menu in between). */
   private voting: { t: number; dur: number; votes: Record<MapId, number>; mine: MapId | null; bots: { at: number; map: MapId; done: boolean }[]; result: MapId | null; resT: number; key: (e: KeyboardEvent) => void } | null = null;
+  /** load another map (a page reload) and start a match there straight away */
+  switchMap(id: MapId, mode: 'dom' | 'sab') {
+    this.ui.notify('DEPLOYING · ' + (MAPS.find((m) => m.id === id)?.name ?? id).toUpperCase(), mode === 'sab' ? 'SABOTASJE 6v6' : 'DOMINATION');
+    try {
+      sessionStorage.setItem('ff.autostart', mode);
+    } catch {
+      /* no session storage: the menu on the new map instead */
+    }
+    Settings.data.level = id;
+    Settings.save();
+    const q = new URLSearchParams(location.search);
+    q.delete('level');
+    q.delete('vote');
+    if (q.has('test')) q.set('level', id);
+    const qs = q.toString();
+    setTimeout(() => (location.href = location.pathname + (qs ? '?' + qs : '')), 500);
+  }
   private beginVote() {
-    const maps = MAPS.map((m) => m.id) as MapId[];
+    const maps = DOM_MAPS.slice();
     const bots = this.bots.filter((b) => !b.netDisabled).map(() => ({ at: 1.2 + this.rng.next() * 8.5, map: maps[this.rng.next() < 0.5 ? 0 : 1], done: false }));
     const key = (e: KeyboardEvent) => {
       if (!this.voting || this.voting.result) return;
@@ -1395,7 +1438,7 @@ export class Game {
   }
   private voteView() {
     const v = this.voting!;
-    return { maps: MAPS.map((m) => ({ id: m.id as MapId, name: m.name, blurb: m.blurb, votes: v.votes[m.id as MapId], loaded: m.id === MAP_ID })), mine: v.mine, left: Math.max(0, v.dur - v.t), result: v.result, total: v.bots.length + 1 };
+    return { maps: MAPS.filter((m) => DOM_MAPS.includes(m.id)).map((m) => ({ id: m.id as MapId, name: m.name, blurb: m.blurb, votes: v.votes[m.id as MapId], loaded: m.id === MAP_ID })), mine: v.mine, left: Math.max(0, v.dur - v.t), result: v.result, total: v.bots.length + 1 };
   }
   private updateVote(dt: number) {
     const v = this.voting!;
@@ -1503,6 +1546,13 @@ export class Game {
     let w = Settings.data.weather;
     let mv = Settings.data.mapVariant ?? 'random';
     let tod = Settings.data.timeOfDay ?? 'dynamic';
+    // Solvik is always the same late-summer evening: clear, low warm sun over the fjord
+    const solvik = MAP_ID === 'solvik';
+    if (solvik) {
+      w = 'clear';
+      mv = 'autumn';
+      tod = 'golden';
+    }
     // Brosund's lighting presets: clear summer, midnight sun, blue hour with lit windows on the
     // canal, an Atlantic storm, or winter with snow on the roofs (picked per match when random)
     if (MAP_ID === 'brosund' && tod === 'dynamic' && w === 'auto') {
@@ -1520,9 +1570,13 @@ export class Game {
     this.weather.gale = storm ? 1 : 0;
     this.presetSea = storm ? 1 : 0;
     this.env.setTime(tod);
+    if (solvik) {
+      this.env.hour = 15.1;
+      this.env.applyLighting(true);
+    }
     const blue = this.env.blueHour > 0;
     // the blue hour is a winter thing: deep blue snow, warm windows (random map: mostly winter)
-    const winter = mv === 'winter' || (mv === 'random' && this.rng.next() < (blue ? (MAP_ID === 'brosund' ? 0.4 : 0.85) : 0.4));
+    const winter = !solvik && (mv === 'winter' || (mv === 'random' && this.rng.next() < (blue ? (MAP_ID === 'brosund' ? 0.4 : 0.85) : 0.4)));
     this.winter = winter;
     this.env.winter = winter;
     this.terrain.winter = winter;
@@ -1538,7 +1592,8 @@ export class Game {
     this.env.setWeather(wx);
     this.weather.reset(winter, wx);
     this.weather.storm = 0;
-    this.scheduleWeatherEvent();
+    if (solvik) this.wxEvent = { kind: '', at: 1e9, t: 0, fog: 0, called: false, cleared: false, prevWeather: '' };
+    else this.scheduleWeatherEvent();
     this.vmScene.environment = this.scene.environment;
     this.match.initialSpawns = true;
     this.respawnPlayer();
@@ -1549,6 +1604,17 @@ export class Game {
     this.match.initialSpawns = false;
     this.state = 'playing';
     this.minuteCalled = false;
+    // Sabotasje: rounds, no vote (Solvik is its own map)
+    if (solvik) {
+      this.sab ??= new SabMode(this);
+      this.sabReport = '';
+      this.weapons.fireModeBlocked = () => !!this.sab && this.sab.sab.canBuy() && this.sab.inBuyZone(this.avatar);
+      this.sab.start();
+      this.netg?.onMatchStart();
+      this.input.lock();
+      return;
+    }
+    this.sab?.stop();
     // solo matches open with a map vote (Update 40): you're in, on the loaded map, the vote runs
     const forceVote = new URLSearchParams(location.search).has('vote');
     if (!skipVote && !this.netg?.active && (!this.testMode || forceVote)) {
@@ -1580,14 +1646,15 @@ export class Game {
   }
 
   private minuteCalled = false;
-  private onMatchEnd(w: 0 | 1 | -1) {
+  onMatchEnd(w: 0 | 1 | -1) {
+    if (this.state === 'ended') return;
     this.netg?.onMatchEnd(w);
     this.announcer(w === this.avatar.team ? 'win' : 'lose');
     this.audio.music.sting(w === this.avatar.team ? 'victory' : 'defeat');
     this.state = 'ended';
     this.input.unlock();
     this.ui.showDeath(false);
-    this.ui.showEnd(w, this.avatar.team, this.match.snapshot(), this.match.scores, this.match.teamNames);
+    this.ui.showEnd(w, this.avatar.team, this.match.snapshot(), this.sab ? this.sab.sab.score : this.match.scores, this.match.teamNames, this.sab ? this.sabReport : '');
   }
 
   private respawnPlayer() {
@@ -1757,7 +1824,7 @@ export class Game {
     if (c4Tap) {
       this.lastUseTap = -9;
       this.startDetonate();
-    } else if (inp.wasPressed('spot') && a.alive) {
+    } else if (inp.wasPressed('spot') && a.alive && !this.sab?.usesF()) {
       // F: clip onto a zipline in reach, else open / close the door you are looking at, else spot
       const d = this.doorFocus();
       if (zipHere && !this.player.mantle && !this.player.ladder) {
@@ -1785,7 +1852,7 @@ export class Game {
     // ---------------- health & bounds ----------------
     a.lastHitT += dt;
     if (a.alive) {
-      if (a.lastHitT > 4 && a.health < 100) a.health = Math.min(100, a.health + dt * 30);
+      if (a.lastHitT > 4 && a.health < 100 && !this.sab) a.health = Math.min(100, a.health + dt * 30);
       const p = this.player.pos;
       const out = Math.abs(p.x) > PLAY_HALF || Math.abs(p.z) > PLAY_HALF || (p.y < 0.4 && shoreDist(p.x, p.z) < -8 && !inTunnel(p.x, p.y, p.z));
       if (out) {
@@ -1795,6 +1862,9 @@ export class Game {
       a.stealth = this.player.stance !== 'stand' ? 1 : 0;
     } else if (this.spectating) {
       this.ui.showDeath(false);
+    } else if (this.sab) {
+      // Sabotasje: no respawn — a moment on your body, then you watch your team (SabMode)
+      this.ui.showDeath(true, this.killerName, this.killerWeapon, 0, this.killerTeam);
     } else {
       this.respawnT -= dt;
       // loadout for the next life: keys 1-5 (the weapon / streak keys) pick a saved loadout
@@ -1833,22 +1903,24 @@ export class Game {
         this.runAvoidance();
       }
       b.update(dt, this.time);
-      if (!b.alive && b.respawnT <= 0 && this.match.phase === 'live') {
+      if (!b.alive && b.respawnT <= 0 && this.match.phase === 'live' && !this.sab) {
         const s = this.match.pickSpawn(b.team);
         b.spawn(s.pos, s.yaw);
       }
     }
-    if (!this.netg?.isClient && !this.voting) {
+    if (this.sab) {
+      if (this.match.phase === 'live') this.sab.update(dt);
+    } else if (!this.netg?.isClient && !this.voting) {
       // (a client mirrors the host's clock, flags and score instead)
       this.match.update(dt);
       this.match.addPoints(this.dom.update(dt, this.match.players, this.time));
     }
     this.netg?.update(dt);
-    if (!this.minuteCalled && this.match.timeLeft < 60 && this.match.phase === 'live') {
+    if (!this.minuteCalled && this.match.timeLeft < 60 && this.match.phase === 'live' && !this.sab) {
       this.minuteCalled = true;
       this.announcer('minute');
     }
-    if (this.match.phase === 'live') {
+    if (this.match.phase === 'live' && !this.sab) {
       const me = this.avatar.team;
       const sc = this.match.scores;
       this.hq.update(dt, this.time, { my: sc[me], en: sc[1 - me], limit: this.match.scoreLimit, timeLeft: this.match.timeLeft, flags: this.dom.flags, team: me }, (line, o) => this.radio.say('ann', line, this.time, o));
@@ -1858,7 +1930,7 @@ export class Game {
       else if (!tense && this.audio.music.current === 'tension') this.audio.music.bedTo(null, 5);
     }
     this.recordFrame();
-    this.updateDominationHUD(dt);
+    if (!this.sab) this.updateDominationHUD(dt);
 
     // ---------------- world & fx ----------------
     this.env.update(dt, this.camera);
@@ -2092,7 +2164,7 @@ export class Game {
     const s = 0.0022 * Settings.data.sensitivity;
     this.specYaw -= inp.mouseDX * s;
     this.specPitch = THREE.MathUtils.clamp(this.specPitch - inp.mouseDY * s * (Settings.data.invertY ? -1 : 1), -1.5, 1.5);
-    const alive = this.match.players.filter((c) => c.alive && c !== this.avatar);
+    const alive = this.match.players.filter((c) => c.alive && c !== this.avatar && (!this.sab || c.team === this.avatar.team || !this.match.players.some((m) => m.alive && m !== this.avatar && m.team === this.avatar.team)));
     if (inp.wasPressed('fire') && alive.length) {
       const i = alive.findIndex((c) => c.id === this.specFollow);
       this.specFollow = alive[(i + 1) % alive.length].id;
@@ -2843,6 +2915,7 @@ export class Game {
     this.explosives = new Explosives(this.scene, this.physics, this.fx, {
       damage: (v, att, amt) => {
         this.logDamage(v, att);
+        this.sab?.onDamage(v, att, amt);
         if (att === this.avatar && v !== this.avatar && v.health > 0) {
           this.ui.hitmarker(false, false, amt);
           this.audio.play('hit', { gain: 0.6, bus: 'ui', reverb: 0, prio: 3 });
@@ -2897,6 +2970,7 @@ export class Game {
         return null;
       },
       flash: (p, owner) => this.flashBang(p, owner),
+      fire: (p, owner) => this.sab?.fire(p, owner),
       stun: (p, owner) => this.stunBlast(p, owner),
       smokeStart: (p, c) => {
         this.audio.play('smokePop', { pos: p, gain: 0.8, ref: 4, reverb: 0.2 });
@@ -3066,6 +3140,7 @@ export class Game {
         if (lethal === 'tknife') this.startEquip('tknife', 'lethalKnife', 0.8, [], { holdAt: 0.28, ...held });
         else if (lethal === 'frag') this.startEquip('frag', 'lethalFrag', 1.3, [], { holdAt: 0.52, ...held });
         else if (lethal === 'sticky') this.startEquip('sticky', 'lethalSticky', 1.25, [], { holdAt: 0.52, ...held });
+        else if (lethal === 'molotov') this.startEquip('molotov', 'lethalSticky', 1.2, [], { holdAt: 0.5, ...held });
         else if (lethal === 'c4') {
           this.vm.detonatorOut = false;
           this.startEquip('c4', 'lethalC4', 1.45, [], { holdAt: 0.42, ...held }, () => {
@@ -3097,7 +3172,7 @@ export class Game {
       }
     }
     // [H] field upgrade: the trophy system, two-handed deploy
-    if (inp.wasPressed('field') && free && !this.player.mantle && !this.player.ladder) {
+    if (inp.wasPressed('field') && free && !this.player.mantle && !this.player.ladder && !this.sab) {
       if (this.fieldCharge >= 1) {
         this.player.sprinting = false;
         this.player.tactical = false;
@@ -3139,7 +3214,7 @@ export class Game {
     // ---- killstreaks: UAV from the phone, mortar via the laser designator, helicopter by radio
     const keys: ['streak1' | 'streak2' | 'streak3', StreakId][] = [['streak1', 'uav'], ['streak2', 'mortar'], ['streak3', 'heli']];
     for (const [k, id] of keys) {
-      if (!inp.wasPressed(k)) continue;
+      if (!inp.wasPressed(k) || this.sab) continue;
       if (this.designating) {
         if (id === 'mortar') this.endDesignate(false);
         continue;
@@ -4231,6 +4306,10 @@ export class Game {
       if (age < 2.2 && Math.hypot(fp.x - p.x, fp.z - p.z) < FIRE_REVEAL_RADIUS) blips.push({ x: fp.x, z: fp.z, kind: 'ping', alpha: 1 - age / 2.2 });
     }
     for (const f of this.dom.flags) blips.push({ x: f.pos.x, z: f.pos.z, kind: 'flag', alpha: 1, label: f.letter, color: f.owner === -1 ? '#dddddd' : f.owner === this.avatar.team ? '#5aa8ff' : '#ff4a3a' });
+    if (this.sab) {
+      const s = this.sab.sab;
+      for (const st of SV_SITES) blips.push({ x: st.x, z: st.z, kind: 'flag', alpha: 1, label: st.letter, color: s.charge.state === 'planted' && s.charge.site === st.letter ? '#ff4a3a' : '#f2b544' });
+    }
     for (const hl of this.streaks.helis) blips.push({ x: hl.pos.x, z: hl.pos.z, kind: hl.team === this.avatar.team ? 'heli' : 'heliFoe', alpha: 1 });
     for (const pg of this.worldPings) {
       if (pg.until <= this.time) continue;
@@ -4307,27 +4386,7 @@ export class Game {
           if (d < 60) this.rig.addTrauma(0.4 * (1 - d / 60));
         }
       },
-      burn: (p, r, dps, by, dt) => {
-        for (const c of this.match.players) {
-          if (!c.alive || c.position().distanceTo(p) > r + 0.4) continue;
-          const amt = dps * dt;
-          if (c === this.avatar) {
-            this.hurtPlayer(amt, 'FIRE');
-            if (Math.random() < dt * 4) {
-              const to = p.clone().sub(this.player.pos);
-              this.ui.damageFrom(Math.atan2(to.x, -to.z) + this.player.yaw, 'fire');
-              this.audio.play('hit', { gain: 0.25, rate: 0.6, bus: 'ui', reverb: 0 });
-            }
-          } else if (c instanceof Bot && !c.netPuppet) {
-            c.health = Math.max(0, c.health - amt);
-            c.onDamaged(by, amt, c.position().clone().sub(p).normalize());
-            if (c.health <= 0) {
-              c.alive = false;
-              this.onKill(by && by.team !== c.team ? by : c, c, 'Fire', false, false);
-            }
-          }
-        }
-      },
+      burn: (p, r, dps, by, dt) => this.burnAt(p, r, dps, by, dt),
       emitter: (key, buf, gain, p) => this.audio.emitter(key, buf, gain, p, { ref: 5, bus: 'sfx' }),
       stopEmitter: (key) => this.audio.stopEmitter(key),
       players: () => this.match.players,
@@ -5099,7 +5158,8 @@ export class Game {
     this.awardAssists(killer, victim);
     this.netg?.reportDeath(killer, victim, weapon, headshot, wallbang);
     this.match.registerKill(killer, victim, weapon, headshot, wallbang, this.time);
-    this.streaks.onKill(killer, victim, weapon === MORTAR.name || weapon === HELI.name);
+    if (this.sab) this.sab.onKill(killer, victim, weapon);
+    else this.streaks.onKill(killer, victim, weapon === MORTAR.name || weapon === HELI.name);
     if (killer instanceof Bot && killer !== victim && Math.random() < 0.5) this.botVoice(killer, 'kill');
     else if (victim !== this.avatar) {
       const mate = this.bots.find((b) => b.alive && b !== victim && b.team === victim.team && b.position().distanceTo(victim.position()) < 30);
@@ -5109,8 +5169,8 @@ export class Game {
     this.deathScream(victim, headshot);
     if (victim instanceof Bot) {
       victim.kill(victim.position().clone().sub(killer.position()).normalize());
-      // enemies drop a supply pouch
-      if (victim.team !== this.avatar.team) {
+      // enemies drop a supply pouch (Sabotasje: their gun instead)
+      if (victim.team !== this.avatar.team && !this.sab) {
         const vp = victim.position();
         this.pickups.drop(vp, this.groundHeightAt(vp.x, vp.z));
       }
@@ -5119,8 +5179,8 @@ export class Game {
       this.player.dead = true;
       this.weapons.enabled = false;
       this.deathTime = this.time;
-      this.killcamSlot = killer instanceof Bot ? this.bots.indexOf(killer) : -1;
-      this.respawnT = this.killcamSlot >= 0 ? 1.7 : 3.5;
+      this.killcamSlot = killer instanceof Bot && !this.sab ? this.bots.indexOf(killer) : -1;
+      this.respawnT = this.sab ? 1e9 : this.killcamSlot >= 0 ? 1.7 : 3.5;
       this.killerName = killer.name.toUpperCase();
       this.killerTeam = killer.team;
       this.killerWeapon = weapon.toUpperCase();
@@ -5200,6 +5260,35 @@ export class Game {
     else this.playerVoice('kill', 0.35);
   }
   private killStreak = 0;
+
+  /**
+   * Fire damage around p (burning cars, firebombs): dps for whoever stands within r. `hits`
+   * filters who it can hurt (firebombs: not the thrower's teammates); `h` = flame height.
+   */
+  burnAt(p: THREE.Vector3, r: number, dps: number, by: Combatant | null, dt: number, hits?: (c: Combatant) => boolean, h = 99, label = 'Fire') {
+    for (const c of this.match.players) {
+      if (!c.alive || Math.hypot(c.position().x - p.x, c.position().z - p.z) > r + 0.4 || Math.abs(c.position().y - p.y) > h) continue;
+      if (hits && !hits(c)) continue;
+      const amt = dps * dt;
+      if (c === this.avatar) {
+        this.hurtPlayer(amt, 'FIRE');
+        if (Math.random() < dt * 4) {
+          const to = p.clone().sub(this.player.pos);
+          this.ui.damageFrom(Math.atan2(to.x, -to.z) + this.player.yaw, 'fire');
+          this.audio.play('hit', { gain: 0.25, rate: 0.6, bus: 'ui', reverb: 0 });
+        }
+      } else if (c instanceof Bot && !c.netPuppet) {
+        const before = c.health;
+        c.health = Math.max(0, c.health - amt);
+        c.onDamaged(by, amt, c.position().clone().sub(p).normalize());
+        if (by && by !== c) this.sab?.onDamage(c, by, Math.min(amt, before));
+        if (c.health <= 0) {
+          c.alive = false;
+          this.onKill(by && by.team !== c.team ? by : c, c, label, false, false);
+        }
+      }
+    }
+  }
 
   // ================================================================ debug helpers (automation)
   view(x: number, z: number, yaw: number, pitch = 0, y?: number) {

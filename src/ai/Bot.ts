@@ -270,6 +270,54 @@ export class Bot implements Combatant {
     return out.set(-Math.sin(this.aimYaw) * cp, Math.sin(this.aimPitch), -Math.cos(this.aimYaw) * cp);
   }
 
+  /** guns this soldier has carried (Sabotasje rearms bots every round): no rebuild on a re-buy */
+  private gunCache = new Map<string, { model: WeaponModel; mesh: THREE.Mesh | null; proxy: THREE.Mesh | null }>();
+  /**
+   * Swap the gun in hand (Sabotasje: bought, picked up or lost between rounds). `build` makes a
+   * new model the first time a weapon is carried; later swaps reuse it.
+   */
+  setWeapon(defId: keyof typeof WEAPONS, build: () => WeaponModel) {
+    if (this.def.id === defId) return;
+    if (!this.gunCache.has(this.def.id)) this.gunCache.set(this.def.id, { model: this.weapon, mesh: this.gunMesh, proxy: this.gunProxy });
+    let e = this.gunCache.get(defId);
+    if (!e) {
+      const model = build();
+      model.root.scale.setScalar(1);
+      model.root.traverse((o) => {
+        if ((o as THREE.Mesh).isMesh) o.castShadow = true;
+      });
+      const proxyGeo = bakeProxy(model.root, 'botgun:' + defId);
+      const mesh = bakeFlat(model.root, 'botgun', 'botgun:' + defId);
+      let proxy: THREE.Mesh | null = null;
+      if (mesh) {
+        proxy = new THREE.Mesh(proxyGeo, mesh.material);
+        proxy.name = 'gunProxy';
+        proxy.visible = false;
+        proxy.castShadow = false;
+        model.root.add(proxy);
+      }
+      e = { model, mesh, proxy };
+      this.gunCache.set(defId, e);
+    }
+    this.def = WEAPONS[defId];
+    this.weapon = e.model;
+    this.gunMesh = e.mesh;
+    this.gunProxy = e.proxy;
+    this.gunNear = true;
+    if (this.gunMesh) this.gunMesh.visible = true;
+    if (this.gunProxy) this.gunProxy.visible = false;
+    this.soldier.setWeapon(this.weapon);
+    this.anim.reloadStyle = reloadStyleFor(this.def);
+    this.anim.pistol = this.def.cls === 'Pistol';
+    this.mag = this.def.mag;
+    this.reloadT = 0;
+  }
+  /** planting / defusing (Sabotasje): stay put, crouched; still looks and shoots */
+  busy = false;
+  /** body armour (Sabotasje) */
+  armor = 0;
+  helmet = false;
+
   spawn(p: THREE.Vector3, yaw: number) {
     this.body.setStance('stand', true);
     this.body.teleport(p);
@@ -1003,10 +1051,15 @@ export class Bot implements Combatant {
         const o = this.order!;
         if (!o) break;
         const goal = o.kind === 'follow' || o.kind === 'regroup' ? (o.who?.position() ?? o.pos) : o.pos;
-        const there = this.moveTo(goal, wish, o.kind === 'follow' ? 5 : 2.5);
-        speed = there ? 0 : o.kind === 'attack' ? 5.6 : 5;
+        const there = this.moveTo(goal, wish, o.arrive ?? (o.kind === 'follow' ? 5 : 2.5));
+        speed = there ? 0 : o.walk ? 2.6 : o.kind === 'attack' ? 5.6 : 5;
         if (there && (o.kind === 'defend' || o.kind === 'hold')) {
-          this.aimYaw += Math.sin(now * 1.3 + this.id) * dt * 1.2;
+          if (o.look) {
+            // watch the given angle, sweeping a little either side of it
+            const lx = o.look.x - this.body.pos.x, lz = o.look.z - this.body.pos.z;
+            const ly = Math.atan2(-lx, -lz) + Math.sin(now * 0.8 + this.id) * 0.32;
+            this.aimYaw = dampAngle(this.aimYaw, ly, 3, dt);
+          } else this.aimYaw += Math.sin(now * 1.3 + this.id) * dt * 1.2;
           wantStance = o.kind === 'hold' ? 'crouch' : 'stand';
         }
         if (there && o.kind === 'regroup') this.order = null;
@@ -1072,6 +1125,11 @@ export class Bot implements Combatant {
         this.tacticals--;
         this.startThrow(false, this.body.pos.clone().lerp(this.target.position(), 0.35), 0, 'smoke');
       }
+    }
+    if (this.busy) {
+      wish.set(0, 0, 0);
+      speed = 0;
+      wantStance = 'crouch';
     }
     // status effects
     this.blindT = Math.max(0, this.blindT - dt);

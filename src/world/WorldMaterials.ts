@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { MaterialLib } from '../render/Materials';
+import { MAP_ID } from './MapLayout';
 
 /** All static world materials, keyed by the names used in the generators. */
 export function makeWorldMaterials(L: MaterialLib): Record<string, THREE.Material> {
@@ -111,11 +112,41 @@ export function makeWorldMaterials(L: MaterialLib): Record<string, THREE.Materia
     wetWall: L.std('concrete', { tile: 3, color: 0x4e4c4a, roughness: 0.25, envMapIntensity: 0.3 }, 'wetWall'),
     puddle: new THREE.MeshStandardMaterial({ color: 0x0c0e10, roughness: 0.02, metalness: 0.4, envMapIntensity: 0.8, polygonOffset: true, polygonOffsetFactor: -3 }),
   };
+  // ---- Solvik (Update 42): warm sandstone, setts and flagstones, tarred shingles, market awnings ----
+  if (MAP_ID === 'solvik') {
+    Object.assign(m, {
+      sandstone: L.std('ashlar', { tile: 3 }, 'sv_sandstone'),
+      sandstoneDk: L.std('ashlar', { tile: 3, color: 0xc8b8a0 }, 'sv_sandstoneDk'),
+      cobbles: L.std('cobbles', { tile: 2.2 }, 'sv_cobbles'),
+      flags: L.std('flagstone', { tile: 4 }, 'sv_flags'),
+      shingles: L.std('shingles', { tile: 1.1 }, 'sv_shingles'),
+      tarWood: L.std('planks', { tile: 1.6, color: 0x4a3426 }, 'sv_tar'),
+      roofRed: L.std('roofTiles', { tile: 1.6, color: new THREE.Color(2.5, 1.25, 0.86) as unknown as number }, 'sv_roofRed'),
+      deck: L.std('planks', { tile: 2.2, color: 0xc2a888 }, 'sv_deck'),
+      awnRed: L.std('awning', { tile: 1.6, color: 0xc0392b }, 'sv_awnRed'),
+      awnBlue: L.std('awning', { tile: 1.6, color: 0x2f6aa8 }, 'sv_awnBlue'),
+      awnGreen: L.std('awning', { tile: 1.6, color: 0x3f8a5a }, 'sv_awnGreen'),
+      awnOchre: L.std('awning', { tile: 1.6, color: 0xd99a2b }, 'sv_awnOchre'),
+      shutterGreen: L.std('planks', { tile: 0.8, color: 0x3c6e52 }, 'sv_shutG'),
+      shutterBlue: L.std('planks', { tile: 0.8, color: 0x3a5f86 }, 'sv_shutB'),
+      shutterRed: L.std('planks', { tile: 0.8, color: 0x8e3226 }, 'sv_shutR'),
+      flowerRed: new THREE.MeshStandardMaterial({ color: 0xd2283a, roughness: 0.8 }),
+      flowerPink: new THREE.MeshStandardMaterial({ color: 0xe86aa0, roughness: 0.8 }),
+      flowerWhite: new THREE.MeshStandardMaterial({ color: 0xf2efe6, roughness: 0.8 }),
+      leaf: new THREE.MeshStandardMaterial({ color: 0x3e6a2a, roughness: 0.9 }),
+      gold: new THREE.MeshStandardMaterial({ color: 0xd8a640, roughness: 0.35, metalness: 0.9 }),
+      cloth: new THREE.MeshStandardMaterial({ color: 0xf2efe8, roughness: 0.9, side: THREE.DoubleSide }),
+      clothBlue: new THREE.MeshStandardMaterial({ color: 0x6f9cc8, roughness: 0.9, side: THREE.DoubleSide }),
+      pennant: new THREE.MeshStandardMaterial({ color: 0xc8202a, roughness: 0.7, side: THREE.DoubleSide }),
+      bulbWarm: new THREE.MeshBasicMaterial({ color: new THREE.Color(4.2, 2.8, 1.4), toneMapped: false }),
+      water2: new THREE.MeshStandardMaterial({ color: 0x1a3a40, roughness: 0.08, metalness: 0.2 }),
+    });
+  }
   // weathering flags (Update 33, see Snow.ts): moss / grime / frost on metal
   const flag = (keys: string[], f: string[]) => {
     for (const k of keys) if (m[k]) m[k].userData.wx = [...((m[k].userData.wx as string[] | undefined) ?? []), ...f];
   };
-  flag(['stone', 'concrete', 'concreteWhite', 'chimney', 'boulder', 'roof', 'granite', 'slate', 'shotcrete'], ['moss', 'grime']);
+  flag(['stone', 'concrete', 'concreteWhite', 'chimney', 'boulder', 'roof', 'granite', 'slate', 'shotcrete', 'sandstone', 'sandstoneDk', 'roofRed'], ['moss', 'grime']);
   flag(['j_ochre', 'j_salmon', 'j_mint', 'j_jwhite', 'j_deepred', 'j_yellow', 'j_skyblue', 'j_cream', 'stucco'], ['grime']);
   flag(['copper', 'iron', 'stay'], ['metal']);
   flag(['red', 'white', 'ochre', 'dkgrey', 'trim', 'planks', 'woodRaw', 'door', 'corrBlue', 'corrWhite', 'tankWhite', 'sandbag', 'crate', 'pallet'], ['grime']);

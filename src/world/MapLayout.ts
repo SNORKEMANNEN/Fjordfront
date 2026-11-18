@@ -1,5 +1,6 @@
 import { clamp, distToSegment2, fbm2, ridged2, smoothstep, simplex2, lerp } from '../core/math';
 import * as BR from './maps/Brosund';
+import * as SV from './maps/Solvik';
 
 /**
  * "Kvitvika" — a fictional settlement on the Norwegian coast combining a Lofoten
@@ -15,11 +16,14 @@ export const SEA_LEVEL = 0;
  * works on either map. It runs at module load (from ?level= or the saved setting) and again in each
  * terrain worker with the id it is sent.
  */
-export type MapId = 'kvitvika' | 'brosund';
+export type MapId = 'kvitvika' | 'brosund' | 'solvik';
 export const MAPS: { id: MapId; name: string; blurb: string }[] = [
   { id: 'kvitvika', name: 'Kvitvika', blurb: 'Lofoten fishing village, fjord inlet and a coastal fort' },
   { id: 'brosund', name: 'Brosund', blurb: 'Jugendstil canal town on three islands, an undersea tunnel and the Sunnmøre Alps' },
+  { id: 'solvik', name: 'Solvik', blurb: 'Compact fjord town in the evening sun: fortress, stave church, wharf lofts. Sabotasje 6v6' },
 ];
+/** maps in the Domination rotation (Solvik is built for Sabotasje) */
+export const DOM_MAPS: MapId[] = ['kvitvika', 'brosund'];
 export let MAP_ID: MapId = 'kvitvika';
 export let MAP_NAME = 'Kvitvika';
 export let PLAY_HALF = 185;
@@ -290,7 +294,7 @@ function padFor(b: BuildingDef): Pad {
 
 /** Natural terrain before roads/pads. */
 export function naturalHeight(x: number, z: number): number {
-  return MAP_ID === 'brosund' ? BR.brNatural(x, z) : kvNatural(x, z);
+  return MAP_ID === 'brosund' ? BR.brNatural(x, z) : MAP_ID === 'solvik' ? SV.svNatural(x, z) : kvNatural(x, z);
 }
 function kvNatural(x: number, z: number): number {
   let h = 4.2 + fbm2(x * 0.007, z * 0.007, 4) * 3.2 + fbm2(x * 0.03 + 7, z * 0.03, 3) * 0.9;
@@ -505,6 +509,8 @@ function roadSegs(x: number, z: number) {
   return segGrid.get((ci + 512) * 1024 + (cj + 512)) ?? NO_SEGS;
 }
 
+/** stand-in for maps without roads (Solvik's streets are paved by its own builder) */
+const NO_ROAD: Road = { name: '', pts: [[1e5, 1e5], [1e5 + 1, 1e5]], width: 1, kind: 'dirt' };
 /** Returns {d, y, t, road} for the nearest road to (x,z). */
 export function nearestRoad(x: number, z: number) {
   const segs = roadSegs(x, z);
@@ -523,7 +529,7 @@ export function nearestRoad(x: number, z: number) {
       bt = t;
     }
   }
-  if (!bs) return { d: 1e9, y: 0, road: ROADS[0], seg: 0, t: 0 };
+  if (!bs) return { d: 1e9, y: 0, road: ROADS[0] ?? NO_ROAD, seg: 0, t: 0 };
   return { d: bd, y: lerp(bs.ys[bs.i], bs.ys[bs.i + 1], bt), road: bs.r, seg: bs.i, t: bt };
 }
 
@@ -551,6 +557,7 @@ export function terrainHeight(x: number, z: number): number {
     const m = nr.road.kind === 'stairs' ? 1 - smoothstep(hw + 1.1, hw + 2.8, nr.d) : 1 - smoothstep(hw + 0.6, hw + 7, nr.d);
     h = lerp(h, nr.y - (nr.d < hw + 0.3 ? (nr.road.kind === 'stairs' ? 0.25 : 0.06) : 0), m);
   }
+  if (MAP_ID === 'solvik') return SV.svTerrainPost(x, z, h);
   if (!kv) return BR.brTerrainPost(x, z, h);
   // Trenches
   for (const t of TRENCHES) {
@@ -601,12 +608,13 @@ export function isWater(x: number, z: number, h: number) {
 
 /** Distance inland from the sea (≤ 0 at sea). */
 export function shoreDist(x: number, z: number): number {
-  return MAP_ID === 'brosund' ? BR.seaDist(x, z) : x - coastX(z);
+  return MAP_ID === 'brosund' ? BR.seaDist(x, z) : MAP_ID === 'solvik' ? SV.svSeaDist(x, z) : x - coastX(z);
 }
 
 /** Inside a road tunnel's bore (acoustics, no underwater filter, no splashes). */
 export function inTunnel(x: number, y: number, z: number): boolean {
   if (MAP_ID === 'brosund') return BR.inBrosundTunnel(x, y, z);
+  if (MAP_ID === 'solvik') return false;
   const W = TUNNEL.width / 2;
   return Math.abs(x - TUNNEL.x) < W + TUNNEL_EXIT.gx1 + 1 && z > TUNNEL.z0 - 4 && z < TUNNEL.z1 + 4 && y < TUNNEL_EXIT.floor + TUNNEL.height + 2;
 }
@@ -621,6 +629,7 @@ export function isWet(x: number, y: number, z: number, ground: number): boolean 
 /** Height of the ground mesh over a tunnel (the cap), or null where there is no cap. */
 export function capHeightAt(x: number, z: number): number | null {
   if (MAP_ID === 'brosund') return BR.brCapCovers(x, z) ? BR.brCapHeight(x, z, naturalWithPads(x, z)) : null;
+  if (MAP_ID === 'solvik') return null;
   if (Math.abs(x - TUNNEL.x) < TUNNEL.width / 2 + TUNNEL_EXIT.carve + 1 && z > TUNNEL.z0 - 1 && z < TUNNEL.z1 + 1) return tunnelCapHeight(x, z);
   return null;
 }
@@ -628,6 +637,7 @@ export function capHeightAt(x: number, z: number): number | null {
 /** Forest density 0..1 used for trees and forest-floor texturing. */
 export function forestDensity(x: number, z: number, h: number): number {
   if (MAP_ID === 'brosund') return BR.brForest(x, z, h);
+  if (MAP_ID === 'solvik') return SV.svForest(x, z, h);
   if (h < 1.6) return 0;
   let f = 0.5 + 0.5 * fbm2(x * 0.018 + 11, z * 0.018 - 5, 4);
   // zones
@@ -711,7 +721,16 @@ export function selectMap(id: MapId) {
   roadCache.length = 0;
   bridgeEndsCache = null;
   shaftCache = null;
-  if (id === 'brosund') {
+  if (id === 'solvik') {
+    PLAY_HALF = SV.SV_PLAY;
+    TERRAIN_INNER = SV.SV_INNER;
+    fill(ROADS, []);
+    fill(BUILDINGS, []);
+    fill(TRENCHES, []);
+    fill(LANDMARKS, SV.SV_LANDMARKS);
+    fill(SPAWNS, SV.SV_SPAWNS);
+    fill(LADDERS, []);
+  } else if (id === 'brosund') {
     PLAY_HALF = BR.BR_PLAY;
     TERRAIN_INNER = BR.BR_INNER;
     fill(ROADS, BR.brRoads());
@@ -746,10 +765,10 @@ export function requestedMap(): MapId {
   try {
     if (typeof location !== 'undefined' && typeof window !== 'undefined') {
       const q = new URLSearchParams(location.search).get('level');
-      if (q === 'brosund' || q === 'kvitvika') return q;
+      if (q === 'brosund' || q === 'kvitvika' || q === 'solvik') return q;
       const raw = localStorage.getItem('fjordfront.settings');
       const lv = raw ? (JSON.parse(raw).level as string | undefined) : undefined;
-      if (lv === 'brosund' || lv === 'kvitvika') return lv;
+      if (lv === 'brosund' || lv === 'kvitvika' || lv === 'solvik') return lv;
     }
   } catch {
     /* no storage */

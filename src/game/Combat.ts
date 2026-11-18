@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import { Physics, RayHit } from '../core/Physics';
-import { Combatant, HitPart } from './Combatant';
+import { Combatant, HitPart, armorAbsorb } from './Combatant';
 import { WeaponDef } from '../weapons/WeaponDefs';
 import { Effects } from '../fx/Effects';
 import { lerp, smoothstep } from '../core/math';
@@ -73,6 +73,7 @@ export class Combat {
         let dmg = lerp(def.damage[0], def.damage[1], fall) * dmgMul;
         if (best.part === 'head') dmg *= def.headMul;
         else if (best.part === 'limb') dmg *= def.limbMul;
+        dmg = armorAbsorb(best.c, dmg, best.part, def.cls);
         const before = best.c.health;
         best.c.health = Math.max(0, best.c.health - dmg);
         best.c.onDamaged(shooter, dmg, dir, best.part);

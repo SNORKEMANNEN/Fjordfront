@@ -5,6 +5,7 @@ import { Physics } from '../core/Physics';
 import { terrainHeight, forestDensity, nearestRoad, PLAY_HALF, TERRAIN_EXTENT, padsNear, TUNNEL, TUNNEL_EXIT, tunnelCapHeight, tunnelShafts, MAP_ID, capHeightAt } from './MapLayout';
 import { tunnelPath, TUN, TUN_FEATURES, GLACIER, glacierMask, canalZ, CANAL_HW, LAKE, brPastPortal } from './maps/Brosund';
 import { clamp, smoothstep } from '../core/math';
+import { SV_GRASS } from './maps/Solvik';
 
 import { INNER, STEP, axisCoords } from './TerrainData';
 
@@ -158,7 +159,7 @@ export class Terrain {
     physics.addTrimesh(verts, idx, { surface: 'grass', tag: 'terrain' });
 
     // Ridge cap over the tunnel
-    this.cap = MAP_ID === 'brosund' ? this.buildBrosundCap(physics) : this.buildTunnelCap(physics);
+    this.cap = MAP_ID === 'brosund' ? this.buildBrosundCap(physics) : MAP_ID === 'solvik' ? new THREE.Mesh(new THREE.BufferGeometry(), new THREE.MeshBasicMaterial({ visible: false })) : this.buildTunnelCap(physics);
     console.log(`[terrain] ${n}x${n} verts in ${(performance.now() - t0).toFixed(0)}ms`);
   }
 
@@ -299,7 +300,10 @@ export class Terrain {
             else dirt = Math.max(dirt, (1 - smoothstep(-1, 2.5, d)) * 0.7);
           }
         }
-        if (MAP_ID === 'brosund') {
+        if (MAP_ID === 'solvik') {
+          // the town is gravel under its paving; the rocky foreshore under the promenade
+          if (x > -76 && x < 78 && z > -84 && z < 82 && !SV_GRASS.some((r) => x > r.x0 && x < r.x1 && z > r.z0 && z < r.z1)) gravel = Math.max(gravel, 0.95);
+        } else if (MAP_ID === 'brosund') {
           // paved quays along the canal and the two harbours; the portal plaza; the summit plateau path
           const dc = Math.abs(z - canalZ(x));
           if (x > -186 && x < 40 && dc < CANAL_HW + 7.5) gravel = Math.max(gravel, 0.95);
@@ -395,7 +399,7 @@ export class Terrain {
       uCloudT: { value: 0 },
       uCloudAmt: { value: 0.5 },
       // snow line (lo, hi), heather / wildflower tint amount, glacier on (Brosund: summits white all summer)
-      uMapK: { value: MAP_ID === 'brosund' ? new THREE.Vector4(300, 420, 1, 1) : new THREE.Vector4(480, 620, 0, 0) },
+      uMapK: { value: MAP_ID === 'brosund' ? new THREE.Vector4(300, 420, 1, 1) : MAP_ID === 'solvik' ? new THREE.Vector4(360, 520, 1, 0) : new THREE.Vector4(480, 620, 0, 0) },
       uGlacier: { value: new THREE.Vector4(GLACIER.x, GLACIER.z, GLACIER.rx, GLACIER.rz) },
     };
     this.cloudUniforms = uniforms;
