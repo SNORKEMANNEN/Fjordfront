@@ -16,7 +16,7 @@ import { World } from '../world/World';
 import { PlayerController } from '../player/PlayerController';
 import { CameraRig } from '../player/CameraRig';
 import { Settings } from './Settings';
-import { SPAWNS, PLAY_HALF, landmarkAt, LANDMARKS, TUNNEL, TUNNEL_EXIT, tunnelShafts, BUILDINGS, MAP_ID, MAPS, MapId, DOM_MAPS, shoreDist, inTunnel, isWet, capHeightAt, forestDensity, isWater } from '../world/MapLayout';
+import { SPAWNS, PLAY_HALF, landmarkAt, LANDMARKS, TUNNEL, TUNNEL_EXIT, tunnelShafts, BUILDINGS, MAP_ID, MAP_NAME, MAPS, MapId, DOM_MAPS, shoreDist, inTunnel, isWet, capHeightAt, forestDensity, isWater } from '../world/MapLayout';
 import { tunnelFloorAt } from '../world/maps/Brosund';
 import { Viewmodel, ActionType } from '../weapons/Viewmodel';
 import { WeaponSystem, ShotRequest } from '../weapons/WeaponSystem';
@@ -1616,6 +1616,7 @@ export class Game {
     this.match.initialSpawns = false;
     this.state = 'playing';
     this.minuteCalled = false;
+    if (!this.testMode) this.ui.deployCard(MAP_NAME.toUpperCase(), solvik ? 'SABOTASJE · 6 V 6' : this.netg?.active ? 'FLERSPILLER · MULTIPLAYER' : 'DOMINATION · 12 V 12');
     // Sabotasje: rounds, no vote (Solvik is its own map)
     if (solvik) {
       this.sab ??= new SabMode(this);
@@ -1692,6 +1693,7 @@ export class Game {
     this.ui.showDeath(false);
     this.deathCamTarget = null;
     this.oobT = 0;
+    if (!this.match.initialSpawns && !this.testMode) this.ui.deployCard('', '', 'respawn');
   }
 
   // ================================================================ loop
@@ -2662,7 +2664,10 @@ export class Game {
     u.uSplitHigh.value.setRGB(1.04 + 0.05 * this.env.golden, 1.0, 0.94 - 0.06 * this.env.golden);
     u.uSplitShadow.value.setRGB(0.93 - 0.02 * nightK, 0.995, 1.07 + 0.04 * nightK);
     u.uVibrance.value = 0.28 * (1 - this.env.blueHour);
-    u.uStreak.value = 0.14 + 0.3 * this.env.night;
+    const lens = Settings.data.lensFx !== false;
+    u.uStreak.value = lens ? 0.14 + 0.3 * this.env.night : 0;
+    u.uCA.value = lens ? 0.0011 : 0;
+    u.uGrain.value = Settings.data.filmGrain !== false ? 0.022 : 0;
     u.uNVG.value = this.nvg.vis;
     u.uNVGPower.value = this.nvg.power;
     u.uNVGGain.value = this.nvg.gain;

@@ -3,7 +3,7 @@
    ===================================================================================== */
 
 /* ---------------------------------------------------------------- map vote (Update 40) */
-.mapvote { position: absolute; left: 50%; top: 150px; translate: -50% 0; pointer-events: auto; display: flex; flex-direction: column; align-items: center; gap: 10px; animation: unfold .45s var(--ease-out) both; z-index: 5; }
+.mapvote { position: absolute; left: 50%; top: 150px; translate: -50% 0; pointer-events: auto; display: flex; flex-direction: column; align-items: center; gap: 10px; animation: unfold .45s var(--ease-out) backwards; z-index: 5; }
 .mv-head { display: flex; align-items: baseline; gap: 14px; color: var(--hud); text-shadow: var(--hud-shadow); }
 .mv-head b { font: 800 22px var(--f-display); font-stretch: 122%; letter-spacing: .18em; }
 .mv-head span { font: 600 11px var(--f-cond); font-stretch: 110%; letter-spacing: .16em; text-transform: uppercase; color: var(--hud-dim); }
@@ -119,7 +119,7 @@ body.sab-mode .hud .top { top: 78px; }
 .sab-spec small { display: block; font-size: 9px; font-weight: 600; letter-spacing: .28em; color: var(--hud-dim); }
 .sab-spec b { font-family: var(--f-display); font-size: 22px; font-weight: 800; font-stretch: 115%; letter-spacing: .06em; }
 .sab-spec em { display: block; font-style: normal; font-size: 9.5px; color: var(--hud-dim); letter-spacing: .16em; }
-.sab-card { position: absolute; left: 50%; top: 20%; transform: translateX(-50%); min-width: 440px; text-align: center; padding: 18px 30px 18px; border-radius: 16px; background: linear-gradient(180deg, rgba(14, 24, 38, .92), rgba(5, 9, 15, .92)); border: 1px solid var(--line-2); box-shadow: 0 30px 80px -30px rgba(0, 0, 0, .9); overflow: hidden; animation: sabCard .55s var(--ease-out) both; }
+.sab-card { position: absolute; left: 50%; top: 20%; transform: translateX(-50%); min-width: 440px; text-align: center; padding: 18px 30px 18px; border-radius: 16px; background: linear-gradient(180deg, rgba(14, 24, 38, .92), rgba(5, 9, 15, .92)); border: 1px solid var(--line-2); box-shadow: 0 30px 80px -30px rgba(0, 0, 0, .9); overflow: hidden; animation: sabCard .55s var(--ease-out) backwards; }
 .sab-card::before { content: ''; position: absolute; left: 0; right: 0; top: 0; height: 3px; background: var(--friend); box-shadow: 0 0 20px var(--friend); }
 .sab-card.lost::before { background: var(--foe); box-shadow: 0 0 20px var(--foe); }
 @keyframes sabCard { from { opacity: 0; transform: translate(-50%, -16px) scale(.98); } }
@@ -141,7 +141,7 @@ body.sab-mode .hud .top { top: 78px; }
 .sab-card .rc-pay b { font-family: var(--f-display); font-size: 22px; color: #8FF0B6; }
 .sab-card .rc-pay small { font-size: 10px; letter-spacing: .16em; color: var(--signal); margin-left: 10px; }
 /* the buy menu */
-.sab-buy { position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); width: min(1000px, calc(100vw - 32px)); max-height: calc(100vh - 60px); overflow: auto; padding: 20px 24px; pointer-events: auto; z-index: 30; animation: unfold .35s var(--ease-out) both; }
+.sab-buy { position: absolute; left: 50%; top: 50%; translate: -50% -50%; width: min(1000px, calc(100vw - 32px)); max-height: calc(100vh - 60px); overflow: auto; padding: 20px 24px; pointer-events: auto; z-index: 30; animation: unfold .35s var(--ease-out) backwards; }
 .sab-buy .bh { display: flex; justify-content: space-between; align-items: flex-end; border-bottom: 1px solid var(--line-2); padding-bottom: 10px; }
 .sab-buy .bh .h-display { font-size: 34px; margin-top: 4px; }
 .sab-buy .bm { display: flex; align-items: center; gap: 8px; padding: 6px 14px; border-radius: 10px; background: rgba(70, 224, 140, .08); border: 1px solid rgba(70, 224, 140, .3); }
@@ -190,7 +190,7 @@ body.sab-mode .hud .top { top: 78px; }
 
 /* ---------------------------------------------------------------- multiplayer: chat, status, voice, lobby */
 .netchat { position: absolute; left: 22px; bottom: 124px; width: 440px; max-width: calc(100vw - 44px); pointer-events: none; font: 13px var(--f-sans); z-index: 30; }
-.netchat .lines div { padding: 4px 10px; margin-top: 3px; border-radius: 6px; background: rgba(4, 8, 14, .6); border-left: 2px solid var(--hud-faint); color: var(--hud); transition: opacity 1.2s; overflow-wrap: anywhere; animation: fadein .25s var(--ease-out) both; }
+.netchat .lines div { padding: 4px 10px; margin-top: 3px; border-radius: 6px; background: rgba(4, 8, 14, .6); border-left: 2px solid var(--hud-faint); color: var(--hud); transition: opacity 1.2s; overflow-wrap: anywhere; animation: fadein .25s var(--ease-out) backwards; }
 .netchat .lines div.old { opacity: 0; }
 .netchat.open .lines div.old { opacity: .85; }
 .netchat .ally { color: var(--friend); font-weight: 600; }
@@ -206,8 +206,8 @@ body.sab-mode .hud .top { top: 78px; }
 .voicehud div { display: flex; align-items: center; gap: 7px; padding: 3px 10px; margin-top: 3px; border-radius: 12px; background: rgba(4, 8, 14, .6); color: var(--hud); }
 .voicehud div.me { color: var(--aurora); }
 .voicehud i { display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: var(--ok); box-shadow: 0 0 8px var(--ok); animation: breathe .8s ease-in-out infinite; }
-.netpanel { display: flex; align-items: center; justify-content: center; background: radial-gradient(120% 90% at 50% 40%, rgba(4, 8, 14, .6), rgba(2, 5, 9, .9)); -webkit-backdrop-filter: blur(8px); backdrop-filter: blur(8px); z-index: 45; animation: menuIn .3s var(--ease) both; }
-.netpanel .card { position: relative; width: 1000px; max-width: calc(100vw - 32px); max-height: calc(100vh - 32px); overflow-y: auto; padding: 28px 32px; border-radius: 18px; color: var(--text); animation: unfold .45s var(--ease-out) both;
+.netpanel { display: flex; align-items: center; justify-content: center; background: radial-gradient(120% 90% at 50% 40%, rgba(4, 8, 14, .6), rgba(2, 5, 9, .9)); -webkit-backdrop-filter: blur(8px); backdrop-filter: blur(8px); z-index: 45; animation: menuIn .3s var(--ease) backwards; }
+.netpanel .card { position: relative; width: 1000px; max-width: calc(100vw - 32px); max-height: calc(100vh - 32px); overflow-y: auto; padding: 28px 32px; border-radius: 18px; color: var(--text); animation: unfold .45s var(--ease-out) backwards;
   border: 1px solid transparent; background: linear-gradient(180deg, rgba(18, 29, 44, .94), rgba(7, 12, 20, .95)) padding-box, linear-gradient(170deg, rgba(190, 226, 255, .32), rgba(190, 226, 255, .06) 40%, rgba(92, 242, 198, .2)) border-box; box-shadow: 0 40px 100px -30px rgba(0, 0, 0, .9); }
 .netpanel .card::before { content: ''; position: absolute; left: 32px; right: 32px; top: 0; height: 1px; background: var(--grad-aurora); opacity: .7; }
 .netpanel h2 { margin: 6px 0 0; font-family: var(--f-display); font-weight: 800; font-stretch: 122%; font-size: 36px; letter-spacing: .1em; }
@@ -217,7 +217,7 @@ body.sab-mode .hud .top { top: 78px; }
 .netpanel input:focus { border-color: rgba(92, 242, 198, .6); box-shadow: 0 0 0 3px rgba(92, 242, 198, .15); }
 .netpanel input.code { text-transform: uppercase; letter-spacing: .4em; text-align: center; font: 600 19px var(--f-mono); }
 .netpanel .row { display: flex; gap: 14px; flex-wrap: wrap; }
-.netpanel .col { position: relative; flex: 1 1 220px; display: flex; flex-direction: column; padding: 18px; border-radius: 14px; border: 1px solid var(--line); background: linear-gradient(180deg, rgba(20, 31, 46, .6), rgba(10, 16, 25, .6)); transition: border-color .25s, transform .25s var(--ease-out); animation: rise .5s var(--ease-out) both; }
+.netpanel .col { position: relative; flex: 1 1 220px; display: flex; flex-direction: column; padding: 18px; border-radius: 14px; border: 1px solid var(--line); background: linear-gradient(180deg, rgba(20, 31, 46, .6), rgba(10, 16, 25, .6)); transition: border-color .25s, transform .25s var(--ease-out); animation: rise .5s var(--ease-out) backwards; }
 .netpanel .col:nth-child(2) { animation-delay: .05s; } .netpanel .col:nth-child(3) { animation-delay: .1s; }
 .netpanel .col:hover { border-color: rgba(92, 242, 198, .3); transform: translateY(-2px); }
 .netpanel .col > .ico { width: 30px; height: 30px; margin-bottom: 10px; color: var(--aurora); }
@@ -230,7 +230,7 @@ body.sab-mode .hud .top { top: 78px; }
 .netpanel .rooms .rh { display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid var(--line-2); padding-bottom: 8px; }
 .netpanel .rooms .rh h3 { margin: 0; }
 .netpanel .rlist { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 12px; margin-top: 14px; max-height: 320px; overflow-y: auto; }
-.netpanel .room { position: relative; display: flex; flex-direction: column; border-radius: 12px; overflow: hidden; border: 1px solid var(--line); background: rgba(10, 16, 25, .7); cursor: pointer; transition: transform .25s var(--ease-out), border-color .25s, box-shadow .25s; animation: rise .4s var(--ease-out) both; }
+.netpanel .room { position: relative; display: flex; flex-direction: column; border-radius: 12px; overflow: hidden; border: 1px solid var(--line); background: rgba(10, 16, 25, .7); cursor: pointer; transition: transform .25s var(--ease-out), border-color .25s, box-shadow .25s; animation: rise .4s var(--ease-out) backwards; }
 .netpanel .room:hover { transform: translateY(-3px); border-color: rgba(92, 242, 198, .4); box-shadow: 0 16px 32px -16px rgba(0, 0, 0, .8); }
 .netpanel .room canvas { width: 100%; aspect-ratio: 16 / 9; display: block; border-bottom: 1px solid var(--line); }
 .netpanel .room .rb { padding: 9px 11px 10px; display: grid; grid-template-columns: 1fr auto; gap: 2px 8px; align-items: center; }

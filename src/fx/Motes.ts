@@ -88,6 +88,10 @@ export class Motes {
    * weather: wet or snowy air hides them; fov: for the point scale.
    */
   update(dt: number, cam: THREE.Vector3, sunDir: THREE.Vector3, day: number, night: number, golden: number, weather: string, viewH: number, fov: number) {
+    if (Settings.data.motes === false) {
+      this.points.visible = false;
+      return;
+    }
     this.t += dt;
     const u = this.mat.uniforms;
     u.uTime.value = this.t;

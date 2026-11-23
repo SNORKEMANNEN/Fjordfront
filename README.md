@@ -328,6 +328,11 @@ Every screen, the HUD, the picture and the sound are redone around one identity,
 - **Death screen and killcam:** a killer card bleeding foe red from the edge, loadout chips with numbered keys, and killcam letterbox bars that slide in with a live dot.
 - **Also restyled:** the multiplayer panel, the room browser, chat, the voice indicator, the map vote and the Sabotasje buy menu, round cards and wire panel.
 
+### Transitions
+- **Deploy:** a match opens from dark letterbox bars while the place name and mode track in over an aurora line.
+- **Redeploy:** each respawn lifts from black with the aurora line sweeping out from the centre.
+- **HUD numbers move:** the magazine count ticks with every shot and flashes in the aurora when a reload lands. A team score pops when it goes up.
+
 ### HUD
 - **Score capsule:** angled team wings fading out of their colours, a dark clock with an aurora underline that pulses red in the last minute, and glowing progress bars.
 - **Compass:** a thinner ribbon with the aurora needle and a white bearing chip.
@@ -358,6 +363,7 @@ The shared chart raster (minimap, tactical map, operation brief and room thumbna
   - finer luminance-only film grain;
   - a pulsing red bleed when hurt.
 - **Bloom:** a third, wider bloom level, and a faint anamorphic streak off the brightest lights, stronger at night.
+- **New Graphics settings:** *Lens character*, *Film grain* and *Atmospheric motes* can each be switched off.
 
 ### Sky and air
 - **Sun:** a limb-darkened disc with a tight corona.

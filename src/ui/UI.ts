@@ -617,6 +617,9 @@ export class UI {
         ${select('weather', 'Weather', [['auto', 'Random'], ['clear', 'Clear (sunny, no clouds)'], ['fair', 'Broken clouds'], ['overcast', 'Overcast'], ['rain', 'Rain'], ['snow', 'Snow showers'], ['storm', 'Atlantic storm (gale, heavy seas)']])}
         ${select('timeOfDay', 'Time of day', [['dynamic', 'Dynamic (time passes)'], ['dawn', 'Morning'], ['day', 'Midday'], ['golden', 'Golden hour'], ['blue', 'Blue hour'], ['night', 'Night — northern lights'], ['midnight', 'Midnight sun']])}
         ${toggle('godRays', 'Sun shafts (god rays)')}
+        ${toggle('lensFx', 'Lens character (edge colour fringing, anamorphic light streaks)')}
+        ${toggle('filmGrain', 'Film grain')}
+        ${toggle('motes', 'Atmospheric motes (sunlit dust and pollen in the air)')}
         ${toggle('showFps', 'Show FPS')}
       </div>
       <div class="tab hidden" data-t="c">
@@ -1030,11 +1033,28 @@ export class UI {
     this.hud.classList.toggle('hidden', !v);
   }
 
+  /**
+   * Deploy / redeploy transition (Update 45). deploy: the view opens from dark letterbox bars
+   * while the place name tracks in over an aurora line; respawn: a quick lift from black with the
+   * aurora line sweeping out from the centre. Never takes the pointer, removes itself.
+   */
+  deployCard(title = '', sub = '', kind: 'deploy' | 'respawn' = 'deploy') {
+    this.root.querySelector('.deploy')?.remove();
+    const el = h('div', `deploy dl-${kind}`, `<i class="dl-top"></i><i class="dl-bot"></i>${kind === 'deploy' ? `<div class="dl-c"><small>${esc(sub)}</small><b>${esc(title)}</b><s></s></div>` : '<s class="dl-line"></s>'}`);
+    this.root.appendChild(el);
+    setTimeout(() => el.remove(), kind === 'deploy' ? 2900 : 1100);
+  }
+
   /** contextual HUD: what changed recently stays bright, what has nothing to say fades */
   private ctx = { hurtT: 99, lastHp: 100, ammoT: 0, lastMag: -1, lastWeapon: '', streakT: 0, eqT: 0, heading: 0 };
   updateHUD(s: HUDState, dt: number) {
     const e = this.els;
     const c = this.ctx;
+    // a score that goes up pops (Web Animations: no forced layout)
+    for (const [el, v] of [[e.s0, s.scores[0]], [e.s1, s.scores[1]]] as const) {
+      const prev = (el as any)._tv;
+      if (prev !== undefined && +prev < v) el.animate([{ transform: 'scale(1.35)', filter: 'brightness(1.8)' }, { transform: 'none', filter: 'none' }], { duration: 420, easing: 'cubic-bezier(.16,1,.3,1)' });
+    }
     setText(e.s0, String(s.scores[0]));
     setText(e.s1, String(s.scores[1]));
     setStyle(e.p0, 'width', `${((s.scores[0] / s.limit) * 100).toFixed(1)}%`);
@@ -1072,6 +1092,11 @@ export class UI {
     e.hf.classList.toggle('low', s.health < 35);
     setText(e.hv, String(Math.ceil(s.health)));
     // ammo: bright while shooting / reloading / aiming / low, quiet otherwise
+    if (s.weapon === c.lastWeapon && s.magSize > 0) {
+      // each shot ticks the count; a finished reload flashes it in the aurora
+      if (s.mag < c.lastMag) e.mag.animate([{ transform: 'translateY(-3px) scale(1.07)' }, { transform: 'none' }], { duration: 110, easing: 'ease-out' });
+      else if (s.mag > c.lastMag + 1) e.mag.animate([{ color: '#5CF2C6', transform: 'scale(1.12)', textShadow: '0 0 18px rgba(92,242,198,.8)' }, { transform: 'none' }], { duration: 480, easing: 'cubic-bezier(.16,1,.3,1)' });
+    }
     if (s.mag !== c.lastMag || s.weapon !== c.lastWeapon || s.reloading || s.ads > 0.3) c.ammoT = 0;
     c.lastMag = s.mag;
     c.lastWeapon = s.weapon;
