@@ -1,6 +1,6 @@
 import * as THREE from 'three';
-import { addLaser } from './Laser';
-import { PartBuilder, profile, cyl, lathe, rbox, picatinny, pin, bez, socket, P2, setFinish, patchWeaponMaterial } from './ModelKit';
+import { addLaser, addWeaponLight } from './Laser';
+import { PartBuilder, profile, cyl, lathe, rbox, picatinny, pin, bez, socket, P2, setFinish, patchWeaponMaterial, engraving, shapeFromProfile } from './ModelKit';
 import { MaterialLib, patchSurfaceMaterial } from '../render/Materials';
 
 export interface WeaponModel {
@@ -22,9 +22,17 @@ export type WeaponMats = Record<string, THREE.Material>;
 export function makeWeaponMaterials(L: MaterialLib): WeaponMats {
   const gm = L.surface('gunMetal');
   const poly = L.surface('polymer');
-  const metal = L.std('gunMetal', { metalness: 0.72, roughness: 1.0, tile: 0.18, envMapIntensity: 1.1 }, 'w.metal');
-  const steel = L.std('gunMetal', { metalness: 0.92, roughness: 0.8, tile: 0.12, color: 0x9a9a9a, envMapIntensity: 1.2 }, 'w.steel');
-  const polymer = L.std('polymer', { metalness: 0.0, roughness: 1.0, tile: 0.12, envMapIntensity: 0.9 }, 'w.poly');
+  // (Update 46) black anodised aluminium reads as a dark dielectric with a satin sheen, not as a
+  // mirror: lower metalness and a darker base; parkerised steel stays metallic but greyer
+  // The baked albedo maps are near-black (≈0.035 linear), so the tint lifts them (>1) to a
+  // neutral charcoal that still reads at dusk; steel skips the map for a real grey metal F0.
+  const metal = L.std('gunMetal', { metalness: 0.3, roughness: 0.78, tile: 0.18, envMapIntensity: 1.0 }, 'w.metal');
+  metal.color.setRGB(1.12, 1.13, 1.16);
+  const steel = new THREE.MeshStandardMaterial({ color: 0x5d5f61, metalness: 0.86, roughness: 0.58, normalMap: gm.normal, envMapIntensity: 1.0 });
+  steel.normalScale.set(0.5, 0.5);
+  patchSurfaceMaterial(steel, 1 / 0.12);
+  const polymer = L.std('polymer', { metalness: 0.0, roughness: 1.0, tile: 0.12, envMapIntensity: 0.8 }, 'w.poly');
+  polymer.color.setRGB(1.1, 1.1, 1.12);
   const tan = new THREE.MeshStandardMaterial({ color: 0x8c7a5c, roughness: 0.62, metalness: 0.05, normalMap: poly.normal, envMapIntensity: 0.8 });
   tan.normalScale.set(0.6, 0.6);
   patchSurfaceMaterial(tan, 1 / 0.12);
@@ -72,6 +80,21 @@ export function makeWeaponMaterials(L: MaterialLib): WeaponMats {
     tritium: new THREE.MeshBasicMaterial({ color: new THREE.Color(0.6, 2.4, 0.5), toneMapped: false }),
     white: new THREE.MeshStandardMaterial({ color: 0xd8d8d0, roughness: 0.5 }),
   };
+}
+
+/**
+ * Extrude a cross-section (w, v around the bore) along the barrel from u0 to u1 (Update 46):
+ * handguards, tubes and receivers that are shaped in section rather than in profile. Optional
+ * inner holes make it a tube (the barrel shows through the end).
+ */
+function alongBore(pts: P2[], u0: number, u1: number, v: number, opts: { round?: number; bevel?: number; holes?: P2[][] } = {}) {
+  const sh = shapeFromProfile(pts, opts.round ?? 0.004);
+  for (const h of opts.holes ?? []) sh.holes.push(shapeFromProfile(h, (opts.round ?? 0.004) * 0.7) as unknown as THREE.Path);
+  const b = opts.bevel ?? 0.0012;
+  const g = new THREE.ExtrudeGeometry(sh, { depth: Math.max(1e-4, u1 - u0 - b * 2), bevelEnabled: b > 0, bevelThickness: b, bevelSize: b * 0.8, bevelSegments: 2, curveSegments: 4 });
+  g.translate(0, v, -(u1 - b));
+  g.computeVertexNormals();
+  return g;
 }
 
 /** Rotate a geometry around the barrel axis (at height v) by angle a. */
@@ -344,26 +367,28 @@ export function buildCarbine(mats: WeaponMats): WeaponModel {
   b.add('metal', rbox(0.036, 0.06, 0.004, 0.016, -0.0172, -0.0142, 0.0012));
   // --- pistol grip ---
   b.add('polymer', profile(pistolGrip(), 0.03, { round: 0.008, bevel: 0.004 }));
-  // --- handguard (free-float, octagonal) ---
+  // --- handguard (Update 46): a slim free-float M-LOK tube in section — flat sides with the slots,
+  // chamfered corners, a lightening-cut belly, the top rail its full length, and a hand stop ---
   {
-    const hg = new THREE.CylinderGeometry(0.0255, 0.0255, 0.345, 8, 1, false);
-    hg.rotateY(Math.PI / 8);
-    hg.rotateX(-Math.PI / 2);
-    hg.translate(0, bore, -(0.141 + 0.345 / 2));
-    b.add('metal', hg);
-    // M-LOK slots on 3 faces
+    const outer: P2[] = [[-0.0175, -0.0262], [0.0175, -0.0262], [0.0248, -0.019], [0.0248, 0.0158], [0.019, 0.0236], [-0.019, 0.0236], [-0.0248, 0.0158], [-0.0248, -0.019]];
+    const inner: P2[] = [[-0.0152, -0.0232], [0.0152, -0.0232], [0.0218, -0.0168], [0.0218, 0.0142], [0.0166, 0.0206], [-0.0166, 0.0206], [-0.0218, 0.0142], [-0.0218, -0.0168]];
+    b.add('metal', alongBore(outer, 0.141, 0.486, bore, { round: 0.0035, holes: [inner] }));
+    // M-LOK slots down both flat sides
     for (let i = 0; i < 5; i++) {
       const u = 0.17 + i * 0.058;
-      for (const a of [Math.PI / 2, -Math.PI / 2, Math.PI, Math.PI * 0.75, -Math.PI * 0.75]) {
-        const s = rbox(u, u + 0.032, bore + 0.0225, bore + 0.0245, -0.0035, 0.0035, 0.0012);
-        b.add('dark', aroundBore(s, bore, a));
+      for (const sd of [1, -1]) {
+        b.add('dark', rbox(u, u + 0.032, bore - 0.0035, bore + 0.0035, sd > 0 ? 0.0251 : -0.0262, sd > 0 ? 0.0262 : -0.0251, 0.0014));
       }
+      // lightening cuts along the belly
+      if (i < 4) b.add('dark', rbox(u + 0.006, u + 0.04, bore - 0.0276, bore - 0.0266, -0.007, 0.007, 0.0016));
     }
-    // barrel nut ring + top rail along handguard
+    // anti-rotation tabs where it meets the upper, the barrel nut ring
     b.add('metal', cyl(0.0225, 0.137, 0.148, bore, 0, 24));
+    for (const sd of [1, -1]) b.add('metal', rbox(0.132, 0.146, bore + 0.018, bore + 0.0232, sd * 0.012 - 0.003, sd * 0.012 + 0.003, 0.001));
     for (const g of picatinny(0.148, 0.48, bore + 0.0234)) b.add('metal', g);
-    // QD sling cup
+    // QD sling cup and a hand stop under the front of the handguard
     b.add('steel', cyl(0.006, 0.16, 0.17, bore - 0.024, -0.016, 12));
+    b.add('polymer', profile([[0.425, bore - 0.0262], [0.462, bore - 0.0262], [0.466, bore - 0.03], [0.46, bore - 0.036], [0.452, bore - 0.0372], [0.444, bore - 0.034], [0.432, bore - 0.0285]], 0.017, { round: 0.003, bevel: 0.0018 }));
   }
   // --- barrel, gas block, flash hider ---
   b.add('steel', cyl(0.0094, 0.14, 0.535, bore, 0, 20));
@@ -2428,6 +2453,56 @@ function cloneModel(t: WeaponModel): WeaponModel {
   if (t.root.userData.setBipod) root.userData.setBipod = bipodSetter(root);
   return { ...t, root: root as THREE.Group, parts, sockets, scopeLens: remap(t.scopeLens), reticle: remap(t.reticle) };
 }
+/**
+ * Roll marks (Update 46): the model and maker on the receiver's left side (the side you see in
+ * first person), calibre and serial beneath; on the pistols the slide carries them, so they ride
+ * back with it. Placed by casting a ray at the receiver beside the ejection port (or the magwell)
+ * so they sit on whatever surface is there, and parented to the part that was hit.
+ */
+const MARKS: Partial<Record<keyof typeof RAW_BUILDERS, { lines: string[]; at?: 'eject' | 'mag'; dv?: number; du?: number; w?: number }>> = {
+  k416: { lines: ['K416 · FJORD ARMS', 'KAL 5,56×45 · NR 041622'], at: 'mag', dv: 0.022, w: 0.054 },
+  ks17: { lines: ['KS-17 · KVITVIK', 'KAL 5,56 · NR 17-2210'], at: 'mag', dv: 0.022, w: 0.05 },
+  hval47: { lines: ['HVAL-47', '7,62×39 · 1947-B'], at: 'mag', dv: 0.026, w: 0.05 },
+  mp7: { lines: ['MP7 · PDW', '4,6×30'], at: 'eject', dv: -0.012, w: 0.04 },
+  lmg: { lines: ['KVL-7 · FJORD ARMS', 'KAL 5,56 · BELTE'], at: 'eject', dv: -0.022, du: -0.03, w: 0.06 },
+  skv338: { lines: ['SKV .338 LAPUA MAG', 'NR 338-0412'], at: 'eject', dv: -0.014, du: 0.02, w: 0.06 },
+  dmr14: { lines: ['FJ-14 · 7,62×51'], at: 'eject', dv: -0.016, w: 0.05 },
+  p80: { lines: ['P80 · NORDFJORD', '9×19 · 80-04471'], at: 'eject', dv: -0.002, du: -0.025, w: 0.05 },
+  mp18: { lines: ['MP-18 · 9×19'], at: 'eject', dv: -0.008, w: 0.04 },
+  ums45: { lines: ['UMS-45 · .45 ACP'], at: 'eject', dv: -0.012, w: 0.045 },
+  stille9: { lines: ['STILLE-9', '9×19 · LYDDEMPET'], at: 'mag', dv: 0.02, w: 0.045 },
+  pump12: { lines: ['PUMP-12 · KAL 12/76'], at: 'eject', dv: -0.012, du: -0.02, w: 0.055 },
+  as20: { lines: ['AS-20 · KAL 12'], at: 'mag', dv: 0.02, w: 0.05 },
+  kr98: { lines: ['KR-98k · 7,92×57'], at: 'eject', dv: -0.012, du: 0.0, w: 0.05 },
+};
+function addMarks(id: keyof typeof RAW_BUILDERS, t: WeaponModel) {
+  const spec = MARKS[id];
+  if (!spec) return;
+  const ref = spec.at === 'mag' ? t.sockets.magWell ?? t.sockets.eject : t.sockets.eject ?? t.sockets.magWell;
+  if (!ref) return;
+  t.root.updateMatrixWorld(true);
+  const rp = ref.getWorldPosition(new THREE.Vector3());
+  const u = -rp.z + (spec.du ?? 0), v = rp.y + (spec.dv ?? 0);
+  const ray = new THREE.Raycaster(new THREE.Vector3(-1, v, -u), new THREE.Vector3(1, 0, 0), 0, 2);
+  const targets: THREE.Object3D[] = [];
+  t.root.traverse((o) => {
+    const m = o as THREE.Mesh;
+    if (m.isMesh && !m.name.startsWith('irons') && !(m.material as THREE.Material).transparent && !/glass|laser|reticle/i.test(m.name)) targets.push(m);
+  });
+  const hit = ray.intersectObjects(targets, false)[0];
+  if (!hit || !hit.face) return;
+  const n = hit.face.normal.clone().transformDirection(hit.object.matrixWorld);
+  if (n.x > -0.75) return; // not a flat side face: leave it plain
+  const w = spec.w ?? 0.05, h = w * (spec.lines.length > 1 ? 0.3 : 0.17);
+  const dec = engraving(spec.lines, u, v, hit.point.x, w, h, -1);
+  // ride with the part that was hit (the pistol's slide), in its local space
+  const owner = hit.object.parent ?? t.root;
+  owner.updateMatrixWorld(true);
+  const inv = owner.matrixWorld.clone().invert();
+  dec.position.applyMatrix4(inv);
+  dec.quaternion.premultiply(new THREE.Quaternion().setFromRotationMatrix(inv));
+  owner.add(dec);
+}
 function cachedBuild(id: keyof typeof RAW_BUILDERS, mats: WeaponMats): WeaponModel {
   let m = templates.get(mats);
   if (!m) templates.set(mats, (m = new Map()));
@@ -2435,6 +2510,12 @@ function cachedBuild(id: keyof typeof RAW_BUILDERS, mats: WeaponMats): WeaponMod
   if (!t) {
     setFinish(id);
     m.set(id, (t = RAW_BUILDERS[id](mats)));
+    try {
+      addMarks(id, t);
+    } catch {
+      /* a gun without a flat side keeps no marks */
+    }
+    addWeaponLight(t.root, t.sockets, mats);
   }
   return cloneModel(t);
 }

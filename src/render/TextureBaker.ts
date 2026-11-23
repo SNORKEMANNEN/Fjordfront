@@ -267,6 +267,36 @@ export class TextureBaker {
     return res;
   }
 
+  private portables = new Map<THREE.Texture, THREE.DataTexture>();
+
+  /**
+   * A CPU-side copy of a baked texture (Update 46). Baked maps are render targets, which exist only
+   * in this baker's GL context — a second renderer (the loadout bench has its own canvas) uploads
+   * them empty: black albedo, zero roughness, so a gun turned into a dark mirror. The copy is a
+   * DataTexture with the same sampling, so any context can upload it. Null until it is baked.
+   */
+  portable(tex: THREE.Texture): THREE.DataTexture | null {
+    const hit = this.portables.get(tex);
+    if (hit) return hit;
+    let rt: THREE.WebGLRenderTarget | undefined;
+    for (const t of this.targets.values()) if (t.texture === tex) rt = t;
+    if (!rt || this.pending.some((j) => j.rt === rt || j.rtB === rt)) return null;
+    const w = rt.width, h = rt.height;
+    const buf = new Uint8Array(w * h * 4);
+    this.renderer.readRenderTargetPixels(rt, 0, 0, w, h, buf);
+    const t = new THREE.DataTexture(buf, w, h, THREE.RGBAFormat, THREE.UnsignedByteType);
+    t.colorSpace = tex.colorSpace;
+    t.wrapS = tex.wrapS;
+    t.wrapT = tex.wrapT;
+    t.minFilter = tex.minFilter;
+    t.magFilter = tex.magFilter;
+    t.generateMipmaps = tex.generateMipmaps;
+    t.anisotropy = tex.anisotropy;
+    t.needsUpdate = true;
+    this.portables.set(tex, t);
+    return t;
+  }
+
   /** Debug: average colour of a baked target (reads a small block). */
   sample(key: string) {
     const rt = this.targets.get(key);

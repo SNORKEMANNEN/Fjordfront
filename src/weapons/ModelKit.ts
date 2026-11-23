@@ -23,7 +23,9 @@ export function setFinish(id: string) {
 }
 
 /**
- * Edge wear, micro detail and finish for the weapon materials (Update 33), as a shader patch:
+ * Edge wear, micro detail and finish for the weapon materials (Update 33; Update 46 adds coating
+ * mottle, brushed scratches along the gun on metal, settled dust on upward faces, and fades the
+ * micro detail with distance), as a shader patch:
  *  - worn edges: where the surface curves (bevels, rounded corners — found from the screen-space
  *    change of the normal) the coating is rubbed through to lighter, shinier base material, in
  *    patches; metal parts show bare steel
@@ -37,7 +39,7 @@ export function patchWeaponMaterial(m: THREE.Material, kind: 'metal' | 'polymer'
   const prev = sm.onBeforeCompile;
   const prevKey = sm.customProgramCacheKey;
   const base = prevKey === THREE.Material.prototype.customProgramCacheKey ? prev.toString() : null;
-  sm.customProgramCacheKey = () => (base ?? prevKey.call(sm)) + '|wear-' + kind;
+  sm.customProgramCacheKey = () => (base ?? prevKey.call(sm)) + '|wear2-' + kind;
   sm.onBeforeCompile = (sh, r) => {
     prev.call(sm, sh, r);
     sh.vertexShader = sh.vertexShader
@@ -55,12 +57,27 @@ export function patchWeaponMaterial(m: THREE.Material, kind: 'metal' | 'polymer'
           // finish
           diffuseColor.rgb *= 1.0 + vFinish.x * 0.1;
           roughnessFactor = clamp(roughnessFactor + vFinish.y * 0.08, 0.04, 1.0);
+          // detail fades with distance so nothing shimmers (pixel footprint in metres)
+          float px = length(fwidth(vObjP));
+          float fine = clamp(1.0 - px * 900.0, 0.0, 1.0);
+          float midD = clamp(1.0 - px * 120.0, 0.0, 1.0);
           // micro detail
           float mn = wN(vObjP * 900.0);
-          ${kind === 'metal' ? 'roughnessFactor *= 0.88 + 0.24 * mn;' : ''}
-          ${kind === 'polymer' || kind === 'rubber' ? 'float st = smoothstep(0.55, 0.8, wN(vObjP * 1400.0)); diffuseColor.rgb *= 0.9 + 0.2 * st; roughnessFactor = mix(roughnessFactor, 1.0, st * 0.35);' : ''}
-          // worn edges (curvature from the screen-space change of the normal)
-          float curv = clamp(length(fwidth(vNormal)) * 6.0 - 0.15, 0.0, 1.0);
+          ${kind === 'metal' ? 'roughnessFactor *= mix(1.0, 0.88 + 0.24 * mn, fine);' : ''}
+          ${kind === 'polymer' || kind === 'rubber' ? 'float st = smoothstep(0.55, 0.8, wN(vObjP * 1400.0)) * fine; diffuseColor.rgb *= 0.9 + 0.2 * st; roughnessFactor = mix(roughnessFactor, 1.0, st * 0.35);' : ''}
+          // (Update 46) coating mottle: the finish is never perfectly even over a whole gun
+          float mot = wN(vObjP * 28.0) * 0.6 + wN(vObjP * 75.0) * 0.4;
+          diffuseColor.rgb *= 0.95 + 0.1 * mot;
+          roughnessFactor = clamp(roughnessFactor + (mot - 0.5) * 0.1, 0.04, 1.0);
+          ${kind === 'metal'
+            ? `// brushed micro-scratches running along the gun (its long axis is z)
+          float scr = smoothstep(0.78, 0.95, wN(vec3(vObjP.x * 1600.0, vObjP.y * 1600.0, vObjP.z * 55.0)));
+          scr *= smoothstep(0.35, 0.7, wN(vObjP * 60.0)) * fine;
+          roughnessFactor = mix(roughnessFactor, 0.18, scr * 0.55);
+          diffuseColor.rgb = mix(diffuseColor.rgb, vec3(0.42, 0.43, 0.44), scr * 0.25);`
+            : ''}
+          // worn edges (curvature from the screen-space change of the normal), calmer far away
+          float curv = clamp(length(fwidth(vNormal)) * 6.0 - 0.15, 0.0, 1.0) * midD;
           float patchy = smoothstep(0.35, 0.75, wN(vObjP * 160.0) * 0.7 + wN(vObjP * 520.0) * 0.3);
           float wear = curv * patchy * (0.35 + 0.65 * vFinish.z);
           ${kind === 'metal'
@@ -68,6 +85,11 @@ export function patchWeaponMaterial(m: THREE.Material, kind: 'metal' | 'polymer'
             : kind === 'wood'
               ? 'diffuseColor.rgb = mix(diffuseColor.rgb, diffuseColor.rgb * 1.5, wear * 0.6); roughnessFactor = mix(roughnessFactor, 0.35, wear);'
               : 'diffuseColor.rgb = mix(diffuseColor.rgb, diffuseColor.rgb * 1.7 + 0.03, wear * 0.55); roughnessFactor = mix(roughnessFactor, 0.45, wear);'}
+          // (Update 46) dust: a faint film settled on the faces that look up
+          float up = clamp(dot(normalize(vNormal), normalize((viewMatrix * vec4(0.0, 1.0, 0.0, 0.0)).xyz)), 0.0, 1.0);
+          float dust = smoothstep(0.55, 0.95, up) * (0.4 + 0.6 * wN(vObjP * 45.0)) * (0.25 + 0.5 * vFinish.z);
+          diffuseColor.rgb = mix(diffuseColor.rgb, vec3(0.42, 0.39, 0.34), dust * 0.14);
+          roughnessFactor = mix(roughnessFactor, 0.95, dust * 0.3);
         }`);
   };
   sm.needsUpdate = true;
@@ -249,4 +271,56 @@ export function socket(name: string, u: number, v: number, w: number, rx = 0, ry
   o.position.set(w, v, -u);
   o.rotation.set(rx, ry, rz, 'YXZ');
   return o;
+}
+
+/**
+ * Roll-marked engraving (Update 46): lines of text cut into a side face — the bare metal shows
+ * lighter and shinier through the coating. A small alpha-textured plane, its texture shared per
+ * text, laid a hair off the surface. `side` -1 = the left face (seen in first person), 1 = right.
+ * u, v: centre in the gun's authoring space; w: the face; width / height in metres.
+ */
+const ENGRAVE_TEX = new Map<string, THREE.CanvasTexture>();
+const ENGRAVE_MAT = new Map<string, THREE.MeshStandardMaterial>();
+export function engraving(lines: string[], u: number, v: number, w: number, width: number, height: number, side: -1 | 1 = -1, tone: 'light' | 'white' = 'light') {
+  const key = lines.join('\n') + '|' + width.toFixed(3) + 'x' + height.toFixed(3);
+  let tex = ENGRAVE_TEX.get(key);
+  if (!tex) {
+    const W = 512, H = Math.max(32, Math.round((W * height) / width / 8) * 8);
+    const cv = document.createElement('canvas');
+    cv.width = W;
+    cv.height = H;
+    const c = cv.getContext('2d')!;
+    c.clearRect(0, 0, W, H);
+    c.fillStyle = '#fff';
+    c.textAlign = 'center';
+    c.textBaseline = 'middle';
+    const lh = H / lines.length;
+    lines.forEach((t, i) => {
+      const big = i === 0;
+      const size = Math.min(lh * (big ? 0.8 : 0.62), (W / Math.max(4, t.length)) * 1.55);
+      c.font = `${big ? 700 : 500} ${size.toFixed(0)}px 'JetBrains Mono', ui-monospace, monospace`;
+      (c as any).letterSpacing = `${(size * (big ? 0.12 : 0.18)).toFixed(1)}px`;
+      c.fillText(t, W / 2, lh * (i + 0.5));
+    });
+    tex = new THREE.CanvasTexture(cv);
+    tex.anisotropy = 4;
+    ENGRAVE_TEX.set(key, tex);
+  }
+  let mat = ENGRAVE_MAT.get(key + tone);
+  if (!mat) {
+    mat = new THREE.MeshStandardMaterial({
+      color: tone === 'white' ? 0xd8d8d0 : 0x8d9096, metalness: tone === 'white' ? 0 : 0.9, roughness: 0.32, alphaMap: tex,
+      transparent: true, depthWrite: false, polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2,
+    });
+    ENGRAVE_MAT.set(key + tone, mat);
+  }
+  const g = new THREE.PlaneGeometry(width, height);
+  const m = new THREE.Mesh(g, mat);
+  m.name = 'engraving';
+  m.rotation.y = side < 0 ? -Math.PI / 2 : Math.PI / 2;
+  m.position.set(w + side * 0.0003, v, -u);
+  m.castShadow = false;
+  m.receiveShadow = false;
+  m.renderOrder = 2;
+  return m;
 }

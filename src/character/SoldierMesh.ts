@@ -41,7 +41,7 @@ export interface Variety {
   boots: THREE.Color;
   gear: THREE.Color;
   gear2: THREE.Color;
-  face: 'bare' | 'beard' | 'balaclava' | 'paint' | 'scarf';
+  face: 'bare' | 'beard' | 'balaclava' | 'paint' | 'scarf' | 'gaiter';
   eyes: 'none' | 'glasses' | 'goggles';
   rolledSleeves: boolean;
   helmetCover: 'camo' | 'plain';
@@ -80,7 +80,8 @@ const GEAR_TEAM: [number[], number[]] = [
 export function varietyFor(look: SoldierLook, team: 0 | 1): Variety {
   const r = new RNG(look.seed * 2654435761 + 97);
   const role = look.role;
-  const face = role === 'sniper' ? r.pick(['paint', 'paint', 'scarf'] as const) : role === 'breacher' ? r.pick(['balaclava', 'balaclava', 'beard'] as const) : r.pick(['bare', 'bare', 'beard', 'balaclava', 'scarf', 'paint'] as const);
+  // (Update 46) most operators cover up: balaclavas, neck gaiters pulled over the nose, a beard
+  const face = role === 'sniper' ? r.pick(['paint', 'paint', 'gaiter'] as const) : role === 'breacher' ? r.pick(['balaclava', 'balaclava', 'gaiter', 'beard'] as const) : r.pick(['bare', 'beard', 'beard', 'balaclava', 'balaclava', 'gaiter', 'gaiter', 'scarf', 'paint'] as const);
   const gt = GEAR_TEAM[team];
   return {
     height: r.range(0.965, 1.04) * (role === 'gunner' ? 1.02 : 1),
@@ -92,7 +93,7 @@ export function varietyFor(look: SoldierLook, team: 0 | 1): Variety {
     gear: new THREE.Color(r.pick(gt)),
     gear2: new THREE.Color(r.pick(gt)),
     face,
-    eyes: role === 'sniper' ? 'none' : r.pick(['none', 'none', 'glasses', 'goggles'] as const),
+    eyes: role === 'sniper' ? 'none' : r.pick(['none', 'glasses', 'glasses', 'goggles'] as const),
     rolledSleeves: role !== 'sniper' && r.chance(0.25),
     helmetCover: r.chance(0.65) ? 'camo' : 'plain',
     pack: role === 'gunner' ? 'assault' : role === 'sniper' ? 'none' : r.pick(['none', 'assault', 'radio', 'none'] as const),
@@ -106,6 +107,9 @@ export function varietyFor(look: SoldierLook, team: 0 | 1): Variety {
 
 type Weights = [string, number][];
 const K_CAMO = 0, K_FLAT = 1, K_TEAM = 2, K_NVG_DOWN = 3, K_NVG_UP = 4, K_GLASS = 5;
+/** Update 46 kinds: 7 nylon webbing (MOLLE rows), 8 skin, 9 helmet strobe (blinks under NVG),
+ *  10 the shoulder flag patch, 11 knit (balaclava, beanie), 12 rubberised / hard plastic */
+const K_WEB = 7, K_SKIN = 8, K_STROBE = 9, K_PATCH = 10, K_KNIT = 11, K_HARD = 12;
 const TILE = 0.3;
 
 class SkinBuilder {
@@ -136,6 +140,10 @@ class SkinBuilder {
     if (!g.getAttribute('normal')) g.computeVertexNormals();
     const p = g.getAttribute('position'), n = g.getAttribute('normal'), uv = g.getAttribute('uv');
     const P = p.array as ArrayLike<number>, N = n.array as ArrayLike<number>, UV = uv ? (uv.array as ArrayLike<number>) : null;
+    // (Update 46) an optional per-vertex colour multiplies the part colour (sculpted head: lips,
+    // eye sockets, stubble)
+    const vc = g.getAttribute('color');
+    const VC = vc ? (vc.array as ArrayLike<number>) : null;
     const base = this.pos.length / 3;
     const v = new THREE.Vector3();
     const fixed = typeof weights === 'function' ? null : this.resolve(weights);
@@ -145,7 +153,8 @@ class SkinBuilder {
       this.pos.push(x, y, z);
       this.nor.push(N[i * 3], N[i * 3 + 1], N[i * 3 + 2]);
       this.uv.push(UV ? UV[i * 2] * uvScale : 0, UV ? UV[i * 2 + 1] * uvScale : 0);
-      this.col.push(color.r, color.g, color.b);
+      if (VC) this.col.push(color.r * VC[i * 3], color.g * VC[i * 3 + 1], color.b * VC[i * 3 + 2]);
+      else this.col.push(color.r, color.g, color.b);
       this.mat.push(kind, rough, metal);
       let r = fixed;
       if (!r) {
@@ -289,6 +298,114 @@ const sph = (r: number, ws = 12, hs = 8) => cached(`sp${r},${ws},${hs}`, () => n
 /** sphere scaled to an ellipsoid */
 const ell = (rx: number, ry: number, rz: number, ws = 12, hs = 9) => sph(1, ws, hs).scale(rx, ry, rz);
 
+// ------------------------------------------------------------------ the head (Update 46)
+
+const HEAD_C = new THREE.Vector3(0, 1.69, 0);
+const gs = (dx: number, dy: number, s: number) => Math.exp(-(dx * dx + dy * dy) / (2 * s * s));
+/**
+ * The sculpted head: a unit-sphere direction d (x right, y up, z out of the face) → a point on
+ * the head surface, relative to HEAD_C. An ellipsoid skull (fuller behind and above), a flatter
+ * face, the jaw tapering to the chin, then the features as smooth bumps and dents along d: brow
+ * ridge, eye sockets, the nose (bridge, tip and wings), cheekbones, lips and the mouth line.
+ */
+function headPoint(x: number, y: number, z: number, out = new THREE.Vector3()) {
+  const f = sstep(0.3, 0.8, z); // the face (front)
+  let rx = 0.07, ry = 0.097, rz = 0.091;
+  rx *= 1 + 0.05 * Math.max(0, y) - 0.05 * Math.max(0, -z);
+  rz *= 1 + 0.06 * Math.max(0, -z) * Math.max(0, y + 0.3);
+  // jaw: narrows toward the chin, a little more at the front
+  const jaw = sstep(-0.15, -0.95, y);
+  rx *= 1 - 0.26 * jaw * (0.45 + 0.55 * f);
+  // temples: the skull narrows a little above and in front of the ears
+  rx *= 1 - 0.05 * gs(z - 0.45, y - 0.3, 0.25);
+  // flatter face plane
+  rz *= 1 - 0.08 * f * (1 - Math.abs(y) * 0.6);
+  out.set(x * rx, y * ry, z * rz);
+  // features: offsets along the surface direction (metres)
+  const ax = Math.abs(x);
+  let off = 0;
+  off += 0.0075 * gs(x, y - 0.29, 0.09) * f * sstep(0.66, 0.3, ax); // brow ridge
+  off -= 0.0145 * gs(ax - 0.33, y - 0.12, 0.09) * f; // eye sockets
+  // nose: bridge rising from the brow to the tip, then tucking under
+  const nt = sstep(0.24, -0.16, y) * sstep(-0.3, -0.17, y);
+  off += (0.005 + 0.027 * sstep(0.22, -0.16, y)) * Math.exp(-(x * x) / (2 * Math.pow(0.048 + 0.05 * sstep(0.1, -0.18, y), 2))) * nt * f;
+  off += 0.0085 * gs(ax - 0.11, y + 0.2, 0.045) * f; // nostril wings
+  off += 0.0065 * gs(ax - 0.5, y - 0.02, 0.12) * f; // cheekbones
+  off += 0.006 * gs(ax - 0.68, y + 0.55, 0.14) * sstep(0.0, 0.5, z); // the angle of the jaw
+  off -= 0.004 * gs(ax - 0.42, y + 0.2, 0.12) * f; // under the cheekbone
+  off -= 0.0022 * gs(ax - 0.2, y + 0.28, 0.035) * f; // nasolabial folds
+  off += 0.0018 * gs(ax - 0.33, y + 0.02, 0.05) * f; // under-eye
+  off += 0.0062 * gs(x / 1.7, y + 0.36, 0.035) * f; // upper lip
+  off += 0.0068 * gs(x / 1.6, y + 0.455, 0.04) * f; // lower lip
+  off -= 0.0034 * gs(x / 2.4, y + 0.405, 0.012) * f * sstep(0.3, 0.15, ax); // mouth line
+  off -= 0.003 * gs(x / 1.4, y + 0.58, 0.05) * f; // the dip above the chin
+  off += 0.012 * gs(x / 1.3, y + 0.86, 0.2) * f; // chin
+  out.addScaledVector(out.clone().normalize(), off);
+  return out;
+}
+/** colour multipliers on the skin: socket shade, lips, mouth line, nostrils, stubble, short hair */
+function headTint(x: number, y: number, z: number, skin: THREE.Color, hair: THREE.Color, beard: number, hairCap: boolean): [number, number, number] {
+  const f = sstep(0.3, 0.8, z), ax = Math.abs(x);
+  let r = 1, g = 1, b = 1;
+  const sock = gs(ax - 0.33, y - 0.13, 0.11) * f;
+  r -= 0.22 * sock; g -= 0.26 * sock; b -= 0.22 * sock;
+  const lips = (gs(x / 1.7, y + 0.36, 0.03) + gs(x / 1.6, y + 0.455, 0.035)) * f;
+  r += 0.04 * lips; g -= 0.2 * lips; b -= 0.15 * lips;
+  const line = gs(x / 2.4, y + 0.405, 0.012) * f * sstep(0.3, 0.15, ax);
+  r -= 0.6 * line; g -= 0.62 * line; b -= 0.6 * line;
+  const nos = gs(ax - 0.07, y + 0.235, 0.025) * f;
+  r -= 0.4 * nos; g -= 0.42 * nos; b -= 0.42 * nos;
+  const fold = gs(ax - 0.2, y + 0.28, 0.035) * f;
+  r -= 0.12 * fold; g -= 0.14 * fold; b -= 0.12 * fold;
+  // cheeks and nose tip a touch warmer
+  const warm = (gs(ax - 0.45, y + 0.08, 0.14) * 0.6 + gs(x, y + 0.14, 0.05)) * f;
+  r += 0.03 * warm; g -= 0.02 * warm; b -= 0.02 * warm;
+  // stubble / beard: jaw, chin, upper lip and the lower cheeks
+  if (beard > 0) {
+    const zone = sstep(-0.12, -0.32, y) * sstep(-0.15, 0.25, z + 0.1) * (1 - 0.8 * lips) * (1 - line);
+    const k = zone * beard;
+    const hr = hair.r / Math.max(0.05, skin.r), hg = hair.g / Math.max(0.05, skin.g), hb = hair.b / Math.max(0.05, skin.b);
+    r = r * (1 - k) + hr * k; g = g * (1 - k) + hg * k; b = b * (1 - k) + hb * k;
+  }
+  // short cropped hair (only seen without a helmet): the crown, back and above the ears
+  if (hairCap) {
+    const cap = sstep(0.05, 0.3, y + 0.55 * Math.max(0, -z) - 0.45 * Math.max(0, z - 0.55)) * sstep(0.02, 0.2, y + 0.35);
+    const hr = hair.r / Math.max(0.05, skin.r), hg = hair.g / Math.max(0.05, skin.g), hb = hair.b / Math.max(0.05, skin.b);
+    r = r * (1 - cap) + hr * cap * 0.9; g = g * (1 - cap) + hg * cap * 0.9; b = b * (1 - cap) + hb * cap * 0.9;
+  }
+  return [r, g, b];
+}
+function sculptHead(q: 0 | 1 | 2, skin: THREE.Color, hair: THREE.Color, beard: number, hairCap: boolean, knit: THREE.Color | null) {
+  const ws = q === 0 ? 40 : q === 1 ? 22 : 10, hs = q === 0 ? 30 : q === 1 ? 16 : 8;
+  const g = new THREE.SphereGeometry(1, ws, hs);
+  const P = g.getAttribute('position') as THREE.BufferAttribute;
+  const col = new Float32Array(P.count * 3);
+  const v = new THREE.Vector3();
+  for (let i = 0; i < P.count; i++) {
+    const x = P.getX(i), y = P.getY(i), z = P.getZ(i);
+    headPoint(x, y, z, v);
+    P.setXYZ(i, v.x + HEAD_C.x, v.y + HEAD_C.y, v.z + HEAD_C.z);
+    let t: [number, number, number];
+    if (knit) {
+      // balaclava: knit everywhere but an eye opening (skin there, as a multiplier on the knit)
+      const open = sstep(0.55, 0.75, z) * sstep(-0.03, 0.05, y) * sstep(0.27, 0.2, y) * sstep(0.7, 0.55, Math.abs(x));
+      const sk = headTint(x, y, z, skin, hair, 0, false);
+      t = [1 + (skin.r / knit.r * sk[0] - 1) * open, 1 + (skin.g / knit.g * sk[1] - 1) * open, 1 + (skin.b / knit.b * sk[2] - 1) * open];
+    } else t = headTint(x, y, z, skin, hair, beard, hairCap);
+    col[i * 3] = t[0]; col[i * 3 + 1] = t[1]; col[i * 3 + 2] = t[2];
+  }
+  g.setAttribute('color', new THREE.BufferAttribute(col, 3));
+  g.computeVertexNormals();
+  return g;
+}
+/** a point on the head for a face direction (placing eyes, brows, glasses) — world-rest space */
+function onHead(x: number, y: number, inset = 0) {
+  const z = Math.sqrt(Math.max(0, 1 - x * x - y * y));
+  const p = headPoint(x, y, z);
+  p.addScaledVector(p.clone().normalize(), -inset);
+  return p.add(HEAD_C);
+}
+
 // ------------------------------------------------------------------ the soldier
 
 /**
@@ -350,7 +467,10 @@ export function buildSoldierGeometry(look: SoldierLook, team: 0 | 1, q: 0 | 1 | 
     ], segL, v.boots, K_FLAT, { rough: 0.75, capB: true });
     B.rigid(rbox(0.095, 0.07, 0.17, 0.03, mid ? 2 : 1), [[`${L}Foot`, 0.55], [`${L}ToeBase`, 0.45]], [x, 0.045, 0.06], v.boots, K_FLAT, { rough: 0.7 });
     B.rigid(rbox(0.1, 0.022, 0.26, 0.008, 1), [[`${L}Foot`, 0.5], [`${L}ToeBase`, 0.5]], [x, 0.011, 0.04], shade(v.boots, 0.5), K_FLAT, { rough: 0.95 });
-    if (v.kneePads && mid) B.rigid(rbox(0.1, 0.12, 0.05, 0.02), `${L}Leg`, [x, 0.5, 0.075], shade(gear, 0.8), K_FLAT, { rough: 0.6, rot: [0.15, 0, 0] });
+    if (v.kneePads && mid) {
+      B.rigid(rbox(0.1, 0.12, 0.05, 0.022), `${L}Leg`, [x, 0.5, 0.075], shade(gear, 0.8), K_HARD, { rough: 0.55, rot: [0.15, 0, 0] });
+      if (detail) B.tube([{ c: V(x, 0.47, 0.0), rx: 0.068, rz: 0.074, w: [[`${L}Leg`, 1]] }, { c: V(x, 0.455, 0.0), rx: 0.068, rz: 0.074, w: [[`${L}Leg`, 1]] }], segL, C(0x1c1c1a), K_WEB, { rough: 0.9 });
+    }
     // cargo pocket on the thigh
     if (detail) B.rigid(rbox(0.035, 0.15, 0.12, 0.012), `${L}UpLeg`, [x + 0.085 * s, 0.7, 0.005], shade(pants, 0.94), K_CAMO, { uv: 0.4 });
   }
@@ -384,78 +504,135 @@ export function buildSoldierGeometry(look: SoldierLook, team: 0 | 1, q: 0 | 1 | 
     B.tube([{ c: V(x - 0.006 * s, 1.37, -0.01), rx: 0.066, rz: 0.066, w: [[`${L}Arm`, 1]] }, { c: V(x - 0.006 * s, 1.32, -0.01), rx: 0.063, rz: 0.063, w: [[`${L}Arm`, 1]] }], segL, C(0xffffff), K_TEAM, { rough: 0.6 });
     // glove: cuff, palm, finger block, thumb
     B.tube([{ c: V(x, 0.95, -0.004), rx: 0.042, rz: 0.044, w: [[`${L}ForeArm`, 1]] }, { c: V(x, 0.9, 0), rx: 0.04, rz: 0.042, w: [[`${L}Hand`, 1]] }], segL, v.gloves, K_FLAT, { rough: 0.7 });
-    B.rigid(rbox(0.032, 0.09, 0.085, 0.014), `${L}Hand`, [x, 0.86, 0.008], v.gloves, K_FLAT, { rough: 0.7 });
-    B.rigid(rbox(0.028, 0.085, 0.078, 0.012), `${L}HandIndex1`, [x - 0.002 * s, 0.775, 0.016], v.gloves, K_FLAT, { rough: 0.7 });
-    B.rigid(rbox(0.024, 0.06, 0.024, 0.01), `${L}HandThumb1`, [x - 0.018 * s, 0.85, 0.05], v.gloves, K_FLAT, { rough: 0.7, rot: [0.3, 0, 0.2 * s] });
+    // glove (Update 46): a shaped palm, a hard knuckle guard, four fingers (one block far away)
+    B.rigid(rbox(0.03, 0.088, 0.08, 0.013), `${L}Hand`, [x, 0.86, 0.008], v.gloves, K_FLAT, { rough: 0.72 });
+    if (mid) B.rigid(rbox(0.012, 0.03, 0.07, 0.005), `${L}Hand`, [x + 0.016 * s, 0.832, 0.01], shade(v.gloves, 0.6), K_HARD, { rough: 0.45 });
+    if (detail) {
+      for (let f = 0; f < 4; f++) {
+        const fz = 0.042 - f * 0.022;
+        B.rigid(rbox(0.017, 0.078 - Math.abs(f - 1.2) * 0.008, 0.019, 0.008), `${L}HandIndex1`, [x - 0.002 * s, 0.776, 0.016 + fz - 0.016], v.gloves, K_FLAT, { rough: 0.72 });
+      }
+    } else B.rigid(rbox(0.028, 0.085, 0.078, 0.012), `${L}HandIndex1`, [x - 0.002 * s, 0.775, 0.016], v.gloves, K_FLAT, { rough: 0.7 });
+    B.rigid(rbox(0.022, 0.06, 0.024, 0.01), `${L}HandThumb1`, [x - 0.018 * s, 0.85, 0.05], v.gloves, K_FLAT, { rough: 0.72, rot: [0.3, 0, 0.2 * s] });
     if (detail && role === 'breacher') B.rigid(rbox(0.08, 0.1, 0.06, 0.02), `${L}ForeArm`, [x, 1.14, -0.05], shade(gear, 0.8), K_FLAT, { rough: 0.6 });
   }
-  // ---- head
+  // ---- head (Update 46: one sculpted mesh with the features in it, real eyes, brows and ears)
   const skin = v.skin;
   const headW: Weights = [['Head', 1]];
   const balaclava = v.face === 'balaclava';
-  const headCol = balaclava ? C(0x24251f) : skin;
-  // skull (back of the head is fuller), face, jaw and cheekbones
-  B.rigid(ell(0.079, 0.1, 0.094, q === 2 ? 8 : 14, q === 2 ? 6 : 10), headW, [0, 1.7, -0.004], headCol, K_FLAT, { rough: balaclava ? 0.95 : 0.6 });
-  B.rigid(ell(0.07, 0.075, 0.07, q === 2 ? 6 : 12, 8), headW, [0, 1.655, 0.03], headCol, K_FLAT, { rough: balaclava ? 0.95 : 0.6 });
+  const knitCol = C(0x24251f);
+  const helmeted = role === 'rifleman' || role === 'gunner' || role === 'breacher' || (role === 'cqb' && look.seed % 3 !== 0);
+  const beard = v.face === 'beard' ? 0.85 : v.face === 'paint' ? 0 : look.seed % 3 === 0 ? 0.35 : 0.12;
+  B.add(sculptHead(q, balaclava ? knitCol : skin, v.hair, beard, !helmeted && role !== 'sniper', balaclava ? knitCol : null), headW, balaclava ? knitCol : skin, balaclava ? K_KNIT : K_SKIN, balaclava ? 0.95 : 0.55);
   if (mid) {
-    B.rigid(rbox(0.1, 0.05, 0.07, 0.024), headW, [0, 1.612, 0.04], headCol, K_FLAT, { rough: balaclava ? 0.95 : 0.6, rot: [0.25, 0, 0] }); // jaw
-    for (const s of [1, -1]) B.rigid(ell(0.024, 0.02, 0.03, 6, 5), headW, [0.045 * s, 1.664, 0.072], headCol, K_FLAT, { rough: 0.6 }); // cheekbones
-  }
-  if (mid) {
-    // nose, brow, ears, eyes
-    B.rigid(ell(0.014, 0.024, 0.02, 6, 5), headW, [0, 1.668, 0.094], balaclava ? headCol : shade(skin, 0.96), K_FLAT, { rough: 0.55 });
-    if (detail) {
-      for (const s of [1, -1]) {
-        B.rigid(ell(0.012, 0.024, 0.018, 6, 5), headW, [0.079 * s, 1.675, -0.004], balaclava ? headCol : shade(skin, 0.94), K_FLAT, { rough: 0.6 });
-        B.rigid(ell(0.012, 0.007, 0.006, 6, 4), headW, [0.03 * s, 1.692, 0.085], C(0x15120f), K_FLAT, { rough: 0.3 });
+    for (const s of [1, -1]) {
+      // eyes: a white set back in the socket with a dark iris; a heavy upper lid shadows them
+      const e = onHead(0.33 * s, 0.12, 0.0075);
+      B.rigid(sph(0.0112, q === 0 ? 12 : 8, q === 0 ? 8 : 6), headW, [e.x, e.y, e.z], C(0xe4ded4), K_FLAT, { rough: 0.2 });
+      B.rigid(sph(0.0058, 8, 6), headW, [e.x - 0.0008 * s, e.y + 0.0004, e.z + 0.0083], C(look.seed % 4 === 0 ? 0x3c5262 : 0x2a1d14), K_FLAT, { rough: 0.12 });
+      const lid = onHead(0.33 * s, 0.165, 0.0005);
+      B.rigid(ell(0.013, 0.0045, 0.006, 8, 5), headW, [lid.x, lid.y, lid.z], balaclava ? knitCol : shade(skin, 0.86), balaclava ? K_KNIT : K_SKIN, { rough: 0.6, rot: [0.35, 0, 0] });
+      // brows
+      if (!balaclava || detail) {
+        const bw = onHead(0.34 * s, 0.27, -0.0012);
+        B.rigid(rbox(0.03, 0.0065, 0.008, 0.0025, 1), headW, [bw.x, bw.y, bw.z], balaclava ? knitCol : shade(v.hair, 0.75), K_FLAT, { rough: 0.95, rot: [0.25, 0.18 * s, -0.1 * s] });
       }
-      B.rigid(rbox(0.095, 0.012, 0.02, 0.005), headW, [0, 1.706, 0.082], balaclava ? C(0x15120f) : shade(v.hair, 1), K_FLAT, { rough: 0.9 });
+      // ears: an outer rim and a darker bowl
+      B.rigid(ell(0.0085, 0.027, 0.017, 8, 6), headW, [0.0735 * s, 1.684, -0.006], balaclava ? knitCol : shade(skin, 0.97), balaclava ? K_KNIT : K_SKIN, { rough: 0.6, rot: [0, 0.25 * s, 0.08 * s] });
+      if (detail && !balaclava) B.rigid(ell(0.004, 0.017, 0.01, 6, 5), headW, [0.0785 * s, 1.684, -0.002], shade(skin, 0.7), K_SKIN, { rough: 0.7, rot: [0, 0.25 * s, 0.08 * s] });
     }
-    if (balaclava) B.rigid(rbox(0.1, 0.032, 0.026, 0.012), headW, [0, 1.69, 0.08], skin, K_FLAT, { rough: 0.55 });
-    if (v.face === 'beard') B.rigid(ell(0.066, 0.05, 0.066, 10, 7), headW, [0, 1.618, 0.045], shade(v.hair, 0.9), K_FLAT, { rough: 1 });
     if (v.face === 'paint') {
-      B.rigid(rbox(0.13, 0.02, 0.03, 0.008), headW, [0, 1.67, 0.088], C(0x2c3420), K_FLAT, { rough: 0.8 });
-      B.rigid(rbox(0.1, 0.018, 0.03, 0.008), headW, [0, 1.64, 0.085], C(0x3a3020), K_FLAT, { rough: 0.8 });
+      // face paint: dark loam bands across the eyes and the cheeks
+      const a = onHead(0, 0.13, -0.001), b2 = onHead(0, -0.12, -0.002);
+      B.rigid(rbox(0.13, 0.016, 0.03, 0.006), headW, [0, a.y, a.z - 0.012], C(0x2c3420), K_FLAT, { rough: 0.85 });
+      B.rigid(rbox(0.11, 0.014, 0.03, 0.006), headW, [0, b2.y, b2.z - 0.016], C(0x3a3020), K_FLAT, { rough: 0.85 });
     }
-    if (v.face === 'scarf') B.tube([{ c: V(0, 1.6, 0.012), rx: 0.08, rz: 0.08, w: [['Neck', 0.5], ['Head', 0.5]] }, { c: V(0, 1.53, 0.0), rx: 0.085, rz: 0.083, w: [['Neck', 1]] }, { c: V(0, 1.47, -0.005), rx: 0.11, rz: 0.09, w: [['Spine2', 1]] }], segs, C(0xb8ac88), K_FLAT, { rough: 1 });
+    if (v.face === 'gaiter') {
+      // neck gaiter pulled up over the nose: follows the face down to the collar
+      const gc = v.helmetCover === 'camo' ? C(0xf0f0f0) : shade(gear, 0.95);
+      const ring = (dirY: number, inset: number) => {
+        const p = onHead(0, dirY, -inset);
+        return p;
+      };
+      const n0 = ring(-0.02, 0.006), m0 = ring(-0.4, 0.007), c0 = ring(-0.85, 0.006);
+      B.tube([
+        { c: V(0, n0.y, 0.006), rx: 0.078, rz: n0.z + 0.001, w: headW },
+        { c: V(0, m0.y, 0.004), rx: 0.071, rz: m0.z, w: headW },
+        { c: V(0, c0.y, 0.0), rx: 0.064, rz: c0.z - 0.004, w: [['Head', 0.6], ['Neck', 0.4]] },
+        { c: V(0, 1.55, -0.004), rx: 0.068, rz: 0.07, w: [['Neck', 1]] },
+        { c: V(0, 1.49, -0.008), rx: 0.085, rz: 0.08, w: [['Neck', 0.4], ['Spine2', 0.6]] },
+      ], segs, gc, v.helmetCover === 'camo' ? K_CAMO : K_KNIT, { rough: 0.95 });
+    }
+    if (v.face === 'scarf') B.tube([{ c: V(0, 1.6, 0.012), rx: 0.08, rz: 0.08, w: [['Neck', 0.5], ['Head', 0.5]] }, { c: V(0, 1.53, 0.0), rx: 0.085, rz: 0.083, w: [['Neck', 1]] }, { c: V(0, 1.47, -0.005), rx: 0.11, rz: 0.09, w: [['Spine2', 1]] }], segs, C(0xb8ac88), K_KNIT, { rough: 1 });
   }
   // ---- headgear by role
   const helmetCol = v.helmetCover === 'camo' ? C(0xf2f2f2) : shade(gear, 1.05);
-  const helmetKind = v.helmetCover === 'camo' ? K_CAMO : K_FLAT;
-  const helmet = role === 'rifleman' || role === 'gunner' || role === 'breacher' || (role === 'cqb' && look.seed % 3 !== 0);
+  const helmetKind = v.helmetCover === 'camo' ? K_CAMO : K_HARD;
+  const helmet = helmeted;
   if (helmet) {
-    // ballistic helmet: a shell lathe with a high cut over the ears
-    const prof: THREE.Vector2[] = [];
-    const n = q === 2 ? 6 : 10;
-    for (let i = 0; i <= n; i++) {
-      const a = (i / n) * Math.PI * 0.53;
-      prof.push(new THREE.Vector2(Math.sin(a) * 0.125, Math.cos(a) * 0.118));
-    }
-    prof.push(new THREE.Vector2(0.128, -0.005));
-    const shell = new THREE.LatheGeometry(prof, q === 2 ? 10 : 18);
-    shell.scale(0.98, 1, 1.08);
-    B.rigid(shell, headW, [0, 1.705, 0.004], helmetCol, helmetKind, { rough: 0.8, uv: 0.4 });
+    // ballistic helmet (Update 46): a high-cut shell built bottom-up (normals out — the old one
+    // faced inward and only its far rim showed), cut high over the ears, with a dark liner inside,
+    // an edge trim, the NVG shroud, side rails, a counterweight pouch, a chinstrap and an IR strobe
+    const shellGeo = (rad: number, hgt: number, n: number, rs: number) => {
+      const prof: THREE.Vector2[] = [new THREE.Vector2(rad * 1.02, -0.012)];
+      for (let i = 0; i <= n; i++) {
+        const a = Math.PI * 0.53 * (1 - i / n);
+        prof.push(new THREE.Vector2(Math.max(1e-4, Math.sin(a) * rad), Math.cos(a) * hgt));
+      }
+      const g = new THREE.LatheGeometry(prof, rs);
+      g.scale(0.97, 1, 1.09);
+      // the high cut: the rim rises over the ears, and the front edge sits up off the brow
+      const P = g.getAttribute('position') as THREE.BufferAttribute;
+      for (let i = 0; i < P.count; i++) {
+        const x = P.getX(i), y = P.getY(i), z = P.getZ(i);
+        const side = sstep(0.45, 0.85, Math.abs(x) / rad) * sstep(-0.6, 0.1, z / rad);
+        const front = sstep(0.6, 0.95, z / (rad * 1.09));
+        const floor = -0.012 + 0.045 * side + 0.012 * front;
+        if (y < floor) P.setY(i, floor);
+      }
+      g.computeVertexNormals();
+      return g;
+    };
+    const rs = q === 2 ? 10 : q === 1 ? 18 : 28, n = q === 2 ? 5 : q === 1 ? 8 : 12;
+    B.rigid(shellGeo(0.126, 0.118, n, rs), headW, [0, 1.705, 0.004], helmetCol, helmetKind, { rough: v.helmetCover === 'camo' ? 0.9 : 0.62, uv: 0.4 });
     if (mid) {
-      // front NVG shroud, side rails
-      B.rigid(rbox(0.05, 0.035, 0.025, 0.008), headW, [0, 1.79, 0.118], metal, K_FLAT, { rough: 0.5, metal: 0.4, rot: [-0.45, 0, 0] });
-      for (const s of [1, -1]) B.rigid(rbox(0.012, 0.03, 0.09, 0.005), headW, [0.122 * s, 1.72, 0.01], shade(gear, 0.7), K_FLAT, { rough: 0.6 });
-      // NVG: raised (on the helmet) and lowered (in front of the eyes) — the shader shows one
-      const nvgDown = (dx: number) => B.rigid(cyl(0.017, 0.016, 0.075, 8).rotateX(Math.PI / 2), headW, [dx, 1.69, 0.145], C(0x1c1d1f), K_NVG_DOWN, { rough: 0.4, metal: 0.3 });
-      const nvgUp = (dx: number) => B.rigid(cyl(0.017, 0.016, 0.07, 8), headW, [dx, 1.805, 0.13], C(0x1c1d1f), K_NVG_UP, { rough: 0.4, metal: 0.3, rot: [1.15, 0, 0] });
+      // liner: the same shell shrunk and turned inside out
+      const liner = shellGeo(0.118, 0.11, n, rs);
+      const ix = liner.getIndex()!;
+      for (let i = 0; i < ix.count; i += 3) { const t = ix.getX(i); ix.setX(i, ix.getX(i + 2)); ix.setX(i + 2, t); }
+      liner.computeVertexNormals();
+      B.rigid(liner, headW, [0, 1.705, 0.004], C(0x1a1b18), K_FLAT, { rough: 0.95 });
+      // NVG shroud on the front, the mount arm, side rails, the edge trim at the brow
+      B.rigid(rbox(0.048, 0.034, 0.018, 0.007), headW, [0, 1.775, 0.132], C(0x2a2c2e), K_HARD, { rough: 0.45, metal: 0.35, rot: [-0.5, 0, 0] });
+      for (const s of [1, -1]) {
+        B.rigid(rbox(0.011, 0.028, 0.095, 0.004), headW, [0.121 * s, 1.722, 0.008], shade(gear, 0.6), K_HARD, { rough: 0.55, rot: [0, 0, -0.12 * s] });
+        for (let k = 0; k < (detail ? 4 : 0); k++) B.rigid(box(0.004, 0.022, 0.006), headW, [0.127 * s, 1.722, -0.028 + k * 0.022], shade(gear, 0.45), K_HARD, { rough: 0.6 });
+        // chinstrap down to the jaw
+        if (detail) B.tube([{ c: V(0.104 * s, 1.705, 0.03), rx: 0.006, rz: 0.003, w: headW }, { c: V(0.08 * s, 1.63, 0.05), rx: 0.006, rz: 0.003, w: headW }, { c: V(0.045 * s, 1.585, 0.065), rx: 0.006, rz: 0.003, w: headW }], 4, C(0x1e1f1c), K_WEB, { rough: 0.9 });
+      }
+      // NVG: lowered (in front of the eyes) and raised (flipped up above the brow) — the shader shows one
+      const nvgDown = (dx: number) => B.rigid(cyl(0.0165, 0.016, 0.07, 10).rotateX(Math.PI / 2), headW, [dx, 1.69, 0.148], C(0x1c1d1f), K_NVG_DOWN, { rough: 0.4, metal: 0.3 });
+      const nvgUp = (dx: number) => B.rigid(cyl(0.0165, 0.015, 0.058, 10), headW, [dx, 1.79, 0.15], C(0x1c1d1f), K_NVG_UP, { rough: 0.4, metal: 0.3, rot: [1.05, 0, 0] });
       for (const dx of [0.032, -0.032]) {
         nvgDown(dx);
         nvgUp(dx);
       }
-      B.rigid(rbox(0.04, 0.05, 0.03, 0.008), headW, [0, 1.73, 0.13], C(0x1c1d1f), K_NVG_DOWN, { rough: 0.5 });
+      B.rigid(rbox(0.04, 0.046, 0.03, 0.008), headW, [0, 1.73, 0.135], C(0x1c1d1f), K_NVG_DOWN, { rough: 0.5 });
+      B.rigid(rbox(0.05, 0.022, 0.028, 0.006), headW, [0, 1.785, 0.14], C(0x1c1d1f), K_NVG_UP, { rough: 0.5, rot: [1.05, 0, 0] });
       if (v.eyes === 'goggles') {
-        B.rigid(rbox(0.15, 0.04, 0.03, 0.012), headW, [0, 1.79, 0.09], C(0x2a2c2c), K_FLAT, { rough: 0.6, rot: [-0.5, 0, 0] });
-        B.rigid(rbox(0.12, 0.03, 0.01, 0.008), headW, [0, 1.795, 0.105], C(0x6a7c80), K_GLASS, { rough: 0.15, rot: [-0.5, 0, 0] });
+        B.rigid(rbox(0.15, 0.04, 0.03, 0.012), headW, [0, 1.79, 0.1], C(0x2a2c2c), K_HARD, { rough: 0.6, rot: [-0.5, 0, 0] });
+        B.rigid(rbox(0.12, 0.03, 0.01, 0.008), headW, [0, 1.795, 0.115], C(0x6a7c80), K_GLASS, { rough: 0.15, rot: [-0.5, 0, 0] });
       }
-      if (detail && look.seed % 2 === 0) B.rigid(rbox(0.05, 0.03, 0.06, 0.008), headW, [-0.07, 1.8, -0.08], shade(gear2, 0.9), K_FLAT, { rough: 0.8, rot: [0.4, 0, 0.3] }); // counterweight pouch
+      // counterweight / battery pouch on the back, an IR strobe on top
+      B.rigid(rbox(0.06, 0.034, 0.03, 0.008), headW, [0, 1.75, -0.122], shade(gear2, 0.9), K_WEB, { rough: 0.9, rot: [-0.6, 0, 0] });
+      if (look.seed % 2 === 0) {
+        B.rigid(rbox(0.022, 0.014, 0.03, 0.005), headW, [0.03, 1.818, -0.04], C(0x1d1e1c), K_HARD, { rough: 0.5, rot: [0.3, 0, 0.12] });
+        B.rigid(sph(0.0055, 6, 4), headW, [0.03, 1.828, -0.04], C(0x9adfb0), K_STROBE, { rough: 0.3 });
+      }
     }
   } else if (role === 'sniper') {
     // ghillie hood: a hood shell and loose burlap strands over head and shoulders
-    const hood = new THREE.LatheGeometry([0, 0.3, 0.6, 0.9, 1.2, 1.5, 1.7].map((a) => new THREE.Vector2(Math.sin(a) * 0.135, Math.cos(a) * 0.13)), q === 2 ? 8 : 14);
+    const hood = new THREE.LatheGeometry([1.7, 1.5, 1.2, 0.9, 0.6, 0.3, 0].map((a) => new THREE.Vector2(Math.max(1e-4, Math.sin(a) * 0.135), Math.cos(a) * 0.13)), q === 2 ? 8 : 14);
     hood.scale(1, 1, 1.12);
     B.rigid(hood, headW, [0, 1.7, -0.01], C(0x5a5a3c), K_FLAT, { rough: 1 });
     const r = new RNG(look.seed + 11);
@@ -476,57 +653,115 @@ export function buildSoldierGeometry(look: SoldierLook, team: 0 | 1, q: 0 | 1 | 
     B.rigid(brim, headW, [0, 1.735, 0.006], shade(cloth, 0.95), K_CAMO, { rough: 0.95, uv: 0.6, rot: [0.08, 0, 0] });
     if (role === 'cqb' && mid) B.rigid(rbox(0.16, 0.024, 0.028, 0.01), headW, [0, 1.7, 0.02], C(0x2a2a2a), K_FLAT, { rough: 0.5 }); // headset band
   }
-  if (v.earPro && mid && role !== 'sniper') for (const s of [1, -1]) B.rigid(cyl(0.036, 0.036, 0.03, 10).rotateZ(Math.PI / 2), headW, [0.1 * s, 1.67, 0.0], C(0x2e302c), K_FLAT, { rough: 0.6 });
-  if (v.eyes === 'glasses' && mid) B.rigid(rbox(0.13, 0.026, 0.012, 0.006), headW, [0, 1.69, 0.1], C(0x111215), K_GLASS, { rough: 0.1, metal: 0.2 });
+  if (v.earPro && mid && role !== 'sniper') {
+    // electronic ear defenders: cups over the ears, a mic boom on the left
+    for (const s of [1, -1]) {
+      B.rigid(cyl(0.034, 0.036, 0.028, 14).rotateZ(Math.PI / 2), headW, [0.091 * s, 1.678, -0.004], C(0x2e302c), K_HARD, { rough: 0.55 });
+      if (detail) B.rigid(cyl(0.03, 0.03, 0.006, 14).rotateZ(Math.PI / 2), headW, [0.106 * s, 1.678, -0.004], C(0x1c1d1b), K_HARD, { rough: 0.7 });
+    }
+    if (detail) B.rigid(cyl(0.0022, 0.0022, 0.075, 5), headW, [-0.085, 1.645, 0.055], C(0x151515), K_HARD, { rough: 0.5, rot: [Math.PI / 2, 0.55, 0] });
+  }
+  if (v.eyes === 'glasses' && mid) {
+    // ballistic glasses: a wrap lens in front of the eyes and arms back to the ears
+    const g0 = onHead(0, 0.13, -0.012);
+    B.rigid(rbox(0.128, 0.03, 0.006, 0.006), headW, [0, g0.y, g0.z], C(0x15181c), K_GLASS, { rough: 0.08, metal: 0.3 });
+    for (const s of [1, -1]) B.rigid(box(0.004, 0.006, 0.085), headW, [0.069 * s, g0.y + 0.004, g0.z - 0.05], C(0x111214), K_HARD, { rough: 0.4 });
+  }
 
-  // ---- load-bearing kit by role
+  // ---- load-bearing kit by role (Update 46: nylon webbing with MOLLE rows, real pouch contents)
   const plates = role === 'rifleman' || role === 'breacher' || role === 'gunner';
   const S2: Weights = [['Spine2', 1]];
   const S1: Weights = [['Spine1', 1]];
+  const magCol = C(0x1f2022), magTop = C(0x8a6a3a);
+  /** a rifle magazine standing in its pouch: the body, the floorplate and a pull tab */
+  const magInPouch = (x: number, y: number, z: number, w: Weights) => {
+    B.rigid(rbox(0.028, 0.05, 0.022, 0.004), w, [x, y, z], magCol, K_HARD, { rough: 0.55 });
+    if (detail) {
+      B.rigid(rbox(0.032, 0.008, 0.026, 0.003), w, [x, y + 0.028, z], shade(magCol, 0.8), K_HARD, { rough: 0.6 });
+      B.rigid(rbox(0.012, 0.016, 0.004, 0.002), w, [x, y + 0.036, z + 0.006], magTop, K_WEB, { rough: 0.9 });
+    }
+  };
   if (plates) {
-    // plate carrier: front / back plates, cummerbund, shoulder straps, mag pouches
+    // plate carrier: shaped front / back plates (chamfered upper corners), cummerbund, padded
+    // shoulder straps, a mag pouch row with the magazines in it, admin panel, radio, tourniquet
     const thick = role === 'breacher' ? 0.055 : 0.045;
-    B.rigid(rbox(0.31, 0.32, thick, 0.02), [['Spine2', 0.75], ['Spine1', 0.25]], [0, 1.255, 0.142], gear, K_FLAT, { rough: 0.85 });
-    B.rigid(rbox(0.3, 0.33, thick, 0.02), [['Spine2', 0.8], ['Spine1', 0.2]], [0, 1.27, -0.135], gear, K_FLAT, { rough: 0.85 });
-    B.tube([{ c: V(0, 1.2, 0.0), rx: 0.188, rz: 0.142, w: S1 }, { c: V(0, 1.1, 0.0), rx: 0.178, rz: 0.134, w: [['Spine1', 0.5], ['Spine', 0.5]] }], segs, gear, K_FLAT, { rough: 0.85, ex: 2.6 });
-    for (const s of [1, -1]) B.rigid(rbox(0.065, 0.025, 0.28, 0.01), S2, [0.1 * s, 1.445, 0.0], gear, K_FLAT, { rough: 0.85 });
+    const plate = (w: number, h: number) => {
+      const sh = new THREE.Shape();
+      const c = 0.06;
+      sh.moveTo(-w / 2, -h / 2); sh.lineTo(w / 2, -h / 2); sh.lineTo(w / 2, h / 2 - c); sh.lineTo(w / 2 - c * 0.8, h / 2); sh.lineTo(-w / 2 + c * 0.8, h / 2); sh.lineTo(-w / 2, h / 2 - c); sh.closePath();
+      const g = new THREE.ExtrudeGeometry(sh, { depth: thick - 0.012, bevelEnabled: true, bevelThickness: 0.006, bevelSize: 0.008, bevelSegments: 2, curveSegments: 2 });
+      g.translate(0, 0, -(thick - 0.012) / 2);
+      g.computeVertexNormals();
+      return g;
+    };
+    B.rigid(plate(0.3, 0.32), [['Spine2', 0.75], ['Spine1', 0.25]], [0, 1.255, 0.142], gear, K_WEB, { rough: 0.88 });
+    B.rigid(plate(0.3, 0.33), [['Spine2', 0.8], ['Spine1', 0.2]], [0, 1.27, -0.135], gear, K_WEB, { rough: 0.88 });
+    B.tube([{ c: V(0, 1.2, 0.0), rx: 0.188, rz: 0.142, w: S1 }, { c: V(0, 1.1, 0.0), rx: 0.178, rz: 0.134, w: [['Spine1', 0.5], ['Spine', 0.5]] }], segs, gear, K_WEB, { rough: 0.88, ex: 2.6 });
+    for (const s of [1, -1]) {
+      B.rigid(rbox(0.065, 0.025, 0.28, 0.01), S2, [0.1 * s, 1.445, 0.0], gear, K_WEB, { rough: 0.88 });
+      if (mid) B.rigid(rbox(0.07, 0.03, 0.12, 0.012), S2, [0.1 * s, 1.462, 0.02], shade(gear, 0.92), K_WEB, { rough: 0.95 }); // shoulder pads
+    }
     const n = v.pouches;
     for (let i = 0; i < n; i++) {
       const px = (i - (n - 1) / 2) * 0.072;
-      B.rigid(rbox(0.064, 0.12, 0.05, 0.012), [['Spine1', 0.6], ['Spine2', 0.4]], [px, 1.15, 0.185], gear2, K_FLAT, { rough: 0.9 });
-      if (detail) B.rigid(box(0.06, 0.012, 0.054), [['Spine1', 0.6], ['Spine2', 0.4]], [px, 1.214, 0.186], shade(gear2, 0.85), K_FLAT, { rough: 0.9 });
+      const w: Weights = [['Spine1', 0.6], ['Spine2', 0.4]];
+      B.rigid(rbox(0.064, 0.1, 0.05, 0.01), w, [px, 1.14, 0.185], gear2, K_WEB, { rough: 0.9 });
+      if (mid) magInPouch(px, 1.205, 0.185, w);
+      if (detail) B.rigid(box(0.066, 0.006, 0.052), w, [px, 1.188, 0.186], shade(gear2, 0.8), K_WEB, { rough: 0.95 }); // elastic retention band
     }
-    if (mid) B.rigid(rbox(0.14, 0.08, 0.03, 0.01), S2, [0, 1.36, 0.172], shade(gear2, 0.9), K_FLAT, { rough: 0.9 }); // admin pouch
+    if (mid) {
+      B.rigid(rbox(0.14, 0.08, 0.026, 0.01), S2, [0, 1.36, 0.172], shade(gear2, 0.9), K_WEB, { rough: 0.9 }); // admin pouch
+      // velcro ID patch on the admin pouch, in the team colour
+      if (detail) B.rigid(rbox(0.05, 0.025, 0.004, 0.002), S2, [0.03, 1.372, 0.186], C(0xffffff), K_TEAM, { rough: 0.8 });
+      // radio on the left side of the cummerbund with its antenna
+      B.rigid(rbox(0.035, 0.11, 0.06, 0.008), S1, [-0.19, 1.17, 0.03], C(0x2a2c28), K_HARD, { rough: 0.6 });
+      B.rigid(cyl(0.004, 0.0025, 0.16, 5), S1, [-0.2, 1.3, 0.03], C(0x111111), K_HARD, { rough: 0.5, rot: [0, 0, 0.12] });
+      // tourniquet in its pouch on the right shoulder strap
+      B.rigid(rbox(0.03, 0.06, 0.03, 0.006), S2, [0.1, 1.38, 0.15], C(0x1b1b1b), K_WEB, { rough: 0.9 });
+      if (detail) B.rigid(rbox(0.012, 0.03, 0.02, 0.003), S2, [0.1, 1.42, 0.15], C(0xb02018), K_HARD, { rough: 0.6 });
+    }
     if (role === 'breacher') {
       // shell bandolier across the chest + shells
-      B.rigid(rbox(0.06, 0.5, 0.02, 0.008), S2, [0, 1.27, 0.175], C(0x3a3428), K_FLAT, { rough: 0.9, rot: [0, 0, 0.75] });
-      if (detail) for (let i = 0; i < 9; i++) B.rigid(cyl(0.009, 0.009, 0.045, 6), S2, [-0.15 + i * 0.037, 1.14 + i * 0.033, 0.19], C(i % 2 ? 0xa02a20 : 0x8a2018), K_FLAT, { rough: 0.5, rot: [0, 0, 0.75] });
+      B.rigid(rbox(0.06, 0.5, 0.02, 0.008), S2, [0, 1.27, 0.175], C(0x3a3428), K_WEB, { rough: 0.9, rot: [0, 0, 0.75] });
+      if (detail) for (let i = 0; i < 9; i++) B.rigid(cyl(0.009, 0.009, 0.045, 6), S2, [-0.15 + i * 0.037, 1.14 + i * 0.033, 0.19], C(i % 2 ? 0xa02a20 : 0x8a2018), K_HARD, { rough: 0.5, rot: [0, 0, 0.75] });
       // breaching bar on the back
       B.rigid(cyl(0.012, 0.012, 0.6, 6), S2, [0.08, 1.3, -0.18], C(0x3a3a3a), K_FLAT, { rough: 0.5, metal: 0.6, rot: [0, 0, 0.35] });
     }
   } else {
     // chest rig: a lighter harness with pouches across the stomach
-    B.tube([{ c: V(0, 1.26, 0.0), rx: 0.185, rz: 0.128, w: S2 }, { c: V(0, 1.12, 0.0), rx: 0.172, rz: 0.124, w: S1 }], segs, shade(gear, 0.95), K_FLAT, { rough: 0.9, ex: 2.6 });
-    for (const s of [1, -1]) B.rigid(rbox(0.05, 0.02, 0.27, 0.008), S2, [0.1 * s, 1.44, 0.0], shade(gear, 0.9), K_FLAT, { rough: 0.9 });
+    B.tube([{ c: V(0, 1.26, 0.0), rx: 0.185, rz: 0.128, w: S2 }, { c: V(0, 1.12, 0.0), rx: 0.172, rz: 0.124, w: S1 }], segs, shade(gear, 0.95), K_WEB, { rough: 0.9, ex: 2.6 });
+    for (const s of [1, -1]) B.rigid(rbox(0.05, 0.02, 0.27, 0.008), S2, [0.1 * s, 1.44, 0.0], shade(gear, 0.9), K_WEB, { rough: 0.9 });
     const n = role === 'sniper' ? 2 : 3;
-    for (let i = 0; i < n; i++) B.rigid(rbox(0.07, 0.1, 0.045, 0.012), [['Spine1', 0.7], ['Spine', 0.3]], [(i - (n - 1) / 2) * 0.078, 1.13, 0.155], gear2, K_FLAT, { rough: 0.9 });
-    if (role === 'marksman' || role === 'sniper') B.rigid(rbox(0.06, 0.09, 0.05, 0.012), S2, [-0.1, 1.3, 0.15], shade(gear2, 0.85), K_FLAT, { rough: 0.9 }); // rangefinder / data book
+    for (let i = 0; i < n; i++) {
+      const px = (i - (n - 1) / 2) * 0.078;
+      const w: Weights = [['Spine1', 0.7], ['Spine', 0.3]];
+      B.rigid(rbox(0.07, 0.09, 0.045, 0.01), w, [px, 1.125, 0.155], gear2, K_WEB, { rough: 0.9 });
+      if (mid) magInPouch(px, 1.18, 0.155, w);
+    }
+    if (role === 'marksman' || role === 'sniper') B.rigid(rbox(0.06, 0.09, 0.05, 0.012), S2, [-0.1, 1.3, 0.15], shade(gear2, 0.85), K_WEB, { rough: 0.9 }); // rangefinder / data book
   }
+  // shoulder flag patch on the left upper arm (Norway / Nordfront), sewn on, subdued
+  if (mid) B.rigid(rbox(0.004, 0.045, 0.062, 0.0015), [['LeftArm', 1]], [0.243, 1.36, -0.008], C(0xffffff), K_PATCH, { rough: 0.85, rot: [0, 0, -0.1] });
   // belt with pouches, thigh holster
-  B.tube([{ c: V(0, 1.035, 0), rx: 0.172, rz: 0.124, w: [['Hips', 0.7], ['Spine', 0.3]] }, { c: V(0, 0.985, 0), rx: 0.172, rz: 0.124, w: [['Hips', 1]] }], segs, shade(gear, 0.8), K_FLAT, { rough: 0.8, ex: 2.6 });
+  B.tube([{ c: V(0, 1.035, 0), rx: 0.172, rz: 0.124, w: [['Hips', 0.7], ['Spine', 0.3]] }, { c: V(0, 0.985, 0), rx: 0.172, rz: 0.124, w: [['Hips', 1]] }], segs, shade(gear, 0.8), K_WEB, { rough: 0.85, ex: 2.6 });
   if (mid) {
-    B.rigid(rbox(0.06, 0.08, 0.05, 0.012), [['Hips', 1]], [0.16, 0.99, 0.06], gear2, K_FLAT, { rough: 0.9, rot: [0, 0.6, 0] });
-    B.rigid(rbox(0.07, 0.08, 0.05, 0.012), [['Hips', 1]], [0.12, 0.99, -0.12], gear2, K_FLAT, { rough: 0.9, rot: [0, -0.5, 0] });
-    B.rigid(rbox(0.05, 0.16, 0.06, 0.012), 'RightUpLeg', [-0.175, 0.83, 0.01], C(0x222222), K_FLAT, { rough: 0.6 });
-    if (detail) B.rigid(rbox(0.04, 0.12, 0.035, 0.01), 'RightUpLeg', [-0.17, 0.8, 0.045], C(0x1a1a1a), K_FLAT, { rough: 0.4 }); // pistol grip in the holster
+    B.rigid(rbox(0.06, 0.08, 0.05, 0.012), [['Hips', 1]], [0.16, 0.99, 0.06], gear2, K_WEB, { rough: 0.9, rot: [0, 0.6, 0] });
+    B.rigid(rbox(0.07, 0.08, 0.05, 0.012), [['Hips', 1]], [0.12, 0.99, -0.12], gear2, K_WEB, { rough: 0.9, rot: [0, -0.5, 0] });
+    // buckle
+    if (detail) B.rigid(rbox(0.045, 0.03, 0.012, 0.004), [['Hips', 1]], [0, 1.01, 0.128], C(0x1a1a1a), K_HARD, { rough: 0.45, metal: 0.3 });
+    B.rigid(rbox(0.05, 0.16, 0.06, 0.012), 'RightUpLeg', [-0.175, 0.83, 0.01], C(0x222222), K_HARD, { rough: 0.6 });
+    if (detail) B.rigid(rbox(0.04, 0.12, 0.035, 0.01), 'RightUpLeg', [-0.17, 0.8, 0.045], C(0x1a1a1a), K_HARD, { rough: 0.4 }); // pistol grip in the holster
+    // leg strap of the holster
+    if (detail) B.tube([{ c: V(-0.105, 0.78, 0.0), rx: 0.098, rz: 0.1, w: [['RightUpLeg', 1]] }, { c: V(-0.105, 0.765, 0.0), rx: 0.098, rz: 0.1, w: [['RightUpLeg', 1]] }], segL, C(0x1c1c1a), K_WEB, { rough: 0.9 });
   }
   // packs
   if (role === 'gunner') {
-    B.rigid(rbox(0.3, 0.38, 0.17, 0.03), S2, [0, 1.22, -0.235], shade(gear, 0.92), K_FLAT, { rough: 0.95 });
-    B.rigid(rbox(0.17, 0.12, 0.1, 0.02), [['Hips', 1]], [0.19, 0.98, 0.04], shade(gear2, 0.9), K_FLAT, { rough: 0.9, rot: [0, 0.4, 0] }); // ammo pouch
+    B.rigid(rbox(0.3, 0.38, 0.17, 0.03), S2, [0, 1.22, -0.235], shade(gear, 0.92), K_WEB, { rough: 0.95 });
+    B.rigid(rbox(0.17, 0.12, 0.1, 0.02), [['Hips', 1]], [0.19, 0.98, 0.04], shade(gear2, 0.9), K_WEB, { rough: 0.9, rot: [0, 0.4, 0] }); // ammo pouch
     if (mid) B.rigid(rbox(0.28, 0.05, 0.03, 0.01), S2, [0, 1.4, -0.33], C(0x3a3a30), K_FLAT, { rough: 0.9 });
   } else if (v.pack === 'assault' && plates) {
-    B.rigid(rbox(0.26, 0.32, 0.12, 0.03), S2, [0, 1.23, -0.215], shade(gear2, 0.95), K_FLAT, { rough: 0.95 });
+    B.rigid(rbox(0.26, 0.32, 0.12, 0.03), S2, [0, 1.23, -0.215], shade(gear2, 0.95), K_WEB, { rough: 0.95 });
+    if (mid) for (const s of [1, -1]) B.rigid(rbox(0.03, 0.3, 0.02, 0.006), S2, [0.1 * s, 1.24, -0.15], shade(gear2, 0.8), K_WEB, { rough: 0.95 }); // pack straps
   } else if (v.pack === 'radio' || (role === 'rifleman' && look.seed % 4 === 1)) {
     B.rigid(rbox(0.12, 0.2, 0.08, 0.015), S2, [0.07, 1.28, -0.195], C(0x30322c), K_FLAT, { rough: 0.7 });
     if (mid) B.rigid(cyl(0.004, 0.006, 0.42, 5), S2, [0.1, 1.55, -0.2], C(0x111111), K_FLAT, { rough: 0.5, rot: [-0.08, 0, -0.06] });

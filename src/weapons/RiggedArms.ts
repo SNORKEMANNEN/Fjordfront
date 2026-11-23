@@ -49,6 +49,9 @@ export class RiggedArms {
 
   /** xy scale for arm vertices near the camera (1 = same FOV as the weapon); see prepareMaterial. */
   static armWarp = { value: 1 };
+  /** (Update 46) the team camo on the first-person sleeves (null: the texture's own sleeves) */
+  static sleeveCamo: { value: THREE.Texture | null } = { value: null };
+  static camoScale = { value: 1 };
 
   static async prepareMaterial(gltf: GLTF, sleeveTint = 0xffffff): Promise<THREE.Material> {
     // The source uses KHR_materials_pbrSpecularGlossiness (not supported by three r170): rebuild as metal/rough.
@@ -70,8 +73,19 @@ export class RiggedArms {
     // tan(weaponFov/2) / tan(armsFov/2), so a wider arms FOV pushes the forearms out and makes them smaller.
     m.onBeforeCompile = (sh) => {
       sh.uniforms.armWarp = RiggedArms.armWarp;
+      sh.uniforms.uSleeveCamo = RiggedArms.sleeveCamo;
+      sh.uniforms.uCamoScale = RiggedArms.camoScale;
+      sh.defines = { ...(sh.defines ?? {}), SLEEVE_CAMO: 1 };
+      // sleeves vs gloves from the skin weights: joints 3–23 and 26–46 are the wrists and fingers
       sh.vertexShader = sh.vertexShader
-        .replace('#include <common>', '#include <common>\nuniform float armWarp;')
+        .replace('#include <common>', '#include <common>\nuniform float armWarp; varying float vHand; varying vec3 vBindP;')
+        .replace('#include <begin_vertex>', `#include <begin_vertex>
+          {
+            float hw = 0.0;
+            for (int i = 0; i < 4; i++) { float bi = skinIndex[i]; if ((bi > 2.5 && bi < 23.5) || bi > 25.5) hw += skinWeight[i]; }
+            vHand = hw;
+            vBindP = position;
+          }`)
         .replace(
           '#include <project_vertex>',
           `#include <project_vertex>
@@ -82,7 +96,18 @@ export class RiggedArms {
             gl_Position = projectionMatrix * mvPosition;
           }`,
         );
+      sh.fragmentShader = sh.fragmentShader
+        .replace('#include <common>', '#include <common>\nuniform sampler2D uSleeveCamo; uniform float uCamoScale; varying float vHand; varying vec3 vBindP;')
+        .replace('#include <map_fragment>', `#include <map_fragment>
+          if (vHand < 0.5 && uCamoScale > 0.0) {
+            // the sleeve: the team's camo, shaded by the original texture's folds and seams
+            float folds = clamp(dot(diffuseColor.rgb, vec3(0.3, 0.55, 0.15)) / 0.2, 0.45, 1.5);
+            vec2 cuv = vec2(vBindP.x + vBindP.z * 0.7, vBindP.y) * uCamoScale;
+            vec3 camo = texture2D(uSleeveCamo, cuv).rgb;
+            diffuseColor.rgb = mix(diffuseColor.rgb, camo * folds * 0.92, smoothstep(0.5, 0.2, vHand));
+          }`);
     };
+    m.customProgramCacheKey = () => 'fpsArms2';
     return m;
   }
 
@@ -96,6 +121,10 @@ export class RiggedArms {
         sm.castShadow = false;
         sm.receiveShadow = false;
         this.mesh = sm;
+        // the camo tiles every ~0.6 m like the soldiers' (an arm is ~0.65 m long)
+        sm.geometry.computeBoundingBox();
+        const sz = sm.geometry.boundingBox!.getSize(new THREE.Vector3());
+        RiggedArms.camoScale.value = 1.8 / Math.max(1e-4, Math.max(sz.x, sz.y, sz.z) * 0.5);
       }
     });
     // normalise scale so the upper arm is ~upperTarget metres

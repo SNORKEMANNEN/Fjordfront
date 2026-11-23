@@ -23,23 +23,40 @@ export class WeaponPreview {
     this.renderer = new THREE.WebGLRenderer({ canvas: this.canvas, antialias: true, alpha: true, powerPreference: 'low-power' });
     this.renderer.outputColorSpace = THREE.SRGBColorSpace;
     this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
-    this.renderer.toneMappingExposure = 1.0;
+    this.renderer.toneMappingExposure = 0.92;
     this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+    // a dark studio for the reflections (Update 46): a neutral charcoal sweep with softboxes — a
+    // big warm-white one overhead, tall cyan and violet strips behind for the rims, a faint aurora
+    // bounce from the floor — so the guns read black with crisp highlights instead of silver
     const pm = new THREE.PMREMGenerator(this.renderer);
-    this.scene.environment = pm.fromScene(new RoomEnvironment(), 0.04).texture;
-    this.scene.environmentIntensity = 0.32;
+    const studio = new THREE.Scene();
+    studio.add(new THREE.Mesh(new THREE.SphereGeometry(10, 32, 16), new THREE.MeshBasicMaterial({ color: 0x1f2329, side: THREE.BackSide })));
+    const box = (w: number, h: number, p: [number, number, number], col: number, k: number) => {
+      const m = new THREE.Mesh(new THREE.PlaneGeometry(w, h), new THREE.MeshBasicMaterial({ color: new THREE.Color(col).multiplyScalar(k), side: THREE.DoubleSide }));
+      m.position.set(...p);
+      m.lookAt(0, 0, 0);
+      studio.add(m);
+    };
+    box(7, 2.6, [0, 6, 2.5], 0xfff4e8, 1.6);
+    box(2.2, 7, [-6.5, 1.5, -2.5], 0x7fe6ff, 1.2);
+    box(2.2, 7, [6.5, 1.5, -3], 0xa890ff, 1.0);
+    box(6, 1.4, [0, -5, 2.5], 0x5cf2c6, 0.5);
+    box(8, 3.2, [-1, 2.2, 7], 0xeef0f2, 0.7);
+    this.scene.environment = pm.fromScene(studio, 0.02).texture;
+    this.scene.environmentIntensity = 1.05;
     pm.dispose();
+    void RoomEnvironment;
     // Nordlys showroom (Update 45): a soft warm key, two aurora rims (ice cyan and violet) that
     // draw the gun's silhouette out of the dark bench, and a low cool fill
-    const key = new THREE.DirectionalLight(0xfff1e2, 2.1);
+    const key = new THREE.DirectionalLight(0xfff1e2, 4.2);
     key.position.set(-1.5, 2.5, 2.5);
-    const rim = new THREE.DirectionalLight(0x7fe6ff, 2.6);
+    const rim = new THREE.DirectionalLight(0x7fe6ff, 2.0);
     rim.position.set(2.2, 1.2, -2.5);
-    const rim2 = new THREE.DirectionalLight(0xa890ff, 1.4);
+    const rim2 = new THREE.DirectionalLight(0xa890ff, 1.1);
     rim2.position.set(-2.4, 0.6, -2.2);
-    const under = new THREE.DirectionalLight(0x5cf2c6, 0.5);
+    const under = new THREE.DirectionalLight(0x5cf2c6, 0.35);
     under.position.set(0, -2, 1);
-    const fill = new THREE.HemisphereLight(0xcfe2f2, 0x14202c, 0.4);
+    const fill = new THREE.HemisphereLight(0xe2e8ee, 0x262b31, 1.3);
     this.scene.add(key, rim, rim2, under, fill, this.holder);
     this.camera.position.set(0, 0.06, 2.3);
     this.camera.lookAt(0, 0, 0);
