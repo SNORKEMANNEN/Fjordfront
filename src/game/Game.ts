@@ -62,6 +62,7 @@ import { reportError, installErrorReport } from '../core/ErrorReport';
 import { WeaponPreview } from '../ui/WeaponPreview';
 import { Silhouettes } from '../ui/Silhouettes';
 import { MenuScene } from './MenuScene';
+import { Motes } from '../fx/Motes';
 import { chartThumb } from '../ui/Chart';
 import type { ScoreRow, CompassMark } from '../ui/UI';
 import { UI, TacticalId, LethalId, LETHALS } from '../ui/UI';
@@ -184,6 +185,8 @@ export class Game {
   weapons!: WeaponSystem;
   wmats!: WeaponMats;
   fx!: Effects;
+  /** atmospheric motes round the camera (Update 45) */
+  motes!: Motes;
   nav!: NavGraph;
   bots: Bot[] = [];
   combat!: Combat;
@@ -350,7 +353,10 @@ export class Game {
    * grows, FAR 90–260 m the distant recording with the highs gone, VERY FAR a dull rumble. Indoors
    * the tail is swapped for the room; suppressed guns lose the thump and most of the tail.
    */
+  /** recent gunfire around you (0..~1), for the live score's intensity */
+  private combatHeat = 0;
   private gunshot(d: WeaponDef, pos: THREE.Vector3 | null, dist: number, occluded: boolean) {
+    this.combatHeat = Math.min(0.85, this.combatHeat + (pos ? (dist < 80 ? 0.028 * (1 - dist / 80) : 0) : 0.03));
     const sup = !!d.sound.suppressed;
     const out = 1 - this.indoor;
     const heavy = d.cls === 'Sniper' || d.cls === 'Shotgun' || d.cls === 'Marksman' ? 1.25 : d.cls === 'LMG' ? 1.15 : d.cls === 'Pistol' || d.cls === 'SMG' ? 0.85 : 1;
@@ -677,6 +683,7 @@ export class Game {
 
     // ---- weapons & fx ----
     this.fx = new Effects(this.scene, this.mats.baker);
+    this.motes = new Motes(this.scene);
     this.smoke = new SmokeVolume(this.scene, this.physics, this.mats.baker);
     this.blastFx = new BlastFx(this.scene, this.physics, this.fx, this.mats.baker);
     this.footprints = new Footprints(this.scene, this.mats.baker);
@@ -1504,6 +1511,7 @@ export class Game {
   startMatch(skipVote = false) {
     this.endVote(false);
     this.menuScene?.show(false);
+    this.fx.menuRim(null);
     this.ui.soldierTag(null, this.avatar.team);
     this.world?.shootable?.repairAll();
     this.tknives?.clear();
@@ -1539,6 +1547,10 @@ export class Game {
     for (const w of this.world.buildings.windows) w.broken = false;
     this.nvg.reset();
     this.audio.music.bedTo(null, 3.5);
+    // deploy: the cinematic hit, then the live score fades in under the opening
+    this.audio.play('uiDeploy', { bus: 'ui', gain: 0.55, reverb: 0, prio: 2 });
+    this.combatHeat = 0.12;
+    if (MAP_ID !== 'solvik') this.audio.music.score.play(true, 9);
     this.pickups.clear();
     this.firstBlood = true;
     this.lastKiller = null;
@@ -1741,11 +1753,19 @@ export class Game {
       if (this.menuScene) {
         this.menuScene.show(true);
         const tag = this.menuScene.update(dt, this.camera, window.innerWidth, window.innerHeight);
+        this.fx.menuRim(this.menuScene.rimPos, 10 + 26 * this.env.night + 8 * (1 - this.env.day));
         this.ui.soldierTag(this.ui.menuVisible ? tag : null, this.avatar.team);
       } else this.menuCamera(dt);
       this.env.update(dt, this.camera);
       this.world.update(this.time, this.camera.position, this.env);
       this.weather.update(dt, this.camera.position, this.env.weather);
+      this.motes.update(dt, this.camera.position, this.env.lightDir, this.env.day, this.env.night, this.env.golden, this.env.weather, window.innerHeight, this.camera.fov);
+      // the shore under the menu theme: a cold breeze and the fjord lapping (Update 45)
+      if (this.state === 'menu') {
+        const mp = this.camera.position;
+        this.audio.loop('wind', 0.14);
+        this.audio.loop('waves', 0.3 * Math.max(0, 1 - Math.max(0, shoreDist(mp.x, mp.z)) / 60), new THREE.Vector3(mp.x - 14, 0, mp.z));
+      }
       this.vm.root.visible = false;
       return;
     }
@@ -1927,7 +1947,10 @@ export class Game {
       // tension underscore while either side is within reach of the win
       const tense = HQ.tense(sc[0], sc[1], this.match.scoreLimit, this.match.timeLeft);
       if (tense && this.audio.music.current !== 'tension') this.audio.music.bedTo('tension', 5);
-      else if (!tense && this.audio.music.current === 'tension') this.audio.music.bedTo(null, 5);
+      else if (!tense && this.audio.music.current === 'tension') {
+        this.audio.music.bedTo(null, 5);
+        this.audio.music.score.play(true, 5);
+      }
     }
     this.recordFrame();
     if (!this.sab) this.updateDominationHUD(dt);
@@ -1975,6 +1998,7 @@ export class Game {
     this.aiDebug.update(this.bots, this.camera, this.avatar.alive ? this.avatar : null);
     this.world.update(this.time, this.camera.position, this.env);
     this.weather.update(dt, this.camera.position, this.env.weather, window.innerHeight);
+    this.motes.update(dt, this.camera.position, this.env.lightDir, this.env.day, this.env.night, this.env.golden, this.env.weather, window.innerHeight, this.camera.fov);
     this.ballistics.wind.copy(this.weather.wind);
     this.updateWeatherEvent(dt);
     this.updateEchoProbe(dt);
@@ -1997,6 +2021,9 @@ export class Game {
     this.damageFx = damp(this.damageFx, a.alive ? clamp((100 - a.health) / 100, 0, 1) * 0.9 : 0.6, 6, dt);
     this.flashFx = Math.max(0, this.flashFx - dt * 4);
     this.suppression = Math.max(0, this.suppression - dt * 0.8);
+    // the live score follows the fighting: gunfire near you, being shot at, being hurt
+    this.combatHeat *= Math.exp(-dt * 0.3);
+    this.audio.music.score.setIntensity(a.alive ? 0.06 + this.combatHeat + this.suppression * 0.45 + this.damageFx * 0.35 : 0.1);
 
     // ---------------- HUD ----------------
     const s = w.cur;
@@ -2629,6 +2656,13 @@ export class Game {
     const u = this.pipeline.grade.mat.uniforms;
     u.uTint.value.copy(this.env.gradeTint);
     u.uSatBoost.value = this.env.gradeSat;
+    // Nordlys split tone: warmer highlights in the golden hour, colder shadows at night and in snow
+    const nightK = this.env.night * (1 - this.env.blueHour);
+    u.uSplit.value = (0.75 + 0.55 * this.env.golden + 0.25 * nightK) * (1 - 0.6 * this.env.blueHour) * (1 - this.nvg.vis);
+    u.uSplitHigh.value.setRGB(1.04 + 0.05 * this.env.golden, 1.0, 0.94 - 0.06 * this.env.golden);
+    u.uSplitShadow.value.setRGB(0.93 - 0.02 * nightK, 0.995, 1.07 + 0.04 * nightK);
+    u.uVibrance.value = 0.28 * (1 - this.env.blueHour);
+    u.uStreak.value = 0.14 + 0.3 * this.env.night;
     u.uNVG.value = this.nvg.vis;
     u.uNVGPower.value = this.nvg.power;
     u.uNVGGain.value = this.nvg.gain;

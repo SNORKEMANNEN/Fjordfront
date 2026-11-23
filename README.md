@@ -94,10 +94,10 @@ URL options: `?quality=low|medium|high|ultra`, `?weather=clear|overcast|rain|sno
 - Every texture is a PBR surface baked on the GPU at load time (grass, granite, forest floor, gravel, asphalt, painted wood, planks, concrete, corrugated steel, roof tiles, bark, camo fabric, gloves, weapon polymer and metal).
 - A sky with layered clouds and sun; image-based lighting from the sky; exponential height fog with sun in-scattering.
 - Texel-snapped sun shadows and N8AO ambient occlusion.
-- Post-processing: optional camera motion blur, aim depth of field, bloom, AgX-style filmic tonemapping with a cool/neutral grade, vignette, chromatic aberration, film grain, and damage/suppression effects. SMAA anti-aliasing.
+- Post-processing: optional camera motion blur, aim depth of field, three-level bloom with an anamorphic streak, contrast-adaptive sharpening, AgX filmic tonemapping with the Nordlys grade (vibrance, split tone, S-curve), edge-only chromatic aberration, a lens vignette, fine film grain, and damage/suppression effects. SMAA anti-aliasing.
 - Weather presets: broken clouds, overcast, and rain with rain streaks and fog sheets.
 
-**Audio** (`src/audio/`): every sound is a real recording (firearm, equipment, ambience, voice and the real-recording bank under `public/assets/sounds/`). The synthesizers in `AudioEngine.ts` remain only as a fallback if a file fails to load.
+**Audio** (`src/audio/`): every in-world sound is a real recording (firearm, equipment, ambience, voice and the real-recording bank under `public/assets/sounds/`); the interface sounds are designed in `AudioEngine.ts`. A live adaptive score (`Score.ts`) plays under matches (Update 45).
 - Gunshots per weapon (blast, low thump, supersonic crack, action noise and mountain echoes), plus distant variants that arrive with a speed-of-sound delay.
 - Reload foley, surface-dependent footsteps, impacts, whizzes and suppression.
 - Ambience: wind, waves, rain, seagulls and songbirds.
@@ -289,6 +289,108 @@ URL options: `?quality=low|medium|high|ultra`, `?weather=clear|overcast|rain|sno
 - **MP7:** sprint and jump clutter reduced.
 - **Rifle:** support hand moved so it no longer shows through the optic window.
 - **Pistol:** hold reworked.
+
+## Update 45: Nordlys — a new look and sound for the whole game
+
+Every screen, the HUD, the picture and the sound are redone around one identity, *Nordlys* (the northern lights): deep polar-night glass, hairline frost strokes, and the aurora — mint, ice cyan, violet — as the one accent that means "you", "go" and "ready". Gameplay is unchanged.
+
+### A new visual identity
+- **Colours with fixed meanings everywhere:** the aurora for you and your actions, friend blue and foe red for the sides, signal amber for objectives, gold rewards and warnings.
+- **New type**, self-hosted (SIL OFL):
+
+  | Font | Used for |
+  | --- | --- |
+  | Saira (variable, 50–125 % width) | Expanded for titles, condensed for labels and every HUD number |
+  | Inter (variable) | Body text |
+  | JetBrains Mono | Keys, bearings, timers, stats |
+
+- **Glass surfaces:** cards and panels are frosted glass with a gradient hairline border and a soft shadow; every card in the game picks it up.
+- **Controls rebuilt:** aurora-filled sliders, pill toggles with a spring knob, custom selects and inputs, segmented tabs, key caps, focus rings, custom scrollbars.
+- **Motion:** staggered entrances, shine sweeps on primary buttons and cards, a sliding tab indicator, spring hovers, blurred fade-ins, and reduced-motion support.
+- **A new brand mark** (a hexagon round two aurora-lit peaks over the fjord line) and favicon.
+
+### Loading screen
+- A polar night over the fjord: drifting aurora curtains, stars, layered mountain ridges with lit cabin windows and a sea haze.
+- The wordmark tracks in, and a thin aurora progress line with a glowing head fills as the game loads.
+- Every moving part is a composited transform or opacity animation, so it keeps moving while the main thread compiles shaders.
+
+### Main menu
+- **A top navigation bar** with a sliding aurora indicator replaces the side rail. A large wordmark with a slow light sweep sits over the live scene.
+- **Mode cards:** an icon tile, a title, a short description and a tag. On hover they slide, an aurora edge lights, a sheen passes over them and a chevron appears. The recommended mode is lit.
+- **The scene:** cinematic shading over the 3D view, a breath of aurora light, and fine grain. The camera eases in when the menu opens. A cold aurora rim light outlines the soldier: it reuses the idle muzzle-flash light, so the light count, and with it every shader, stays the same between menu and match.
+- **News and the operation brief** are glass cards. The brief's map is the new night chart.
+
+### Every screen
+- **Settings:** a wide glass panel with segmented tabs, a scrolling body and a fixed footer.
+- **Pause:** a vertical action list with chevrons. Quit is set apart in red.
+- **Loadout:** a dark armoury. The gun turns on a lit studio plinth under a warm key light and two aurora rim lights (cyan and violet). Stat bars grow in, and the equipped and focused cards glow.
+- **Scoreboard and end screen:** team cards washed in their side's colour, zebra rows, and your row in the aurora. VICTORY (SEIER) resolves out of a blur in the aurora gradient.
+- **Death screen and killcam:** a killer card bleeding foe red from the edge, loadout chips with numbered keys, and killcam letterbox bars that slide in with a live dot.
+- **Also restyled:** the multiplayer panel, the room browser, chat, the voice indicator, the map vote and the Sabotasje buy menu, round cards and wire panel.
+
+### HUD
+- **Score capsule:** angled team wings fading out of their colours, a dark clock with an aurora underline that pulses red in the last minute, and glowing progress bars.
+- **Compass:** a thinner ribbon with the aurora needle and a white bearing chip.
+- **Ammo:** a big condensed count, a fire-mode chip and rounded round pips.
+- **Health:** a four-segment bar that pulses when low.
+- **Rings and streaks:** equipment rings with rounded caps, and killstreak pips that fill in the aurora.
+- **Markers:** objective markers are diamonds with a soft glow. The capture bar is a glass plate. Announcements arrive with an aurora rule and a tracking-in title.
+- **Kill feed, hitmarkers and popups:** feed rows wipe in, and your own rows are marked in the aurora. Hitmarkers and kill popups keep the Update 38 animation in the new colours.
+- **A soft corner shade** keeps numbers readable on snow and sunlit water. The HUD uses no backdrop blur, so it adds nothing to the frame cost.
+
+### The chart, at night
+The shared chart raster (minimap, tactical map, operation brief and room thumbnails) is redrawn as a night tactical chart:
+- **Land:** dark slate with frost contour lines and stronger relief shading.
+- **Sea:** deep-navy depth bands with cyan isobaths, and a glowing coastline.
+- **Features:** pale roads on dark casing, and slate buildings.
+- **Markings:** you as the aurora arrowhead, and glass plates for the chart's title, score and key.
+
+### A new grade
+- **Sharpening:** contrast-adaptive, on luminance, before the tone curve. It is stronger when dynamic resolution renders below the screen size.
+- **Tone:** AgX with a gentle filmic S-curve in perceptual space.
+- **Colour:**
+  - vibrance in place of flat saturation;
+  - a split tone, teal shadows and amber highlights, that warms in the golden hour, cools at night and stays out of the blue hour's way;
+  - lifted, slightly blue blacks.
+- **Lens:**
+  - chromatic aberration only toward the frame edges (more when hurt or pinned);
+  - a natural cos⁴-style vignette;
+  - finer luminance-only film grain;
+  - a pulsing red bleed when hurt.
+- **Bloom:** a third, wider bloom level, and a faint anamorphic streak off the brightest lights, stronger at night.
+
+### Sky and air
+- **Sun:** a limb-darkened disc with a tight corona.
+- **Clouds:** silver linings on thin cloud edges against the sun.
+- **Twilight:** the Earth's shadow and the pink "belt of Venus" opposite a low sun.
+- **Night:** coloured stars and a faint Milky Way.
+- **Aurora:** curtains that shade from green to cyan to violet and slowly surge.
+- **Atmospheric motes:** dust, pollen and salt specks drifting around you. They glint warm when you look toward a low sun, show a few cold specks by moonlight, and fade out in rain and snow. They are one GPU-only draw: everything is computed in the vertex shader.
+
+### Sound
+- **The live score (`src/audio/Score.ts`):** an adaptive underscore played by the audio engine in the key and tempo of the menu theme (D minor, 88 BPM).
+  - Layers come in with the fighting: a breathing pad and high "aurora" glints when calm, then a sub-bass pulse, glassy FM arpeggios through a ping-pong delay, frame drums and ticking hats, and a backbeat in heavy firefights.
+  - The harmony turns darker (Dm Bb Gm A) when it is intense.
+  - Intensity comes from gunfire near you, suppression and damage.
+  - It fades in on deploy, hands over to the composed tension bed in the final stretch, and stops for the victory and defeat stings.
+- **Interface sounds,** designed anew: glass ticks, crystalline confirms over a soft sub knock, a falling back, an ice-bell "ready" arpeggio, and a whoosh when panels open.
+- **New stingers** (ElevenLabs sound generation, `tools/audio45_build.py`):
+  - a cinematic deploy hit when a match starts;
+  - a new "match found" swell;
+  - a round-start hit in Sabotasje;
+  - the panel whoosh.
+- **The menu** has a cold breeze and the fjord lapping under the theme.
+
+### Tested
+- Typecheck and production build.
+- Screenshot passes at 1280×720 and 1920×1080 for:
+  - the loading screen, the menu and the manual;
+  - settings, loadout and the weapon picker;
+  - the HUD, scoreboard, pause, killcam, death and end screens;
+  - the multiplayer panel and the Sabotasje HUD;
+  - in-game golden-hour, blue-hour and night scenes.
+- Headless audio run: every interface sound and stinger loads, and the score plays, rises with intensity and stops cleanly. Its level sits about 3 dB under the menu theme.
+- `tools/match12.cjs`: a 300 s 12 v 12 match, with no errors.
 
 ## Update 44: The charge spawns in the attackers' spawn
 

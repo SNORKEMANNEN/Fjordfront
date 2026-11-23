@@ -234,6 +234,25 @@ export class Effects {
     scene.add(this.worldFlashLight);
   }
 
+  /**
+   * Main menu (Update 45): the idle muzzle-flash light doubles as a cold aurora rim light behind
+   * the menu soldier (same light count as the match, so no shader recompiles on deploy). null
+   * hands it back to the muzzle flashes, warm and dark.
+   */
+  menuRim(p: THREE.Vector3 | null, intensity = 0) {
+    const l = this.worldFlashLight;
+    if (!p) {
+      l.color.setHex(0xffa850);
+      l.intensity = 0;
+      l.distance = 9;
+      return;
+    }
+    l.color.setRGB(0.5, 0.92, 1.0);
+    l.position.copy(p);
+    l.intensity = intensity;
+    l.distance = 7;
+  }
+
   muzzleWorld(p: THREE.Vector3, dir: THREE.Vector3, suppressed: boolean, scale = 1, indoor = 0) {
     if (!suppressed) {
       this.worldFlashLight.position.copy(p).addScaledVector(dir, 0.3);

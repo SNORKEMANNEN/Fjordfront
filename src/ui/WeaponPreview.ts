@@ -23,18 +23,24 @@ export class WeaponPreview {
     this.renderer = new THREE.WebGLRenderer({ canvas: this.canvas, antialias: true, alpha: true, powerPreference: 'low-power' });
     this.renderer.outputColorSpace = THREE.SRGBColorSpace;
     this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
-    this.renderer.toneMappingExposure = 0.9;
+    this.renderer.toneMappingExposure = 1.0;
     this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
     const pm = new THREE.PMREMGenerator(this.renderer);
     this.scene.environment = pm.fromScene(new RoomEnvironment(), 0.04).texture;
     this.scene.environmentIntensity = 0.32;
     pm.dispose();
-    const key = new THREE.DirectionalLight(0xfff2e0, 1.7);
+    // Nordlys showroom (Update 45): a soft warm key, two aurora rims (ice cyan and violet) that
+    // draw the gun's silhouette out of the dark bench, and a low cool fill
+    const key = new THREE.DirectionalLight(0xfff1e2, 2.1);
     key.position.set(-1.5, 2.5, 2.5);
-    const rim = new THREE.DirectionalLight(0xbcd2ff, 1.2);
-    rim.position.set(2, 1, -2.5);
-    const fill = new THREE.HemisphereLight(0xdfe6ee, 0x2a2620, 0.35);
-    this.scene.add(key, rim, fill, this.holder);
+    const rim = new THREE.DirectionalLight(0x7fe6ff, 2.6);
+    rim.position.set(2.2, 1.2, -2.5);
+    const rim2 = new THREE.DirectionalLight(0xa890ff, 1.4);
+    rim2.position.set(-2.4, 0.6, -2.2);
+    const under = new THREE.DirectionalLight(0x5cf2c6, 0.5);
+    under.position.set(0, -2, 1);
+    const fill = new THREE.HemisphereLight(0xcfe2f2, 0x14202c, 0.4);
+    this.scene.add(key, rim, rim2, under, fill, this.holder);
     this.camera.position.set(0, 0.06, 2.3);
     this.camera.lookAt(0, 0, 0);
   }

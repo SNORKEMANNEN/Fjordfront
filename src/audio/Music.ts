@@ -1,8 +1,10 @@
 import { Settings } from '../game/Settings';
+import { Score } from './Score';
 
 /**
  * Music: one looping bed at a time (menu theme / tension underscore) with equal-power crossfades,
- * plus one-shot stings (victory / defeat) that duck whatever is playing.
+ * plus one-shot stings (victory / defeat) that duck whatever is playing, and (Update 45) the
+ * live adaptive score (Score.ts) that plays under a match and follows the fighting.
  *
  * Tracks are original pieces generated for the game (Stable Audio 2.5 for the theme, the tension
  * bed and the victory sting; ElevenLabs sound generation for the defeat sting), mastered and made
@@ -22,11 +24,14 @@ export class Music {
   private bed: Voice | null = null;
   private want: TrackId | null = null;
   private duckG: GainNode;
+  /** the live adaptive underscore during matches (Update 45) */
+  score: Score;
 
   constructor(private ctx: AudioContext) {
     this.out = ctx.createGain();
     this.duckG = ctx.createGain();
     this.duckG.connect(this.out);
+    this.score = new Score(ctx, this.duckG);
     this.out.connect(ctx.destination);
     this.applyVolume();
     Settings.onChange(() => this.applyVolume());
@@ -59,6 +64,8 @@ export class Music {
   async bedTo(id: TrackId | null, fade = 2.5) {
     if (this.want === id) return;
     this.want = id;
+    // a composed bed takes over from the live score
+    if (id) this.score.play(false, Math.min(4, fade));
     const now = this.ctx.currentTime;
     const old = this.bed;
     this.bed = null;
@@ -86,6 +93,7 @@ export class Music {
   /** One-shot sting; the bed is faded out underneath it. */
   async sting(id: 'victory' | 'defeat') {
     this.bedTo(null, 0.6);
+    this.score.play(false, 0.8);
     const buf = await this.load(id);
     if (!buf) return;
     const t = this.ctx.currentTime + 0.05;

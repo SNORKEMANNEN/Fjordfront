@@ -183,7 +183,7 @@ export class TacticalMap {
     return { sx: (x) => this.sx(x), sy: (z) => this.sy(z), ppm: this.ppm };
   }
 
-  // ------------------------------------------------------------------ drawing (Sjøkart)
+  // ------------------------------------------------------------------ drawing (night chart)
   draw(s: MapState, dt: number) {
     this.last = s;
     if (!this.open) return;
@@ -207,9 +207,9 @@ export class TacticalMap {
     c.rect(0, 0, W, H);
     c.rect(x1, y0, x0 - x1, y1 - y0);
     c.clip('evenodd');
-    c.fillStyle = 'rgba(20,33,61,0.16)';
+    c.fillStyle = 'rgba(2,5,9,0.45)';
     c.fillRect(0, 0, W, H);
-    c.strokeStyle = 'rgba(20,33,61,0.18)';
+    c.strokeStyle = 'rgba(160,205,240,0.07)';
     c.lineWidth = 1;
     c.beginPath();
     for (let k = -H; k < W; k += 9) {
@@ -242,7 +242,7 @@ export class TacticalMap {
   /** lettered graticule; the chart's neat-line border with alternating ticks */
   private drawGrid(x0: number, y0: number, x1: number, y1: number) {
     const c = this.c;
-    c.strokeStyle = 'rgba(20,33,61,0.16)';
+    c.strokeStyle = 'rgba(160,205,240,0.09)';
     c.lineWidth = 1;
     c.beginPath();
     for (let i = 1; i < 8; i++) {
@@ -262,11 +262,11 @@ export class TacticalMap {
     }
   }
 
-  /** text with a paper halo so it reads over contours */
+  /** text with a dark halo so it reads over contours */
   private halo(text: string, x: number, y: number, color: string, w = 3) {
     const c = this.c;
     c.lineWidth = w;
-    c.strokeStyle = 'rgba(237,230,214,0.9)';
+    c.strokeStyle = INK.halo;
     c.strokeText(text, x, y);
     c.fillStyle = color;
     c.fillText(text, x, y);
@@ -278,7 +278,7 @@ export class TacticalMap {
     if (MAP_ID === 'brosund') {
       // Sundtunnelen: the curved bore under the sound, dashed
       const P = tunnelPath();
-      for (const [lw, col, dash] of [[TUN.hw * 2, 'rgba(237,230,214,0.75)', [] as number[]], [1.4, INK.ink, [5, 4]]] as const) {
+      for (const [lw, col, dash] of [[TUN.hw * 2, 'rgba(4,8,14,0.7)', [] as number[]], [1.4, INK.ink, [5, 4]]] as const) {
         c.strokeStyle = col;
         c.lineWidth = typeof lw === 'number' && lw > 2 ? Math.max(2, (this.sx(TUN.hw * 2) - this.sx(0))) : 1.4;
         c.setLineDash(dash as number[]);
@@ -291,7 +291,7 @@ export class TacticalMap {
     }
     const W = TUNNEL.width / 2;
     const tx0 = this.sx(TUNNEL.x - W), tx1 = this.sx(TUNNEL.x + W), tz0 = this.sy(TUNNEL.z0), tz1 = this.sy(TUNNEL.z1);
-    c.fillStyle = 'rgba(237,230,214,0.75)';
+    c.fillStyle = 'rgba(4,8,14,0.7)';
     c.fillRect(tx0, tz0, tx1 - tx0, tz1 - tz0);
     c.strokeStyle = INK.ink;
     c.lineWidth = 1.4;
@@ -414,7 +414,7 @@ export class TacticalMap {
     });
     if (s.waypoint) {
       const x = this.sx(s.waypoint.x), y = this.sy(s.waypoint.z);
-      c.strokeStyle = 'rgba(20,33,61,0.55)';
+      c.strokeStyle = 'rgba(160,205,240,0.45)';
       c.lineWidth = 1.5;
       c.setLineDash([7, 5]);
       c.beginPath(); c.moveTo(this.sx(s.px), this.sy(s.pz)); c.lineTo(x, y); c.stroke();
@@ -458,7 +458,7 @@ export class TacticalMap {
     c.textBaseline = 'middle';
     for (const a of s.allies) {
       const x = this.sx(a.x), y = this.sy(a.z);
-      inkArrow(c, x, y, a.yaw, 7, INK.friend);
+      inkArrow(c, x, y, a.yaw, 7, INK.friend, INK.casing);
       if (this.zoom > 2.2) this.halo(a.name.toUpperCase(), x + 9, y, INK.sea);
     }
   }
@@ -495,7 +495,7 @@ export class TacticalMap {
     c.fill();
     c.stroke();
     c.restore();
-    inkArrow(c, x, y, s.yaw, 11, s.alive ? INK.red : '#8A8A80');
+    inkArrow(c, x, y, s.yaw, 11, s.alive ? INK.you : '#6B7C8F', INK.casing);
   }
 
   /** chart furniture: title cartouche, score, legend, compass rose, scale bar */
@@ -503,13 +503,7 @@ export class TacticalMap {
     const c = this.c, W = this.W, H = this.H;
     // title cartouche (top left)
     const cw = 330;
-    c.fillStyle = 'rgba(246,241,230,0.94)';
-    c.fillRect(18, 16, cw, 62);
-    c.strokeStyle = INK.ink;
-    c.lineWidth = 1.5;
-    c.strokeRect(18, 16, cw, 62);
-    c.lineWidth = 0.6;
-    c.strokeRect(21, 19, cw - 6, 56);
+    this.plate(18, 16, cw, 62);
     c.textBaseline = 'alphabetic';
     c.textAlign = 'left';
     c.fillStyle = INK.ink;
@@ -519,22 +513,18 @@ export class TacticalMap {
     c.font = `600 10px ${FONT.cond}`;
     (c as any).letterSpacing = '2.5px';
     c.fillStyle = INK.ink2;
-    c.fillText('SJØKART · TACTICAL CHART', 32, 66);
+    c.fillText('NATTKART · TACTICAL CHART', 32, 66);
     c.textAlign = 'right';
     c.font = `500 12px ${FONT.mono}`;
     (c as any).letterSpacing = '0px';
-    c.fillStyle = INK.red;
+    c.fillStyle = INK.you;
     c.fillText(`${gridRef(s.px, s.pz)} · ${landmarkAt(s.px, s.pz).toUpperCase()}`, 18 + cw - 14, 50);
     c.fillStyle = INK.ink2;
     c.fillText(s.uav > 0 ? `UAV ${Math.ceil(s.uav)} s` : `GUNFIRE ≤ ${FIRE_REVEAL_RADIUS} m`, 18 + cw - 14, 66);
     // score (top centre)
     const mine = s.team, foe = 1 - s.team;
     const sw = 300, sx = W / 2 - sw / 2;
-    c.fillStyle = 'rgba(246,241,230,0.94)';
-    c.fillRect(sx, 16, sw, 40);
-    c.strokeStyle = INK.ink;
-    c.lineWidth = 1.5;
-    c.strokeRect(sx, 16, sw, 40);
+    this.plate(sx, 16, sw, 40);
     c.textAlign = 'center';
     c.textBaseline = 'middle';
     c.font = `800 20px ${FONT.display}`;
@@ -554,14 +544,10 @@ export class TacticalMap {
     compassRose(c, W - 74, 82, 50, 0.95);
     // legend + controls (bottom right, a paper key)
     const kx = W - 214, ky = H - 196;
-    c.fillStyle = 'rgba(246,241,230,0.94)';
-    c.fillRect(kx - 14, ky - 22, 210, 190);
-    c.strokeStyle = INK.ink;
-    c.lineWidth = 1.5;
-    c.strokeRect(kx - 14, ky - 22, 210, 190);
+    this.plate(kx - 14, ky - 22, 210, 190);
     c.font = `600 10px ${FONT.cond}`;
     (c as any).letterSpacing = '2.5px';
-    c.fillStyle = INK.red;
+    c.fillStyle = INK.you;
     c.textAlign = 'left';
     c.fillText('TEGNFORKLARING · KEY', kx - 2, ky - 8);
     (c as any).letterSpacing = '0px';
@@ -574,13 +560,13 @@ export class TacticalMap {
       c.textBaseline = 'middle';
       c.fillText(label, kx + 24, y + 1);
     };
-    row(0, (x, y) => inkArrow(c, x, y, 0, 7, INK.red), 'You');
-    row(1, (x, y) => inkArrow(c, x, y, 0, 7, INK.friend), 'Squad');
+    row(0, (x, y) => inkArrow(c, x, y, 0, 7, INK.you, INK.casing), 'You');
+    row(1, (x, y) => inkArrow(c, x, y, 0, 7, INK.friend, INK.casing), 'Squad');
     row(2, (x, y) => { c.fillStyle = INK.foe; c.beginPath(); c.arc(x, y, 4, 0, Math.PI * 2); c.fill(); }, 'Enemy gunfire / UAV');
     row(3, (x, y) => { c.strokeStyle = INK.foe; inkLine(c, [[x - 5, y - 5], [x + 5, y + 5]], 1, 2.2); inkLine(c, [[x + 5, y - 5], [x - 5, y + 5]], 2, 2.2); }, 'Spotted enemy');
     row(4, (x, y) => inkDiamond(c, x, y, 6, 3, INK.gold), 'Ping');
-    row(5, (x, y) => { c.fillStyle = '#3E8E5A'; c.fillRect(x - 5, y - 5, 10, 10); }, 'Tunnel exit / hatch');
-    row(6, (x, y) => { c.strokeStyle = '#E2563C'; c.lineWidth = 3; c.beginPath(); c.moveTo(x - 7, y); c.lineTo(x + 7, y); c.stroke(); }, 'Road');
+    row(5, (x, y) => { c.fillStyle = '#46E08C'; c.fillRect(x - 5, y - 5, 10, 10); }, 'Tunnel exit / hatch');
+    row(6, (x, y) => { c.strokeStyle = '#C9D5E0'; c.lineWidth = 3; c.beginPath(); c.moveTo(x - 7, y); c.lineTo(x + 7, y); c.stroke(); }, 'Road');
     row(7, (x, y) => { c.fillStyle = INK.sea; c.font = `italic 500 12px ${FONT.serif}`; c.textAlign = 'center'; c.fillText('12', x, y + 1); }, 'Depth (m)');
     // scale bar
     scaleBar(c, W - 214, H - 236, this.ppm, 160);
@@ -589,24 +575,43 @@ export class TacticalMap {
     c.font = `500 11px ${FONT.mono}`;
     let lx = 30;
     const ly = H - 26;
-    c.fillStyle = 'rgba(246,241,230,0.94)';
-    c.fillRect(16, ly - 16, 560, 32);
-    c.strokeStyle = INK.ink;
-    c.lineWidth = 1.2;
-    c.strokeRect(16, ly - 16, 560, 32);
+    this.plate(16, ly - 16, 560, 32);
     c.textAlign = 'left';
     c.textBaseline = 'middle';
     for (const [k, v] of items) {
       const kw = c.measureText(k).width + 12;
-      c.strokeStyle = INK.ink;
+      c.strokeStyle = 'rgba(160,205,240,0.35)';
       c.lineWidth = 1;
-      c.strokeRect(lx, ly - 9, kw, 18);
+      c.beginPath();
+      c.roundRect(lx, ly - 9, kw, 18, 4);
+      c.stroke();
       c.fillStyle = INK.ink;
       c.fillText(k, lx + 6, ly + 1);
       c.fillStyle = INK.ink2;
       c.fillText(v, lx + kw + 6, ly + 1);
       lx += kw + c.measureText(v).width + 20;
     }
+  }
+
+  /** a glass plate for the chart furniture (rounded, hairline frost border, aurora top edge) */
+  private plate(x: number, y: number, w: number, h: number) {
+    const c = this.c;
+    c.save();
+    c.fillStyle = 'rgba(8,14,22,0.88)';
+    c.strokeStyle = 'rgba(160,205,240,0.22)';
+    c.lineWidth = 1;
+    c.beginPath();
+    c.roundRect(x, y, w, h, 10);
+    c.fill();
+    c.stroke();
+    const g = c.createLinearGradient(x, 0, x + w, 0);
+    g.addColorStop(0, 'rgba(92,242,198,0)');
+    g.addColorStop(0.3, 'rgba(92,242,198,0.8)');
+    g.addColorStop(0.7, 'rgba(56,204,255,0.8)');
+    g.addColorStop(1, 'rgba(156,124,255,0)');
+    c.fillStyle = g;
+    c.fillRect(x + 12, y, w - 24, 1.5);
+    c.restore();
   }
 
   private drawCursor(s: MapState) {

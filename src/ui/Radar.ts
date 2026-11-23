@@ -5,9 +5,9 @@ import { chartRaster, B, INK, FONT, View, drawRoads, drawBuildings, inkObjective
 export interface RadarBlip { x: number; z: number; kind: 'ally' | 'enemy' | 'spotted' | 'ping' | 'flag' | 'heli' | 'heliFoe' | 'charge'; alpha: number; label?: string; color?: string }
 
 /**
- * Rotating minimap, drawn as a cut-out of the paper chart: the same raster as the tactical map,
- * a bearing ring around the edge (it turns with you, north marked in red), allies as blue ink
- * arrows, enemies in red ink when they fire unsuppressed or are spotted, flags as inked rings.
+ * Rotating minimap, a cut-out of the night chart: the same raster as the tactical map, a bearing
+ * ring around the edge (it turns with you, north marked in red), allies as blue dots, enemies in
+ * red when they fire unsuppressed or are spotted, flags as rings, you as the aurora arrowhead.
  */
 export class Radar {
   el: HTMLCanvasElement;
@@ -31,7 +31,7 @@ export class Radar {
     const v: View = { ppm, sx: (wx) => (wx + B) * ppm, sy: (wz) => (wz + B) * ppm };
     drawRoads(x, v, 0.6);
     drawBuildings(x, v);
-    x.strokeStyle = INK.red;
+    x.strokeStyle = 'rgba(255,77,94,0.75)';
     x.lineWidth = 2;
     x.setLineDash([8, 6]);
     x.strokeRect(v.sx(-PLAY_HALF), v.sy(-PLAY_HALF), 2 * PLAY_HALF * ppm, 2 * PLAY_HALF * ppm);
@@ -43,7 +43,7 @@ export class Radar {
     const scale = Ri / this.range; // px per metre
     const mapScale = (2 * B) / this.map.width; // metres per map px
     c.clearRect(0, 0, W, W);
-    // paper disc
+    // the disc
     c.save();
     c.beginPath();
     c.arc(R, R, Ri, 0, Math.PI * 2);
@@ -55,7 +55,7 @@ export class Radar {
     const mpx = ((px + B) / (2 * B)) * this.map.width, mpz = ((pz + B) / (2 * B)) * this.map.width;
     c.drawImage(this.map, -mpx * mapScale * scale, -mpz * mapScale * scale, this.map.width * mapScale * scale, this.map.height * mapScale * scale);
     // range rings
-    c.strokeStyle = 'rgba(20,33,61,0.16)';
+    c.strokeStyle = 'rgba(160,205,240,0.12)';
     c.lineWidth = 1;
     for (const k of [0.33, 0.66]) {
       c.beginPath();
@@ -107,7 +107,7 @@ export class Radar {
       }
       if (b.kind === 'ally') {
         c.fillStyle = INK.friend;
-        c.strokeStyle = INK.ink;
+        c.strokeStyle = INK.casing;
         c.lineWidth = 1.5;
         c.beginPath();
         c.arc(x, z, 7, 0, Math.PI * 2);
@@ -133,22 +133,22 @@ export class Radar {
     c.globalAlpha = 1;
     c.restore();
     // view wedge + you (fixed, pointing up)
-    c.fillStyle = 'rgba(215,38,46,0.12)';
+    c.fillStyle = 'rgba(92,242,198,0.13)';
     c.beginPath();
     c.moveTo(R, R);
     c.arc(R, R, Ri, -Math.PI / 2 - 0.55, -Math.PI / 2 + 0.55);
     c.fill();
-    inkArrow(c, R, R, 0, 13, INK.red);
+    inkArrow(c, R, R, 0, 13, INK.you, INK.casing);
     // bearing ring (turns with the map; N in red)
     c.save();
     c.translate(R, R);
-    c.fillStyle = 'rgba(20,33,61,0.86)';
+    c.fillStyle = 'rgba(4,8,14,0.9)';
     c.beginPath();
     c.arc(0, 0, R - 1, 0, Math.PI * 2);
     c.arc(0, 0, Ri, 0, Math.PI * 2, true);
     c.fill('evenodd');
     c.rotate(yaw);
-    c.strokeStyle = 'rgba(237,230,214,0.7)';
+    c.strokeStyle = 'rgba(200,225,245,0.5)';
     c.lineWidth = 1.2;
     for (let d = 0; d < 360; d += 10) {
       const a = (d * Math.PI) / 180;
@@ -167,7 +167,7 @@ export class Radar {
       c.save();
       c.translate(Math.sin(a) * (R - 9), -Math.cos(a) * (R - 9));
       c.rotate(-yaw);
-      c.fillStyle = d === 0 ? '#FF5A52' : INK.paper;
+      c.fillStyle = d === 0 ? '#FF4D5E' : INK.ink;
       c.fillText(lab, 0, 1);
       c.restore();
     }

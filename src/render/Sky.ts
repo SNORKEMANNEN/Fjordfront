@@ -4,6 +4,9 @@ import { GLSL_NOISE } from './glsl';
 /**
  * Nordic sky: gradient, low sun with glow, layered fbm clouds, and by night
  * stars, a moon and animated aurora borealis curtains. Output is linear HDR.
+ * Update 45: a limb-darkened sun with a tight corona, silver-lined clouds against the light, the
+ * twilight earth shadow and pink belt opposite a low sun, coloured stars, a faint Milky Way and
+ * aurora curtains that shade from green to violet and slowly surge.
  */
 export class Sky {
   mesh: THREE.Mesh;
@@ -60,20 +63,39 @@ export class Sky {
             float band = abs(p.y * 0.55 + sin(p.x * 0.9 + uTime * 0.05) * 0.8 + fold * 2.6 - 1.6);
             float curtain = smoothstep(0.32, 0.0, band) * (0.6 + 0.4 * noise2(vec2(p.x * 3.0 + uTime * 0.2, float(i))));
             float rays = 0.65 + 0.35 * sin(p.x * 18.0 + fold * 9.0 + uTime * 0.3);
-            vec3 col = mix(vec3(0.15, 1.0, 0.45), vec3(0.75, 0.25, 0.9), float(i) / 10.0);
-            acc += col * curtain * rays * (1.0 - float(i) / 11.0);
+            // green oxygen glow low in the curtain, magenta / violet fringes at the top
+            float f = float(i) / 9.0;
+            vec3 col = mix(vec3(0.12, 1.0, 0.5), vec3(0.2, 0.85, 0.95), smoothstep(0.2, 0.55, f));
+            col = mix(col, vec3(0.8, 0.25, 0.95), smoothstep(0.55, 1.0, f));
+            acc += col * curtain * rays * (1.0 - f * 0.85);
           }
-          // brighter toward the northern sky
+          // brighter toward the northern sky; the whole display slowly surges and fades
           float north = smoothstep(0.4, -0.6, d.z);
-          return acc * 0.07 * north * smoothstep(0.02, 0.25, d.y);
+          float surge = 0.75 + 0.25 * sin(uTime * 0.07) * sin(uTime * 0.031 + 1.3);
+          return acc * 0.085 * surge * north * smoothstep(0.02, 0.25, d.y);
         }
         void main(){
           vec3 d = normalize(vDir);
           float h = clamp(d.y, -1.0, 1.0);
           float sd = max(dot(d, uSunDir), 0.0);
           vec3 col = mix(uHorizon, uZenith, pow(max(h, 0.0), 0.5));
-          col += uSunColor * (pow(sd, 6.0) * 0.22 + pow(sd, 48.0) * 0.55);
-          col += uSunColor * smoothstep(0.99955, 0.99975, sd) * 40.0;
+          // Mie forward glow: a wide soft aureole and a tight bright corona round the sun
+          col += uSunColor * (pow(sd, 6.0) * 0.22 + pow(sd, 48.0) * 0.55 + pow(sd, 900.0) * 2.2);
+          // the disc, limb-darkened toward its edge
+          float disc = smoothstep(0.99955, 0.99975, sd);
+          float limb = 0.62 + 0.38 * smoothstep(0.99955, 0.99995, sd);
+          col += uSunColor * disc * limb * 40.0;
+          // twilight (Update 45): the earth's shadow and the pink "belt of Venus" opposite a low sun
+          float tw = smoothstep(0.22, 0.03, uSunDir.y) * smoothstep(-0.14, -0.01, uSunDir.y + 0.08) * (1.0 - uNight);
+          if (tw > 0.001) {
+            vec3 anti = normalize(vec3(-uSunDir.x, 0.0, -uSunDir.z) + 1e-4);
+            float facing = pow(max(dot(normalize(vec3(d.x, 0.0, d.z) + 1e-4), anti), 0.0), 1.5);
+            float belt = smoothstep(0.02, 0.1, h) * smoothstep(0.32, 0.12, h);
+            float shadow = smoothstep(0.08, 0.0, h) * smoothstep(-0.02, 0.02, h);
+            float lum = dot(uHorizon, vec3(0.3, 0.5, 0.2));
+            col = mix(col, col * vec3(0.62, 0.66, 0.86), shadow * facing * tw * 0.6);
+            col += vec3(0.85, 0.45, 0.55) * belt * facing * tw * lum * 0.55;
+          }
           // night: stars, moon, aurora
           if (uNight > 0.01) {
             vec2 sc = vec2(atan(d.z, d.x) * 120.0, asin(clamp(d.y, -1.0, 1.0)) * 120.0);
@@ -81,8 +103,15 @@ export class Sky {
             float r = hash12(cell);
             vec2 off = hash22(cell) - 0.5;
             float star = smoothstep(0.18, 0.0, length(fract(sc) - 0.5 - off * 0.6)) * step(0.985, r);
-            float tw = 0.6 + 0.4 * sin(uTime * (2.0 + r * 6.0) + r * 40.0);
-            col += vec3(0.85, 0.9, 1.0) * star * tw * 1.6 * uNight * smoothstep(0.0, 0.15, h);
+            float twk = 0.6 + 0.4 * sin(uTime * (2.0 + r * 6.0) + r * 40.0);
+            // star colours: mostly white, some blue-white, a few warm giants
+            vec3 sCol = mix(vec3(0.75, 0.85, 1.0), vec3(1.0, 0.82, 0.62), step(0.993, hash12(cell + 7.0)));
+            col += sCol * star * twk * (1.2 + 1.6 * step(0.996, r)) * uNight * smoothstep(0.0, 0.15, h);
+            // the Milky Way: a faint, mottled band across the sky
+            vec3 gal = normalize(vec3(0.35, 0.55, -0.76));
+            float band = exp(-pow(dot(d, gal) * 4.2, 2.0));
+            float dust = fbm2(vec2(atan(d.z, d.x) * 3.0, d.y * 6.0));
+            col += vec3(0.55, 0.6, 0.75) * band * smoothstep(0.35, 0.8, dust) * 0.045 * uNight * smoothstep(0.05, 0.35, h) * (1.0 - uAurora * 0.6);
             float md = max(dot(d, uMoonDir), 0.0);
             col += vec3(0.75, 0.8, 0.9) * (smoothstep(0.99965, 0.99985, md) * 5.0 + pow(md, 80.0) * 0.08) * uNight;
             col += aurora(d) * uAurora;
@@ -97,6 +126,8 @@ export class Sky {
             vec3 bright = mix(vec3(0.86, 0.87, 0.88), vec3(0.05, 0.06, 0.08), uNight) + uSunColor * 0.45 * pow(sd, 3.0);
             vec3 cc = mix(dark, bright, lit);
             cc += uSunColor * pow(sd, 12.0) * (1.0 - c) * 1.6;
+            // silver lining: thin cloud edges backlit by the sun
+            cc += uSunColor * pow(sd, 18.0) * smoothstep(0.0, 0.25, c) * smoothstep(0.7, 0.2, c) * 2.4 * (1.0 - uNight);
             // underlit cloud bases at sunset
             cc += uSunColor * 0.35 * (1.0 - lit) * smoothstep(0.25, 0.0, h) * (1.0 - uNight);
             float fade = smoothstep(0.0, 0.18, h);
