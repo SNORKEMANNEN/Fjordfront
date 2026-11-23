@@ -193,6 +193,9 @@ function localBox(o: THREE.Object3D) {
   return box;
 }
 
+/** where the weapon light's spill comes from, relative to the muzzle (viewmodel space) */
+const SPILL_OFS = new THREE.Vector3(0.02, -0.07, -0.32);
+
 export type ActionType = 'reload' | 'reloadEmpty' | 'inspect' | 'inspectMag' | 'draw' | 'holster' | 'pump' | 'bolt' | 'shellStart' | 'shell' | 'shellEnd' | 'melee' | 'throw' | 'stim' | 'uav' | 'designate' | 'nvg' | 'breakReload' | 'knifeSlash' | 'knifeStab' | 'knifeKill'
   | 'claymore' | 'c4Throw' | 'detonate' | 'stickyThrow' | 'snapshotThrow' | 'decoyThrow' | 'trophy'
   | 'karReload' | 'karCycle'
@@ -312,6 +315,9 @@ export class Viewmodel {
   lightLevel(k: number) {
     if (this.wlLensMat) this.wlLensMat.emissiveIntensity = k * 3.2;
   }
+  /** spill of your weapon light off whatever it hits close in front (0..1, set by the game):
+   *  lifts the hands and gun in the dark the way the lit wall would */
+  lightBounce = 0;
   get hasLight() {
     return !!this.model?.sockets.light;
   }
@@ -1848,11 +1854,22 @@ export class Viewmodel {
     this.muzzleFlashT = Math.max(0, this.muzzleFlashT - dt * 22);
     const muz = new THREE.Vector3();
     this.model.sockets.muzzle.getWorldPosition(muz);
-    this.flashLight.position.copy(muz);
-    this.flashLight.intensity = this.muzzleFlashT > 0 && !def.sound.suppressed ? 2.4 * this.muzzleFlashT : 0;
+    const flash = this.muzzleFlashT > 0 && !def.sound.suppressed ? 2.4 * this.muzzleFlashT : 0;
+    // (Update 46) the same light carries the weapon light's spill when the gun is not firing:
+    // cool white from the lit patch out ahead of and below the muzzle
+    const spill = this.lightBounce * 1.9;
+    if (flash >= spill) {
+      this.flashLight.position.copy(muz);
+      this.flashLight.color.setHex(0xffb060);
+      this.flashLight.intensity = flash;
+    } else {
+      this.flashLight.position.copy(muz).add(SPILL_OFS);
+      this.flashLight.color.setHex(0xe2eaff);
+      this.flashLight.intensity = spill;
+    }
     // indoor dims sunlight on the viewmodel
     this.lighting.intensity = lerp(2.6, 0.35, c.indoor) * this.daylight;
-    this.ambient.intensity = lerp(0.55, 0.3, c.indoor) * (0.35 + 0.65 * this.daylight);
+    this.ambient.intensity = lerp(0.55, 0.3, c.indoor) * (0.35 + 0.65 * this.daylight) + this.lightBounce * 0.3;
   }
 
   /**

@@ -45,6 +45,7 @@ URL options: `?quality=low|medium|high|ultra`, `?weather=clear|overcast|rain|sno
 | Skip killcam | Space or left mouse |
 | Use / spot | F. Clips onto a zipline in reach, opens or closes the door you are looking at (prompt under the crosshair), otherwise spots enemies. Space lets go of a zipline |
 | Night vision | N. The left hand flips the goggles down (or back up) |
+| Weapon light | L, on guns that carry one (see Update 46) |
 | Vault through a window | Space, facing the window close by (inside or outside): the whole window breaks |
 | Performance overlay | F3 |
 | Door peek | Aim down sights in front of a closed door: you ease it open a crack and lean round the edge |
@@ -289,6 +290,72 @@ URL options: `?quality=low|medium|high|ultra`, `?weather=clear|overcast|rain|sno
 - **MP7:** sprint and jump clutter reduced.
 - **Rifle:** support hand moved so it no longer shows through the optic window.
 - **Pistol:** hold reworked.
+
+## Update 46: soldiers, gun finishes and gun handling rebuilt
+
+The soldiers and the guns are rebuilt up close: sculpted faces and new kit, gun finishes that read as real coatings, and guns that react to the world around them: walls, cover, heat and the dark.
+
+### Soldiers
+- **Faces:** sculpted heads (brow ridge, eye sockets, nose, cheekbones, lips, jaw and chin), real eyes with irises and lids, eyebrows and ears, stubble and beards, and a subtle skin shader (pores, warmth under the skin).
+- **Face coverings and eyewear:** neck gaiters, balaclavas, face paint and scarves; wrap glasses, goggles and ear protection with a mic boom are more common.
+- **Helmet:** the shell rendered inside-out; it is rebuilt as a high-cut helmet with a liner, side rails, shroud, chinstrap and counterweight. Night-vision goggles sit down or flipped up. Some helmets carry an **IR strobe** that blinks only through night vision.
+- **Load-bearing kit:** a plate carrier with shaped plates, MOLLE webbing, cummerbund and shoulder pads; magazines in the pouches, a radio with antenna, a tourniquet, an admin pouch, a team ID patch and a flag patch on the left arm; belt, holster, knee pads and packs with straps.
+- **Gloves:** knuckle guards and separate fingers.
+- **Cloth and gear shader:** rip-stop weave and wrinkles on the uniform, MOLLE rows and bar-tacks on webbing, knit ribs on gaiters, stippled hard plastic, mud on boots and knees, a soft sheen on cloth. Fine detail fades with distance so nothing shimmers.
+
+### Gun finishes and models
+- **Finishes rebalanced:**
+  - anodised aluminium and polymer are a neutral charcoal that reads in daylight and at dusk;
+  - steel parts (barrels, bolts) are grey metal, no longer a black mirror.
+- **Finish shader:**
+  - coating mottle, so no gun is perfectly even;
+  - fine brushed scratches along the gun;
+  - worn edges;
+  - a film of dust on upward faces.
+
+  The detail fades with distance.
+- **Roll-mark engravings** on 14 guns: maker, calibre and serial number stamped on the receiver. On the P80 the marks ride on the slide.
+- **K416 handguard:** a free-float handguard with M-LOK slots, lightening cuts, barrel nut, QD cup and hand stop.
+- **Weapon light:** a compact LED light on the left of the handguard, opposite the IR laser. It is fitted to the K416, KS-17, HVAL-47, MP7, UMS-45, Stille-9, KVL-7 and Pump-12.
+- **Loadout bench fixed:** the bench draws in its own GL context, where the baked gun textures came up empty, so guns showed as dark mirrors. It now gets copies of the textures, and its studio light is redone.
+
+### How the guns handle
+- **Walls:** push the muzzle into a wall and the gun comes up to high port. You cannot fire or aim until you back off. Glass doesn't count.
+- **Bracing:**
+  - **When:** aim down sights while standing still on the ground with a ledge under the front of the gun or a wall edge beside it.
+  - **Effect:** about 38 % less recoil, 28 % less spread and much less sway.
+  - **Feedback:** a BRACED chip appears and you hear the gun settle.
+  - The bipod still takes precedence on the LMG.
+- **Barrel heat:**
+  - **Building heat:** every shot heats the barrel. A full rifle magazine takes it to about 60 %, and heavy sniper rounds warm it quickly.
+  - **Effects:**
+    - above 45 % the spread widens;
+    - from 28 % the barrel smokes;
+    - above 50 % heat shimmer rises off it;
+    - past about 60 % the end of the barrel glows.
+  - **HUD:** a BARREL bar under the ammo count.
+  - **LMG overheat:** at 100 % the KVL-7 locks up with a hiss (OVERHEATED) until the barrel cools to half.
+- **Weapon light (L):**
+  - **The light:** a real spot light and a faint beam through the air (strong at night, gone in daylight). The lens glows.
+  - **Spill:** when it hits something close in front of you in the dark, the spill lights your own hands and gun.
+  - **The risk:** at night bots see a lit soldier as easily as in daylight.
+  - **Guns without one:** pressing L tells you this gun carries no light.
+- **Dropped magazines:** on an empty reload your old magazine falls out of the gun into the world. It keeps your momentum and lands on its side next to the ones bots drop.
+
+### First-person animation
+- **Fire-mode flick:** changing fire mode moves the gun with a thumb flick.
+- **Idle fidgets:** stand still for a while and your soldier shifts the grip or checks the gun.
+- **Winded:** after a long sprint the arms heave with your breathing for a few seconds.
+- **Hurt:** when badly hurt the hands shake.
+- **Steep angles:** looking far up or down tucks the gun in.
+- **Bracing:** the gun settles onto the cover.
+- **Sleeves:** the first-person sleeves are in your team's camouflage, folds and all.
+
+### Tested
+- Typecheck and production build.
+- Screenshots of faces and kit close up, the loadout bench (K416, SKV .338, MP7) and first-person views in daylight and at night with the weapon light. The test scripts force heat, wall obstruction and bracing.
+- A forced empty reload: the magazine falls and lands on its side.
+- `tools/match12.cjs`: a 300 s 12 v 12 match, with no errors, at 3.7 ms per simulated frame.
 
 ## Update 45: Nordlys — a new look and sound for the whole game
 

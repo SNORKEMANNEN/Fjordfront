@@ -2424,6 +2424,27 @@ export class Game {
     this.fx.debris(proto, p, q, new THREE.Vector3(b.velocity.x * 0.5, -0.5, b.velocity.z * 0.5), new THREE.Vector3(Math.random() * 4 - 2, 0, Math.random() * 3), 'mag');
   }
 
+  /**
+   * Your own empty magazine leaves the gun and falls into the world (Update 46): a world copy of
+   * the magazine takes over where the viewmodel one let go — same place on screen, same angle —
+   * and tumbles to the ground with your momentum, where it stays like the ones bots drop.
+   */
+  private dropPlayerMag(d: WeaponDef) {
+    if (d.cls === 'Shotgun' || d.id === 'db12') return;
+    if (!this.magProtos.has(d.id)) this.magProtos.set(d.id, WEAPON_BUILDERS[d.id as WeaponId](this.wmats).parts.mag ?? null);
+    const proto = this.magProtos.get(d.id);
+    const part = this.vm.model?.parts.mag;
+    if (!proto || !part) return;
+    const cs = this.vm.partCameraSpace('mag');
+    const p = this.screenToWorld(cs.clone().project(this.vmCamera), Math.max(0.3, cs.length()));
+    // the magazine's angle relative to the view, carried into the world camera
+    const rootQ = this.vm.root.getWorldQuaternion(new THREE.Quaternion());
+    const q = this.camera.quaternion.clone().multiply(rootQ.invert().multiply(part.getWorldQuaternion(new THREE.Quaternion())));
+    const right = new THREE.Vector3(1, 0, 0).applyQuaternion(this.camera.quaternion);
+    const v = this.player.vel.clone().addScaledVector(right, -0.25 + Math.random() * 0.2).add(new THREE.Vector3(0, -0.9, 0));
+    this.fx.debris(proto, p, q, v, new THREE.Vector3(Math.random() * 3 - 1.5, Math.random() - 0.5, 1 + Math.random() * 2), 'mag');
+  }
+
   private startKillcam() {
     const slot = this.killcamSlot;
     this.killcamSlot = -1;
@@ -4202,6 +4223,7 @@ export class Game {
     if (this.wlSpot) this.wlSpot.intensity = 0;
     if (this.wlBeam) this.wlBeam.visible = false;
     this.vm?.lightLevel(0);
+    if (this.vm) this.vm.lightBounce = 0;
   }
   private updateWeaponLight(dt: number) {
     const vm = this.vm;
@@ -4219,6 +4241,14 @@ export class Game {
     vm.lightLevel(k);
     this.wlSpot.intensity = k * 85;
     this.wlBeam.visible = k > 0.01;
+    // the spill off a surface close in front lifts your own hands and gun, in the dark only
+    let bounce = 0;
+    if (k > 0.001) {
+      const dir = new THREE.Vector3(0, 0, -1).applyQuaternion(this.camera.quaternion);
+      const hit = this.physics.raycast(this.camera.position, dir, 6);
+      if (hit) bounce = k * Math.pow(1 - hit.distance / 6, 1.5) * Math.max(0, 1 - vm.daylight / 0.9);
+    }
+    vm.lightBounce = damp(vm.lightBounce, bounce, 10, dt);
     if (k <= 0.001) return;
     const lp = vm.socketCameraSpace('light');
     const at = this.screenToWorld(lp.clone().project(this.vmCamera), Math.min(0.9, lp.length()));
@@ -4877,6 +4907,7 @@ export class Game {
       this.fx.shell(ej, v, 'shotgun');
       if (this.audio.has(`shellIn@${d.id}`)) this.audio.play(`shellIn@${d.id}`, { gain: 0.28, rate: 1.6, reverb: 0.04, vary: 0.06 });
     }
+    if (name === 'magDrop') this.dropPlayerMag(d);
     if (name === 'nvgGrab') this.audio.play('click', { gain: 0.35, reverb: 0, rate: 0.7 });
     if (name === 'nvgDown') {
       this.nvg.engage();

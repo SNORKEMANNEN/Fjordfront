@@ -31,8 +31,7 @@ export interface WeaponState {
  * of 100 from the LMG past its limit, a few heavy sniper rounds noticeably warm.
  */
 export function heatPerShot(d: WeaponDef) {
-  const base = ({ LMG: 0.0115, 'Assault Rifle': 0.02, SMG: 0.016, Pistol: 0.028, Shotgun: 0.055, Sniper: 0.09, Marksman: 0.04 } as Record<string, number>)[d.cls] ?? 0.02;
-  return base * (d.pellets > 1 ? 1 : 1);
+  return ({ LMG: 0.0115, 'Assault Rifle': 0.02, SMG: 0.016, Pistol: 0.028, Shotgun: 0.055, Sniper: 0.09, Marksman: 0.04 } as Record<string, number>)[d.cls] ?? 0.02;
 }
 
 export interface ShotRequest {
