@@ -219,7 +219,7 @@ async function impact(surface: string): Promise<AudioBuffer> {
 }
 
 async function mech(kind: string): Promise<AudioBuffer> {
-  const LEN: Record<string, number> = { uiHorn: 2.6, uiReady: 1.4, uiConfirm: 0.6, smokeHiss: 7, snapPulse: 1.6, servo: 0.9, zap: 0.8, trophyDeploy: 1.0, carFire: 3, debris: 1.2, bipod: 0.4, fireIgnite: 1.4 };
+  const LEN: Record<string, number> = { heatHiss: 1.4, uiHorn: 2.6, uiReady: 1.4, uiConfirm: 0.6, smokeHiss: 7, snapPulse: 1.6, servo: 0.9, zap: 0.8, trophyDeploy: 1.0, carFire: 3, debris: 1.2, bipod: 0.4, fireIgnite: 1.4 };
   return render(LEN[kind] ?? 0.6, (ctx, out) => {
     const t = 0.002;
     switch (kind) {
@@ -283,6 +283,12 @@ async function mech(kind: string): Promise<AudioBuffer> {
         burst(ctx, out, t, { dur: 2.3, attack: 0.3, decay: 1.8, gain: 0.05, type: 'bandpass', freq: 500, q: 0.7, color: 'pink' });
         break;
       }
+      case 'heatHiss':
+        // Update 46: an overheated barrel — a sizzling hiss and the steel ticking as it expands
+        burst(ctx, out, t, { dur: 1.3, attack: 0.02, decay: 1.2, gain: 0.32, type: 'bandpass', freq: 5200, freqEnd: 2600, q: 0.6 });
+        burst(ctx, out, t, { dur: 0.5, attack: 0.005, decay: 0.45, gain: 0.18, type: 'highpass', freq: 7000 });
+        for (let i = 0; i < 5; i++) metal(ctx, out, t + 0.15 + i * 0.19 + Math.random() * 0.05, 2600 + Math.random() * 900, 0.05, 0.05);
+        break;
       case 'bipod':
         metal(ctx, out, t, 1500, 0.2, 0.08);
         burst(ctx, out, t, { dur: 0.04, decay: 0.03, gain: 0.5, type: 'bandpass', freq: 1800, q: 1 });
@@ -776,7 +782,7 @@ export class AudioEngine {
     // (weapon audio is recorded only: see the firearm library load below)
     for (const s of ['grass', 'dirt', 'gravel', 'concrete', 'wood', 'metal', 'water']) for (let v = 0; v < 4; v++) jobs.push([`step_${s}`, () => footstep(s, v)]);
     for (const s of ['concrete', 'metal', 'wood', 'glass', 'flesh', 'water', 'dirt']) for (let v = 0; v < 2; v++) jobs.push([`imp_${s}`, () => impact(s)]);
-    for (const k of ['uiHover', 'uiConfirm', 'uiBack', 'uiReady', 'uiHorn', 'click', 'cloth', 'adsIn', 'adsOut', 'lowAmmo', 'breathIn', 'breathOut', 'whiz', 'jump', 'land', 'mantle', 'tac', 'medal', 'flagWon', 'flagLost', 'capTick', 'streak', 'radio', 'uavPing', 'whistle', 'bipod', 'carFire'])
+    for (const k of ['heatHiss', 'uiHover', 'uiConfirm', 'uiBack', 'uiReady', 'uiHorn', 'click', 'cloth', 'adsIn', 'adsOut', 'lowAmmo', 'breathIn', 'breathOut', 'whiz', 'jump', 'land', 'mantle', 'tac', 'medal', 'flagWon', 'flagLost', 'capTick', 'streak', 'radio', 'uavPing', 'whistle', 'bipod', 'carFire'])
       jobs.push([k, () => mech(k)]);
     for (const k of ['wind', 'waves', 'rain', 'slide', 'heli', 'snowwind'] as const) jobs.push([`loop_${k}`, () => loopBuffer(k)]);
     for (let i = 0; i < 3; i++) jobs.push(['gull', () => bird('gull')]);

@@ -21,6 +21,18 @@ export interface WeaponState {
   reserve: number;
   mode: FireMode;
   chambered: boolean; // pump/bolt need cycling
+  /** barrel heat (Update 46): 0 cold … 1 hot; the LMG locks up past 1 until it cools to 0.5 */
+  heat?: number;
+  overheated?: boolean;
+}
+
+/**
+ * Barrel heat per shot (Update 46): a 30-round rifle dump takes the barrel to about 0.6, a belt
+ * of 100 from the LMG past its limit, a few heavy sniper rounds noticeably warm.
+ */
+export function heatPerShot(d: WeaponDef) {
+  const base = ({ LMG: 0.0115, 'Assault Rifle': 0.02, SMG: 0.016, Pistol: 0.028, Shotgun: 0.055, Sniper: 0.09, Marksman: 0.04 } as Record<string, number>)[d.cls] ?? 0.02;
+  return base * (d.pellets > 1 ? 1 : 1);
 }
 
 export interface ShotRequest {
@@ -84,6 +96,17 @@ export class WeaponSystem {
   bipod = 0;
   /** set by the game: signed Q/E lean amount -1..1 */
   lean = 0;
+  /** set by the game (Update 46): how far the muzzle is jammed into a wall in front, 0..1 — the gun
+   *  comes up to high port; past 0.75 it can neither fire nor aim */
+  obstruct = 0;
+  /** set by the game (Update 46): braced on cover while aiming, 0..1 — less recoil, sway and spread */
+  brace = 0;
+  /** true for a frame when the LMG just overheated (the game plays the hiss) */
+  justOverheated = false;
+  /** set by the game: 0..1 how badly hurt you are (unsteady hands) */
+  hurt = 0;
+  private sprintFor = 0;
+  private winded = 0;
   lastSpread = 0;
   private cycleTimer = 0;
   private adsSoundOn = false;
@@ -297,6 +320,17 @@ export class WeaponSystem {
     const s = this.cur;
     if (!s) return;
     const d = s.def;
+    // barrels cool: slowly while firing, faster once the trigger is off, holstered guns too
+    this.justOverheated = false;
+    for (const sl of this.slots) {
+      if (!sl.heat) continue;
+      const idle = sl !== s || this.sinceShot > 0.6;
+      sl.heat = Math.max(0, sl.heat - dt * (idle ? (sl.def.cls === 'LMG' ? 0.14 : 0.2) : 0.04));
+      if (sl.overheated && sl.heat < 0.5) {
+        sl.overheated = false;
+        if (sl === s) this.hooks.onSound('cooled', sl.def);
+      }
+    }
     this.cooldown = Math.max(0, this.cooldown - dt);
     this.sinceShot += dt;
     if (this.cycleTimer > 0) {
@@ -318,6 +352,7 @@ export class WeaponSystem {
         const i = d.modes.indexOf(s.mode);
         s.mode = d.modes[(i + 1) % d.modes.length];
         this.hooks.onSound('fireMode', d);
+        this.vm.modeFlick();
       }
       if (inp.wasPressed('reload')) this.startReload();
       // tap = full inspect, hold = magazine / chamber check
@@ -371,7 +406,7 @@ export class WeaponSystem {
     const busy = this.switching || (this.reloading && !d.perShell);
     const cycling = this.vm.action?.type === 'bolt' || this.vm.action?.type === 'karCycle';
     const handsBusy = !!this.vm.action && ['throw', 'stim', 'uav', 'designate', 'melee', 'nvg', 'tactical', 'detPress'].includes(this.vm.action.type);
-    const wantAds = d.cls !== 'Melee' && this.enabled && this.adsHeld && !busy && !handsBusy && !p.sprinting && !p.mantle && !(p.sliding && d.cls === 'Sniper');
+    const wantAds = d.cls !== 'Melee' && this.enabled && this.adsHeld && !busy && !handsBusy && !p.sprinting && !p.mantle && !(p.sliding && d.cls === 'Sniper') && this.obstruct < 0.75;
     if (wantAds && p.sprinting) p.sprinting = false;
     if (this.adsHeld && p.sprinting && !busy) {
       p.sprinting = false;
@@ -417,7 +452,8 @@ export class WeaponSystem {
     }
     // stim and the UAV tablet are one-handed: the right hand keeps shooting
     const oneHand = !!this.vm.action && (this.vm.action.type === 'stim' || this.vm.action.type === 'uav' || this.vm.action.type === 'tactical' || this.vm.action.type === 'detPress');
-    const canFire = d.cls !== 'Melee' && !this.switching && !this.reloading && this.sprintBlock <= 0 && this.cooldown <= 0 && !p.mantle && (this.vm.action === null || this.vm.action.type === 'inspect' || oneHand);
+    const canFire = d.cls !== 'Melee' && !this.switching && !this.reloading && this.sprintBlock <= 0 && this.cooldown <= 0 && !p.mantle && (this.vm.action === null || this.vm.action.type === 'inspect' || oneHand)
+      && this.obstruct < 0.75 && !s.overheated;
     if (canFire && ((s.mode === 'auto' && trig) || this.wantFire) && this.vm.action && (this.vm.action.type === 'inspect')) this.vm.cancelAction();
     // 3-round burst: one pull fires three at a raised cyclic, then a short reset
     if (s.mode === 'burst' && this.wantFire && this.burstLeft === 0 && canFire && s.mag > 0) {
@@ -483,6 +519,10 @@ export class WeaponSystem {
 
     this.bloom = Math.max(0, this.bloom - dt * (this.sinceShot > 0.15 ? 5 : 1.5));
 
+    // winded: a long sprint leaves you breathing hard for a few seconds
+    if (p.sprinting) this.sprintFor += dt * (p.tactical ? 1.6 : 1);
+    else this.sprintFor = Math.max(0, this.sprintFor - dt * 1.5);
+    this.winded = damp(this.winded, p.sprinting ? 0 : clamp((this.sprintFor - 1.5) / 4, 0, 1), 3, dt);
     // ---- viewmodel ----
     const right = new THREE.Vector3(Math.cos(p.yaw), 0, -Math.sin(p.yaw));
     const ctx: VMContext = {
@@ -508,6 +548,12 @@ export class WeaponSystem {
       cant: this.cant,
       peek: this.peek,
       lean: this.lean,
+      obstruct: this.obstruct,
+      brace: this.brace,
+      heat: s.heat ?? 0,
+      pitch: p.pitch,
+      hurt: this.hurt,
+      winded: this.winded,
     };
     // the dive tucks the gun like a slide
     this.diveBlend = damp(this.diveBlend, p.diving ? 1 : 0, p.diving ? 10 : 4, dt);
@@ -582,6 +628,9 @@ export class WeaponSystem {
     if (!p.grounded) sp *= 2.2;
     if (p.sliding) sp *= 1.4;
     if (this.bipod > 0) sp *= 1 - 0.45 * this.bipod;
+    // braced on cover: steadier; a hot barrel throws rounds wider
+    sp *= 1 - 0.28 * this.brace;
+    sp *= 1 + 0.45 * Math.max(0, (this.cur.heat ?? 0) - 0.45);
     this.lastSpread = sp;
     return sp;
   }
@@ -597,6 +646,13 @@ export class WeaponSystem {
     this.shotsInSpray++;
     this.firing = true;
     if (d.modes[0] === 'pump' || d.modes[0] === 'bolt') s.chambered = false;
+    // the barrel heats; the LMG's locks up when it passes its limit
+    s.heat = Math.min(1.15, (s.heat ?? 0) + heatPerShot(d));
+    if (d.cls === 'LMG' && s.heat >= 1 && !s.overheated) {
+      s.overheated = true;
+      this.justOverheated = true;
+      this.hooks.onSound('overheat', d);
+    }
 
     // directions
     const spreadDeg = this.spread();
@@ -622,7 +678,7 @@ export class WeaponSystem {
 
     // camera recoil (pattern: climbs, drifts with weapon-specific bias)
     const r = d.recoil;
-    const stanceMul = (p.stance === 'crouch' ? 0.8 : p.stance === 'prone' ? 0.6 : 1) * (d.modes.includes('auto') && s.mode === 'semi' ? 0.85 : s.mode === 'burst' ? 0.8 : 1) * (1 - 0.5 * this.bipod);
+    const stanceMul = (p.stance === 'crouch' ? 0.8 : p.stance === 'prone' ? 0.6 : 1) * (d.modes.includes('auto') && s.mode === 'semi' ? 0.85 : s.mode === 'burst' ? 0.8 : 1) * (1 - 0.5 * this.bipod) * (1 - 0.38 * this.brace);
     const first = this.shotsInSpray === 1 ? r.firstShotMul : 1;
     const adsMul = 1 + (r.adsMul - 1) * this.ads;
     void first;
@@ -632,8 +688,8 @@ export class WeaponSystem {
     this.pendingRecoil.y += (ak.h * adsMul * stanceMul * Math.PI) / 180;
     // view kick (camera punch, does not move the aim) and weapon kick
     const vk = viewKick(d, this.ads);
-    if (this.bipod > 0) {
-      const k = 1 - 0.5 * this.bipod;
+    if (this.bipod > 0 || this.brace > 0) {
+      const k = (1 - 0.5 * this.bipod) * (1 - 0.35 * this.brace);
       vk.pitch *= k; vk.yaw *= k; vk.roll *= k; vk.back *= k;
     }
     this.rig.shotKick(vk);

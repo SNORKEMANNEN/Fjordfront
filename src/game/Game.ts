@@ -29,7 +29,7 @@ import { NavGraph } from '../ai/NavGraph';
 import { Bot } from '../ai/Bot';
 import { avoidance, CoverMap, Exposure, Fireteam, Order } from '../ai/BotBrain';
 import { AIDebug } from '../ai/AIDebug';
-import { Soldier, SoldierStyle } from '../character/Soldier';
+import { Soldier, SoldierStyle, SOLDIER_SHARED } from '../character/Soldier';
 import { Impostors } from '../character/Impostors';
 import { roleFor } from '../character/SoldierMesh';
 import { Combat } from './Combat';
@@ -185,6 +185,12 @@ export class Game {
   weapons!: WeaponSystem;
   wmats!: WeaponMats;
   fx!: Effects;
+  /** weapon light (Update 46) */
+  wlSpot!: THREE.SpotLight;
+  private wlBeam!: THREE.Mesh;
+  private wlBeamMat!: THREE.ShaderMaterial;
+  weaponLightOn = false;
+  private wlK = 0;
   /** atmospheric motes round the camera (Update 45) */
   motes!: Motes;
   nav!: NavGraph;
@@ -684,6 +690,30 @@ export class Game {
     // ---- weapons & fx ----
     this.fx = new Effects(this.scene, this.mats.baker);
     this.motes = new Motes(this.scene);
+    // weapon light (Update 46): one spot light and a faint beam, in the scene from the start so the
+    // light count (and every shader built for it) never changes when it is switched on
+    this.wlSpot = new THREE.SpotLight(0xfff2dc, 0, 46, 0.36, 0.6, 2);
+    this.wlSpot.castShadow = false;
+    this.scene.add(this.wlSpot, this.wlSpot.target);
+    {
+      const L = 9, ang = 0.3;
+      const g = new THREE.ConeGeometry(Math.tan(ang) * L, L, 28, 1, true);
+      g.translate(0, -L / 2, 0);
+      g.rotateX(Math.PI / 2);
+      this.wlBeamMat = new THREE.ShaderMaterial({
+        uniforms: { uK: { value: 0 } },
+        vertexShader: `varying float vAlong; varying vec3 vN; varying vec3 vV; void main(){ vAlong = clamp(-position.z / 9.0, 0.0, 1.0); vN = normalize(normalMatrix * normal); vec4 mv = modelViewMatrix * vec4(position, 1.0); vV = -mv.xyz; gl_Position = projectionMatrix * mv; }`,
+        fragmentShader: `uniform float uK; varying float vAlong; varying vec3 vN; varying vec3 vV;
+          void main(){ float edge = pow(abs(dot(normalize(vN), normalize(vV))), 1.6); float a = uK * edge * pow(1.0 - vAlong, 1.8) * smoothstep(0.0, 0.06, vAlong);
+            gl_FragColor = vec4(vec3(1.0, 0.95, 0.86) * a, a); }`,
+        transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, side: THREE.DoubleSide,
+      });
+      this.wlBeam = new THREE.Mesh(g, this.wlBeamMat);
+      this.wlBeam.frustumCulled = false;
+      this.wlBeam.visible = false;
+      this.wlBeam.renderOrder = 19;
+      this.scene.add(this.wlBeam);
+    }
     this.smoke = new SmokeVolume(this.scene, this.physics, this.mats.baker);
     this.blastFx = new BlastFx(this.scene, this.physics, this.fx, this.mats.baker);
     this.footprints = new Footprints(this.scene, this.mats.baker);
@@ -1138,7 +1168,7 @@ export class Game {
       e.speed = pl.horizSpeed();
       e.sinceFire = this.time - this.lastShotT;
       e.suppressed = !!this.weapons?.cur.def.sound.suppressed;
-      e.lit = false;
+      e.lit = this.wlK > 0.5;
     }
     const p = c.position();
     const [forest] = this.terrain.splatAt(p.x, p.z);
@@ -1320,6 +1350,7 @@ export class Game {
   // ================================================================ states
   toMenu() {
     this.endVote(false);
+    this.killWeaponLight();
     this.state = 'menu';
     this.sbCursor = false;
     this.menuScene?.setKit(this.avatar.team, this.ui.primary);
@@ -1510,6 +1541,8 @@ export class Game {
 
   startMatch(skipVote = false) {
     this.endVote(false);
+    this.killWeaponLight();
+    this.weaponLightOn = false;
     this.menuScene?.show(false);
     this.fx.menuRim(null);
     this.ui.soldierTag(null, this.avatar.team);
@@ -1672,6 +1705,8 @@ export class Game {
 
   private respawnPlayer() {
     this.spectating = false;
+    // first-person sleeves in your side's camo (Update 46)
+    RiggedArms.sleeveCamo.value = SoldierStyle.camo(this.avatar.team);
     // your own legs / killcam stand-in wear your side's uniform
     this.legs?.setTeam(this.avatar.team);
     this.ghost?.setTeam(this.avatar.team);
@@ -1799,6 +1834,7 @@ export class Game {
       this.input.mouseDX = this.input.mouseDY = this.input.wheel = 0;
     }
     if (this.killcam) {
+      this.killWeaponLight();
       this.updateKillcam(dt);
       this.updateMapView(dt);
       return;
@@ -1818,7 +1854,11 @@ export class Game {
     this.player.update(dt);
     this.updateDoors(dt);
     this.physics.step();
+    this.updateHandling(dt);
+    w.hurt = this.avatar.alive ? clamp((100 - this.avatar.health) / 100, 0, 1) : 0;
     w.update(dt, this.indoor);
+    this.updateBarrelFx(dt);
+    this.updateWeaponLight(dt);
     const def = w.cur.def;
     // canted laser aim under goggles: no optic in front of the eye, so (almost) no zoom
     w.cant = this.nvg.active && !!w.cur.model.sockets.laser ? 1 : 0;
@@ -2001,6 +2041,10 @@ export class Game {
     this.world.update(this.time, this.camera.position, this.env);
     this.weather.update(dt, this.camera.position, this.env.weather, window.innerHeight);
     this.motes.update(dt, this.camera.position, this.env.lightDir, this.env.day, this.env.night, this.env.golden, this.env.weather, window.innerHeight, this.camera.fov);
+    // soldiers: strobe clock, IR strobes seen through goggles, daylight for the cloth sheen
+    SOLDIER_SHARED.uTime.value += dt;
+    SOLDIER_SHARED.uStrobe.value = this.nvg.vis;
+    SOLDIER_SHARED.uLight.value = 0.15 + 0.85 * this.env.day;
     this.ballistics.wind.copy(this.weather.wind);
     this.updateWeatherEvent(dt);
     this.updateEchoProbe(dt);
@@ -2050,6 +2094,10 @@ export class Game {
       hint: w.scopeActive ? `${this.windReadout()}   ${w.holdingBreath ? `HOLDING BREATH ${'▮'.repeat(Math.ceil(w.breath * 5))}` : '[SHIFT] HOLD BREATH'}` : '',
       scoped: false,
       teamNames: this.match.teamNames,
+      heat: s.heat ?? 0,
+      overheated: !!s.overheated,
+      braced: w.brace > 0.5,
+      obstructed: w.obstruct > 0.75,
     }, dt);
     w.spread();
     this.ui.compassMarks(this.compassMarks(p));
@@ -2309,7 +2357,7 @@ export class Game {
       rays: this.env.rays,
       sunDir: this.env.sunDir,
       sunColor: this.env.sunColor,
-      heat: this.blastFx?.heat,
+      heat: this.muzzleHeatOn ? [this.muzzleHeat, ...(this.blastFx?.heat ?? [])] : this.blastFx?.heat,
     });
   }
 
@@ -4057,6 +4105,129 @@ export class Game {
     for (const key of ['outdoor', 'small', 'hall', 'tunnel'] as const) rm[key] += (this.roomTarget[key] - rm[key]) * k;
   }
 
+  // ================================================================ weapon handling (Update 46)
+  private handRay = new THREE.Vector3();
+  private handFwd = new THREE.Vector3();
+  private braceT = 0;
+  /**
+   * Wall obstruction and bracing, from a few short world rays each frame:
+   *  - obstruction: rays from the eye along the view (and down-right, where the gun is) against
+   *    the gun's length — a wall closer than the muzzle pushes the gun up to high port; glass
+   *    doesn't count (you can always shoot a window you are standing at)
+   *  - bracing: aiming, nearly still, with a ledge just under the handguard or a wall edge right
+   *    beside it — the gun rests on it
+   */
+  private updateHandling(dt: number) {
+    const w = this.weapons;
+    const def = w.cur?.def;
+    if (!def || def.cls === 'Melee' || !this.avatar.alive || this.player.ladder || this.player.mantle) {
+      w.obstruct = 0;
+      w.brace = 0;
+      return;
+    }
+    const cam = this.camera;
+    const eye = cam.position;
+    const fwd = this.handFwd.set(0, 0, -1).applyQuaternion(cam.quaternion);
+    const right = new THREE.Vector3(1, 0, 0).applyQuaternion(cam.quaternion);
+    const up = new THREE.Vector3(0, 1, 0).applyQuaternion(cam.quaternion);
+    // gun length from the eye: long guns reach further
+    const reach = ({ Pistol: 0.55, SMG: 0.72, Shotgun: 0.92, 'Assault Rifle': 0.9, Marksman: 1.0, Sniper: 1.05, LMG: 1.0 } as Record<string, number>)[def.cls] ?? 0.85;
+    let near = 99;
+    for (const [sx, sy] of [[0, 0], [0.09, -0.07], [0.05, -0.03]] as const) {
+      const d = this.handRay.copy(fwd).addScaledVector(right, sx).addScaledVector(up, sy).normalize();
+      const hit = this.physics.raycast(eye, d, reach + 0.2);
+      if (hit && hit.info.surface !== 'glass') near = Math.min(near, hit.distance);
+    }
+    const ob = clamp((reach - near) / (reach * 0.55), 0, 1);
+    w.obstruct = damp(w.obstruct, ob, ob > w.obstruct ? 18 : 10, dt);
+    // bracing: only while aiming, standing or crouched still, not on the LMG's own bipod
+    let braceOK = false;
+    if (w.ads > 0.6 && this.player.horizSpeed() < 0.9 && this.player.grounded && w.bipod < 0.1 && w.obstruct < 0.3) {
+      const tip = eye.clone().addScaledVector(fwd, 0.5);
+      tip.y -= 0.04;
+      const down = this.physics.raycast(tip, new THREE.Vector3(0, -1, 0), 0.32);
+      if (down && down.normal.y > 0.6 && down.info.surface !== 'glass') braceOK = true;
+      else {
+        // a wall edge or door frame beside the handguard (left or right)
+        for (const side of [-1, 1]) {
+          const h = this.physics.raycast(tip, right.clone().multiplyScalar(side), 0.16);
+          if (h && Math.abs(h.normal.y) < 0.4) braceOK = true;
+        }
+      }
+    }
+    this.braceT = braceOK ? Math.min(1, this.braceT + dt * 4) : Math.max(0, this.braceT - dt * 6);
+    w.brace = this.braceT;
+  }
+
+  /** barrel heat you can see: smoke curling off the muzzle after a long burst, heat shimmer over it */
+  private barrelSmokeT = 0;
+  private muzzleHeat = { p: new THREE.Vector3(), t: 0, life: 1, r: 0.05 };
+  private muzzleHeatOn = false;
+  private updateBarrelFx(dt: number) {
+    const w = this.weapons;
+    const s = w.cur;
+    const heat = s?.heat ?? 0;
+    this.muzzleHeatOn = false;
+    if (!s || heat < 0.28 || !this.avatar.alive || !this.vm.root.visible || s.def.sound.suppressed || this.killcam) return;
+    const lp = this.vm.socketCameraSpace('muzzle');
+    const mp = this.screenToWorld(lp.clone().project(this.vmCamera), Math.min(1.1, lp.length()));
+    // wisps: only once the trigger is off (a firing barrel blows its smoke away)
+    this.barrelSmokeT -= dt;
+    if (!w.firing && this.barrelSmokeT <= 0 && this.time - this.lastShotT > 0.12) {
+      this.barrelSmokeT = 0.09 + (1 - Math.min(1, heat)) * 0.22;
+      const v = new THREE.Vector3((Math.random() - 0.5) * 0.05, 0.08 + Math.random() * 0.08, (Math.random() - 0.5) * 0.05);
+      this.fx.smoke.spawn(mp, v, [0.7, 0.7, 0.68], 0.025 + 0.045 * Math.min(1, heat), 0.018 + Math.random() * 0.014, 1.1 + Math.random() * 0.7, { drag: 1.6, grav: -0.12, grow: 0.07 });
+    }
+    // shimmer over a hot barrel
+    if (heat > 0.5) {
+      this.muzzleHeatOn = true;
+      this.muzzleHeat.p.copy(mp).y += 0.03;
+      this.muzzleHeat.r = 0.05 + 0.04 * Math.min(1, heat);
+      this.muzzleHeat.t = this.muzzleHeat.life * (1 - Math.min(0.9, (heat - 0.5) * 1.4));
+    }
+  }
+
+  /**
+   * Weapon light: L toggles it (on guns that carry one). A real spot light from the lens down the
+   * line of sight, a faint beam through the air (strong at night, gone in daylight), the lens
+   * glowing on the gun. At night it gives you away: bots see a lit soldier as in daylight.
+   */
+  /** light off now (menu, a new match, the killcam): no fade, nothing left lit behind */
+  private killWeaponLight() {
+    this.wlK = 0;
+    if (this.wlSpot) this.wlSpot.intensity = 0;
+    if (this.wlBeam) this.wlBeam.visible = false;
+    this.vm?.lightLevel(0);
+  }
+  private updateWeaponLight(dt: number) {
+    const vm = this.vm;
+    const usable = this.avatar.alive && !this.killcam && this.state === 'playing' && vm.hasLight && this.vm.root.visible;
+    if (this.input.wasPressed('light') && this.avatar.alive) {
+      if (vm.hasLight) {
+        this.weaponLightOn = !this.weaponLightOn;
+        this.audio.play('click', { gain: 0.6, rate: this.weaponLightOn ? 1.25 : 1.05, reverb: 0.03 });
+      } else this.ui.notify('NO WEAPON LIGHT', 'NOT ON THIS WEAPON');
+    }
+    const want = usable && this.weaponLightOn ? 1 : 0;
+    // an LED snaps on (a little flicker as it comes up), fades off fast
+    this.wlK = want ? Math.min(1, this.wlK + dt * 14) : Math.max(0, this.wlK - dt * 18);
+    const k = this.wlK * (this.wlK < 1 ? 0.75 + 0.25 * Math.sin(this.time * 90) : 1);
+    vm.lightLevel(k);
+    this.wlSpot.intensity = k * 85;
+    this.wlBeam.visible = k > 0.01;
+    if (k <= 0.001) return;
+    const lp = vm.socketCameraSpace('light');
+    const at = this.screenToWorld(lp.clone().project(this.vmCamera), Math.min(0.9, lp.length()));
+    const fwd = new THREE.Vector3(0, 0, -1).applyQuaternion(this.camera.quaternion);
+    this.wlSpot.position.copy(at);
+    this.wlSpot.target.position.copy(this.camera.position).addScaledVector(fwd, 12);
+    this.wlSpot.target.updateMatrixWorld();
+    this.wlBeam.position.copy(at);
+    this.wlBeam.lookAt(this.wlSpot.target.position);
+    this.wlBeam.rotateY(Math.PI);
+    this.wlBeamMat.uniforms.uK.value = k * (0.015 + 0.09 * this.env.night) * (1 - 0.85 * this.env.day * (1 - this.indoor)) * (this.nvg.active ? 0.4 : 1);
+  }
+
   screenToWorld(ndc: THREE.Vector3, dist: number) {
     const p = new THREE.Vector3(ndc.x, ndc.y, 0.5).unproject(this.camera);
     const o = this.camera.position;
@@ -4683,6 +4854,13 @@ export class Game {
         if (alt) this.audio.play(`${alt[0]}@${d.id}`, { gain: 0.85 * alt[1], rate: alt[2], reverb: 0.06, vary: 0.04 });
       } else if (this.audio.has(s)) this.audio.play(s, { gain: s === 'cloth' ? 0.45 : 0.8, reverb: 0.05, vary: 0.05 });
     }
+    // Update 46 handling sounds: settling onto cover, the LMG barrel overheating and cooling
+    if (name === 'brace') this.audio.play('cloth', { gain: 0.55, rate: 0.8, reverb: 0.03, vary: 0.06 });
+    if (name === 'overheat') {
+      this.audio.play('heatHiss', { gain: 0.6, reverb: 0.05 });
+      this.ui.notify('OVERHEATED', 'LET THE BARREL COOL');
+    }
+    if (name === 'cooled') this.audio.play('click', { gain: 0.45, rate: 0.9 });
     if (name === 'reloadStart') this.playerVoice('reload', 0.6);
     if (name === 'hullL' || name === 'hullR') {
       // the ejector throws the spent hull up and back past the shooter's shoulder

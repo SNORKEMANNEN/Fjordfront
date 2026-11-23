@@ -3,7 +3,7 @@ import { Settings } from '../game/Settings';
 /** Keyboard/mouse/controller input with pointer lock, rebindable keys and per-frame edge detection. */
 export type Action =
   | 'forward' | 'back' | 'left' | 'right' | 'jump' | 'crouch' | 'prone' | 'sprint'
-  | 'reload' | 'inspect' | 'primary' | 'secondary' | 'swap' | 'melee' | 'scoreboard' | 'fire' | 'ads' | 'fireMode' | 'spot' | 'tuning' | 'grenade' | 'tactical' | 'streak1' | 'streak2' | 'streak3' | 'nvg' | 'ping' | 'map' | 'leanL' | 'leanR' | 'field' | 'orders' | 'aidebug'
+  | 'reload' | 'inspect' | 'primary' | 'secondary' | 'swap' | 'melee' | 'scoreboard' | 'fire' | 'ads' | 'fireMode' | 'spot' | 'tuning' | 'grenade' | 'tactical' | 'streak1' | 'streak2' | 'streak3' | 'nvg' | 'ping' | 'map' | 'leanL' | 'leanR' | 'field' | 'light' | 'orders' | 'aidebug'
   | 'chatTeam' | 'talk' | 'spectate' | 'drop';
 
 /** default bindings (key code or Mouse0-4 → action) */
@@ -13,7 +13,7 @@ export const DEFAULT_BINDS: Record<string, Action> = {
   ShiftLeft: 'sprint', KeyR: 'reload', KeyI: 'inspect',
   Digit1: 'primary', Digit2: 'secondary', KeyQ: 'leanL', KeyE: 'leanR', KeyV: 'melee', KeyX: 'ping', Tab: 'scoreboard', KeyB: 'fireMode', KeyF: 'spot', Backquote: 'tuning', F2: 'tuning',
   KeyG: 'grenade', KeyT: 'tactical', KeyH: 'field', KeyN: 'nvg', KeyM: 'map', KeyY: 'orders', F4: 'aidebug', Digit3: 'streak1', Digit4: 'streak2', Digit5: 'streak3',
-  KeyU: 'chatTeam', KeyK: 'talk', F6: 'spectate', KeyJ: 'drop',
+  KeyU: 'chatTeam', KeyK: 'talk', F6: 'spectate', KeyJ: 'drop', KeyL: 'light',
   Mouse0: 'fire', Mouse2: 'ads', Mouse1: 'ping', Mouse4: 'reload',
 };
 /** the rebindable actions, in the order the Controls tab lists them */
@@ -25,7 +25,7 @@ export const ACTION_LABELS: [Action, string][] = [
   ['primary', 'Primary weapon'], ['secondary', 'Sidearm'], ['melee', 'Melee / knife (hold)'],
   ['grenade', 'Lethal'], ['tactical', 'Tactical'], ['field', 'Field upgrade'],
   ['streak1', 'Killstreak 1'], ['streak2', 'Killstreak 2'], ['streak3', 'Killstreak 3'],
-  ['spot', 'Use / spot'], ['ping', 'Ping'], ['nvg', 'Night vision'], ['map', 'Tactical map'], ['orders', 'Squad orders'],
+  ['spot', 'Use / spot'], ['ping', 'Ping'], ['nvg', 'Night vision'], ['light', 'Weapon light'], ['map', 'Tactical map'], ['orders', 'Squad orders'],
   ['scoreboard', 'Scoreboard'], ['chatTeam', 'Team chat'], ['talk', 'Push to talk'], ['spectate', 'Spectate / free camera'], ['drop', 'Drop weapon / charge (Sabotasje)'],
 ];
 let BINDS: Record<string, Action> = { ...DEFAULT_BINDS };

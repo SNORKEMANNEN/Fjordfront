@@ -49,3 +49,52 @@ export function addLaser(root: THREE.Group, sockets: Record<string, THREE.Object
   sockets.laser = s;
   return g;
 }
+
+/**
+ * Weapon light (Update 46): a compact LED flashlight on the left of the handguard, opposite the
+ * IR laser — the side you see in first person. Tail cap with a pressure switch, a knurled bezel,
+ * a reflector and the lens (named 'wlLens', its material swapped per viewmodel so only your own
+ * light glows). Adds a `light` socket on the lens, pointing down the bore. Guns without the laser
+ * rail (the pistols, the knife) get none.
+ */
+let wlBody: THREE.MeshStandardMaterial | null = null;
+let wlLens: THREE.MeshStandardMaterial | null = null;
+export function addWeaponLight(root: THREE.Group, sockets: Record<string, THREE.Object3D>, mats: Record<string, THREE.Material>) {
+  const ls = sockets.laser;
+  if (!ls || sockets.light) return null;
+  wlBody ??= new THREE.MeshStandardMaterial({ color: 0x1c1d1f, roughness: 0.42, metalness: 0.7 });
+  wlLens ??= new THREE.MeshStandardMaterial({ color: 0xdfe8ee, roughness: 0.05, metalness: 0.2, emissive: new THREE.Color(0xfff4e0), emissiveIntensity: 0, envMapIntensity: 2 });
+  const u1 = -ls.position.z - 0.005;
+  const u0 = u1 - 0.092;
+  const v = ls.position.y + 0.008;
+  const wc = -(ls.position.x - 0.004);
+  const g = new THREE.Group();
+  g.name = 'weaponLight';
+  const along = (r0: number, r1: number, a: number, b: number, seg = 18) => new THREE.CylinderGeometry(r1, r0, b - a, seg).rotateX(-Math.PI / 2).translate(wc, v, -(a + (b - a) / 2));
+  const add = (geo: THREE.BufferGeometry, m: THREE.Material, name = '') => {
+    const mesh = new THREE.Mesh(geo, m);
+    mesh.castShadow = true;
+    if (name) mesh.name = name;
+    g.add(mesh);
+    return mesh;
+  };
+  // mount: a clamp from the body to the handguard
+  add(new THREE.BoxGeometry(0.012, 0.012, 0.03).translate(wc + 0.012, v, -(u0 + 0.045)), mats.metal ?? wlBody);
+  add(new THREE.CylinderGeometry(0.004, 0.004, 0.005, 10).rotateZ(Math.PI / 2).translate(wc + 0.016, v - 0.009, -(u0 + 0.045)), mats.steel ?? wlBody);
+  // tail cap + rubber switch, body, cooling fins, bezel, reflector ring, lens
+  add(along(0.0098, 0.0104, u0, u0 + 0.012), wlBody);
+  add(along(0.0062, 0.0062, u0 - 0.004, u0, 14), mats.rubber ?? wlBody);
+  add(along(0.0108, 0.0108, u0 + 0.012, u0 + 0.07), wlBody);
+  for (let i = 0; i < 4; i++) add(along(0.0119, 0.0119, u0 + 0.05 + i * 0.006, u0 + 0.053 + i * 0.006), wlBody);
+  add(along(0.0118, 0.0142, u0 + 0.07, u0 + 0.088, 22), wlBody);
+  add(along(0.0142, 0.0142, u0 + 0.088, u0 + 0.096, 22), wlBody);
+  add(along(0.0122, 0.0122, u0 + 0.0955, u0 + 0.0965, 22), mats.steel ?? wlBody);
+  add(along(0.0116, 0.0116, u0 + 0.0962, u0 + 0.0968, 22), wlLens, 'wlLens');
+  root.add(g);
+  const s = new THREE.Object3D();
+  s.name = 'light';
+  s.position.set(wc, v, -(u0 + 0.098));
+  root.add(s);
+  sockets.light = s;
+  return g;
+}

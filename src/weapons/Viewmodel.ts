@@ -238,6 +238,18 @@ export interface VMContext {
   peek?: number;
   /** -1..1 Q/E lean (the view rolls with it; the gun counter-settles so the sights stay put) */
   lean?: number;
+  /** 0..1 muzzle jammed into a wall in front (Update 46): the gun comes up to high port */
+  obstruct?: number;
+  /** 0..1 braced on cover while aiming (Update 46): the gun settles and stops swaying */
+  brace?: number;
+  /** 0..1+ barrel heat (Update 46): the barrel glows dull red past ~0.7 */
+  heat?: number;
+  /** view pitch, radians (Update 46): the gun carries a little differently looking up / down */
+  pitch?: number;
+  /** 0..1 injured (Update 46): unsteady hands */
+  hurt?: number;
+  /** 0..1 winded after a sprint (Update 46): the gun heaves with the breathing */
+  winded?: number;
 }
 
 /** Hand orientation (camera space) while holding the UAV tablet: fingers right and a little up, palm to the camera. */
@@ -294,6 +306,38 @@ export class Viewmodel {
   poses = POSES;
   private cantBlend = 0;
   private peekBlend = 0;
+  /** this viewmodel's own weapon-light lens (so only your light glows, not every soldier's) */
+  private wlLensMat: THREE.MeshStandardMaterial | null = null;
+  /** 0..1 weapon light output (set by the game) */
+  lightLevel(k: number) {
+    if (this.wlLensMat) this.wlLensMat.emissiveIntensity = k * 3.2;
+  }
+  get hasLight() {
+    return !!this.model?.sockets.light;
+  }
+  private idleFor = 0;
+  private fidgetT = -1;
+  private fidgetKind = 0;
+  private obstructBlend = 0;
+  private braceBlend = 0;
+  private braceWas = false;
+  /** additive glow sleeve over the barrel's muzzle end, faded in with heat (Update 46) */
+  private heatSleeve: THREE.Mesh | null = null;
+  private heatMat = new THREE.ShaderMaterial({
+    uniforms: { uHeat: { value: 0 }, uTime: { value: 0 } },
+    vertexShader: `varying vec3 vP; varying vec3 vN; varying vec3 vV; void main(){ vP = position; vN = normalize(normalMatrix * normal); vec4 mv = modelViewMatrix * vec4(position, 1.0); vV = -mv.xyz; gl_Position = projectionMatrix * mv; }`,
+    fragmentShader: `uniform float uHeat; uniform float uTime; varying vec3 vP; varying vec3 vN; varying vec3 vV;
+      void main(){
+        // hottest at the muzzle, fading back along the barrel; shimmering a little
+        float along = clamp(-vP.y / 0.16, 0.0, 1.0);
+        float k = smoothstep(0.62, 1.05, uHeat) * (1.0 - along * 0.85);
+        float rim = 0.55 + 0.45 * abs(dot(normalize(vN), normalize(vV)));
+        float flick = 0.9 + 0.1 * sin(uTime * 11.0 + vP.y * 90.0);
+        vec3 c = mix(vec3(0.9, 0.12, 0.02), vec3(1.6, 0.55, 0.12), k * k) * k * rim * flick * 2.2;
+        gl_FragColor = vec4(c, 1.0);
+      }`,
+    transparent: true, depthWrite: false, blending: THREE.AdditiveBlending,
+  });
   private animMem: AnimCtx['mem'] = {};
   /** finger pose for the right hand while an animation drives it off the grip (reset each frame) */
   rightActionPose: FingerPose | null = null;
@@ -940,8 +984,30 @@ export class Viewmodel {
     if (p.pump) this.pumpHome.copy(p.pump.position);
     this.boltLocked = false;
     this.action = null;
+    // heat sleeve: a thin shell over the last 16 cm of barrel behind the muzzle (rifles, LMG,
+    // SMGs, marksman; not the pistols, shotguns and the suppressed gun's can)
+    this.heatSleeve?.removeFromParent();
+    this.heatSleeve = null;
+    const mz = model.sockets.muzzle;
+    if (mz && ['Assault Rifle', 'LMG', 'SMG', 'Marksman', 'Sniper'].includes(def.cls) && !def.sound.suppressed) {
+      const r = def.cls === 'LMG' ? 0.0132 : def.cls === 'Sniper' ? 0.0125 : 0.0118;
+      const g = new THREE.CylinderGeometry(r, r * 0.96, 0.16, 16, 1, true);
+      g.translate(0, -0.08, 0);
+      const sl = new THREE.Mesh(g, this.heatMat);
+      sl.rotation.x = -Math.PI / 2;
+      sl.position.copy(mz.position);
+      sl.renderOrder = 5;
+      sl.frustumCulled = false;
+      sl.visible = false;
+      mz.parent!.add(sl);
+      this.heatSleeve = sl;
+    }
     model.root.traverse((o) => {
       const m = o as THREE.Mesh;
+      if (m.isMesh && m.name === 'wlLens') {
+        this.wlLensMat ??= (m.material as THREE.MeshStandardMaterial).clone();
+        m.material = this.wlLensMat;
+      }
       if (m.isMesh) {
         m.castShadow = false;
         m.receiveShadow = false;
@@ -1351,6 +1417,102 @@ export class Viewmodel {
       pos.x += (0.008 * ln - 0.01 * lsw) * hipK;
       pos.y += -0.006 * Math.abs(ln) * hipK - 0.004 * Math.abs(lsw);
       pos.z += 0.01 * Math.abs(ln) * hipK;
+    }
+
+    // ---------------- wall in front: high port (Update 46) ----------------
+    // the muzzle would go through the wall: the gun comes back and up, canted, the support hand
+    // still on it — aiming and firing wait until there is room
+    const obT = clamp(c.obstruct ?? 0, 0, 1);
+    this.obstructBlend = damp(this.obstructBlend, obT, obT > this.obstructBlend ? 11 : 7, dt);
+    const ob = easeInOutCubic(this.obstructBlend) * (1 - 0.6 * c.sprint);
+    if (ob > 1e-4) {
+      pos.z += 0.045 * ob;
+      pos.y -= 0.022 * ob;
+      pos.x += 0.018 * ob;
+      rot.x += 0.5 * ob;
+      rot.z += 0.34 * ob;
+      rot.y += -0.22 * ob;
+    }
+    // ---------------- braced on cover (Update 46) ----------------
+    const brT = clamp(c.brace ?? 0, 0, 1);
+    this.braceBlend = damp(this.braceBlend, brT, 9, dt);
+    const brc = this.braceBlend;
+    if (brT > 0.5 && !this.braceWas) {
+      // settling onto the ledge: a small drop and a soft knock
+      this.recoilP.impulse(0, -0.05, 0.01);
+      this.recoilR.impulse(-0.02, 0, 0.01);
+      this.onEvent('brace');
+    }
+    this.braceWas = brT > 0.5;
+    if (brc > 1e-4) {
+      pos.y -= 0.0018 * brc;
+      this.swayR.value.multiplyScalar(1 - 0.5 * brc);
+      this.swayP.value.multiplyScalar(1 - 0.5 * brc);
+    }
+    // ---------------- barrel heat glow (Update 46) ----------------
+    if (this.heatSleeve) {
+      const hk = c.heat ?? 0;
+      this.heatSleeve.visible = hk > 0.62;
+      this.heatMat.uniforms.uHeat.value = hk;
+      this.heatMat.uniforms.uTime.value = this.t;
+    }
+
+    // ---------------- body state (Update 46): breathing, injuries, where you look ----------------
+    {
+      // winded after a sprint: slow deep heaves that fade as you get your breath back
+      const wd = clamp(c.winded ?? 0, 0, 1) * (1 - 0.6 * ads);
+      if (wd > 1e-3) {
+        const hv = Math.sin(this.t * 3.4);
+        pos.y += hv * 0.004 * wd;
+        rot.x += hv * 0.012 * wd;
+        pos.z += Math.max(0, hv) * 0.002 * wd;
+      }
+      // hurt: the hands shake a little and the gun drifts, worse the lower your health
+      const hu = clamp(c.hurt ?? 0, 0, 1);
+      if (hu > 0.4) {
+        const k = (hu - 0.4) / 0.6 * lerp(1, 0.55, ads);
+        rot.z += (Math.sin(this.t * 7.3) * 0.5 + Math.sin(this.t * 13.1) * 0.5) * 0.006 * k;
+        rot.x += Math.sin(this.t * 1.7) * 0.01 * k;
+        pos.x += Math.sin(this.t * 2.3) * 0.0025 * k;
+      }
+      // looking steeply down the gun tucks in toward the chest; looking up it settles lower
+      const pt = c.pitch ?? 0;
+      pos.z += clamp(-pt - 0.55, 0, 0.6) * 0.03 * nonAds;
+      rot.x += clamp(-pt - 0.55, 0, 0.6) * 0.12 * nonAds;
+      pos.y -= clamp(pt - 0.6, 0, 0.6) * 0.02 * nonAds;
+    }
+    // ---------------- idle fidgets (Update 46) ----------------
+    // standing still a while, the hands do something: tip the gun to glance at the ejection port,
+    // or roll it out and back as if easing a tired grip
+    const still = c.speed01 < 0.05 && Math.abs(c.lookDX) + Math.abs(c.lookDY) < 0.004 && !this.action && c.ads < 0.05 && !c.firing && c.sprint < 0.05;
+    this.idleFor = still ? this.idleFor + dt : Math.min(this.idleFor, 0);
+    if (this.fidgetT < 0 && this.idleFor > 11) {
+      this.fidgetT = 0;
+      this.fidgetKind = Math.random() < 0.5 ? 0 : 1;
+      this.idleFor = -(6 + Math.random() * 10);
+      this.onEvent('inspect1');
+    }
+    if (this.fidgetT >= 0) {
+      if (!still) this.fidgetT = -1;
+      else {
+        this.fidgetT += dt;
+        const D = 2.3;
+        const u = clamp(this.fidgetT / D, 0, 1);
+        const bump = Math.sin(u * Math.PI) * (1 - 0.15 * Math.sin(u * Math.PI * 3));
+        if (this.fidgetKind === 0) {
+          // tip it over to look at the port
+          rot.z += 0.42 * bump;
+          rot.y += -0.1 * bump;
+          pos.y += 0.012 * bump;
+          pos.x += -0.012 * bump;
+        } else {
+          // roll the wrists out and back, settling the grip
+          rot.z += -0.18 * bump;
+          rot.x += 0.06 * bump;
+          pos.z += 0.012 * bump;
+        }
+        if (u >= 1) this.fidgetT = -1;
+      }
     }
 
     // ---------------- weapon life: full-auto shake & post-burst settle ----------------
@@ -2341,6 +2503,12 @@ export class Viewmodel {
     const p = new THREE.Vector3(), q = new THREE.Quaternion(), sc = new THREE.Vector3();
     this.magTmp.copy(mag.matrixWorld).decompose(p, q, sc);
     return { p, q, mesh: mag };
+  }
+
+  /** Fire-mode change (Update 46): the thumb rocks the selector — the gun rolls a touch and settles. */
+  modeFlick() {
+    this.recoilR.impulse(0.01, -0.006, -0.05);
+    this.recoilP.impulse(0.004, 0.003, 0);
   }
 
   /** Spring jolt used when parts seat (mag in, bolt home). */

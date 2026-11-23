@@ -1,6 +1,6 @@
 import * as THREE from 'three';
-import { addLaser } from './Laser';
-import { PartBuilder, profile, cyl, lathe, rbox, picatinny, pin, bez, socket, P2, setFinish, patchWeaponMaterial } from './ModelKit';
+import { addLaser, addWeaponLight } from './Laser';
+import { PartBuilder, profile, cyl, lathe, rbox, picatinny, pin, bez, socket, P2, setFinish, patchWeaponMaterial, engraving } from './ModelKit';
 import { MaterialLib, patchSurfaceMaterial } from '../render/Materials';
 
 export interface WeaponModel {
@@ -2428,6 +2428,56 @@ function cloneModel(t: WeaponModel): WeaponModel {
   if (t.root.userData.setBipod) root.userData.setBipod = bipodSetter(root);
   return { ...t, root: root as THREE.Group, parts, sockets, scopeLens: remap(t.scopeLens), reticle: remap(t.reticle) };
 }
+/**
+ * Roll marks (Update 46): the model and maker on the receiver's left side (the side you see in
+ * first person), calibre and serial beneath; on the pistols the slide carries them, so they ride
+ * back with it. Placed by casting a ray at the receiver beside the ejection port (or the magwell)
+ * so they sit on whatever surface is there, and parented to the part that was hit.
+ */
+const MARKS: Partial<Record<keyof typeof RAW_BUILDERS, { lines: string[]; at?: 'eject' | 'mag'; dv?: number; du?: number; w?: number }>> = {
+  k416: { lines: ['K416 · FJORD ARMS', 'KAL 5,56×45 · NR 041622'], at: 'mag', dv: 0.022, w: 0.054 },
+  ks17: { lines: ['KS-17 · KVITVIK', 'KAL 5,56 · NR 17-2210'], at: 'mag', dv: 0.022, w: 0.05 },
+  hval47: { lines: ['HVAL-47', '7,62×39 · 1947-B'], at: 'mag', dv: 0.026, w: 0.05 },
+  mp7: { lines: ['MP7 · PDW', '4,6×30'], at: 'eject', dv: -0.012, w: 0.04 },
+  lmg: { lines: ['KVL-7 · FJORD ARMS', 'KAL 5,56 · BELTE'], at: 'eject', dv: -0.022, du: -0.03, w: 0.06 },
+  skv338: { lines: ['SKV .338 LAPUA MAG', 'NR 338-0412'], at: 'eject', dv: -0.014, du: 0.02, w: 0.06 },
+  dmr14: { lines: ['FJ-14 · 7,62×51'], at: 'eject', dv: -0.016, w: 0.05 },
+  p80: { lines: ['P80 · NORDFJORD', '9×19 · 80-04471'], at: 'eject', dv: -0.002, du: -0.025, w: 0.05 },
+  mp18: { lines: ['MP-18 · 9×19'], at: 'eject', dv: -0.008, w: 0.04 },
+  ums45: { lines: ['UMS-45 · .45 ACP'], at: 'eject', dv: -0.012, w: 0.045 },
+  stille9: { lines: ['STILLE-9', '9×19 · LYDDEMPET'], at: 'mag', dv: 0.02, w: 0.045 },
+  pump12: { lines: ['PUMP-12 · KAL 12/76'], at: 'eject', dv: -0.012, du: -0.02, w: 0.055 },
+  as20: { lines: ['AS-20 · KAL 12'], at: 'mag', dv: 0.02, w: 0.05 },
+  kr98: { lines: ['KR-98k · 7,92×57'], at: 'eject', dv: -0.012, du: 0.0, w: 0.05 },
+};
+function addMarks(id: keyof typeof RAW_BUILDERS, t: WeaponModel) {
+  const spec = MARKS[id];
+  if (!spec) return;
+  const ref = spec.at === 'mag' ? t.sockets.magWell ?? t.sockets.eject : t.sockets.eject ?? t.sockets.magWell;
+  if (!ref) return;
+  t.root.updateMatrixWorld(true);
+  const rp = ref.getWorldPosition(new THREE.Vector3());
+  const u = -rp.z + (spec.du ?? 0), v = rp.y + (spec.dv ?? 0);
+  const ray = new THREE.Raycaster(new THREE.Vector3(-1, v, -u), new THREE.Vector3(1, 0, 0), 0, 2);
+  const targets: THREE.Object3D[] = [];
+  t.root.traverse((o) => {
+    const m = o as THREE.Mesh;
+    if (m.isMesh && !m.name.startsWith('irons') && !(m.material as THREE.Material).transparent && !/glass|laser|reticle/i.test(m.name)) targets.push(m);
+  });
+  const hit = ray.intersectObjects(targets, false)[0];
+  if (!hit || !hit.face) return;
+  const n = hit.face.normal.clone().transformDirection(hit.object.matrixWorld);
+  if (n.x > -0.75) return; // not a flat side face: leave it plain
+  const w = spec.w ?? 0.05, h = w * (spec.lines.length > 1 ? 0.3 : 0.17);
+  const dec = engraving(spec.lines, u, v, hit.point.x, w, h, -1);
+  // ride with the part that was hit (the pistol's slide), in its local space
+  const owner = hit.object.parent ?? t.root;
+  owner.updateMatrixWorld(true);
+  const inv = owner.matrixWorld.clone().invert();
+  dec.position.applyMatrix4(inv);
+  dec.quaternion.premultiply(new THREE.Quaternion().setFromRotationMatrix(inv));
+  owner.add(dec);
+}
 function cachedBuild(id: keyof typeof RAW_BUILDERS, mats: WeaponMats): WeaponModel {
   let m = templates.get(mats);
   if (!m) templates.set(mats, (m = new Map()));
@@ -2435,6 +2485,12 @@ function cachedBuild(id: keyof typeof RAW_BUILDERS, mats: WeaponMats): WeaponMod
   if (!t) {
     setFinish(id);
     m.set(id, (t = RAW_BUILDERS[id](mats)));
+    try {
+      addMarks(id, t);
+    } catch {
+      /* a gun without a flat side keeps no marks */
+    }
+    addWeaponLight(t.root, t.sockets, mats);
   }
   return cloneModel(t);
 }

@@ -76,6 +76,23 @@ export const SoldierStyle = {
   },
 };
 
+/** uniforms every soldier material shares (Update 46): time (strobes), the viewer's night-vision
+ *  level (IR strobes only show through goggles) and how much daylight there is (cloth sheen) */
+export const SOLDIER_SHARED = { uTime: { value: 0 }, uStrobe: { value: 0 }, uLight: { value: 1 } };
+
+/**
+ * The soldier material (Update 46 rewrite). One MeshStandardMaterial, every part told apart by
+ * its aMat kind, with the detail computed from the bind-pose position (metric, so every garment
+ * shares one scale):
+ *  - camo cloth: the faction pattern, a fine rip-stop weave (faded out with distance so it never
+ *    shimmers), soft wrinkles, and a velvet sheen at grazing angles
+ *  - nylon webbing: MOLLE rows (25 mm straps, 13 mm gaps) with bar-tack stitching and cordura grain
+ *  - skin: a warm subsurface lift, pores, slight oil on the T-zone
+ *  - knit: vertical ribbing, fuzzy roughness · hard plastic: fine stipple
+ *  - the shoulder flag patch (Norway's cross for Kystjegerne, a peak-and-raven mark for Nordfront)
+ *  - the helmet IR strobe, blinking only through night vision
+ *  - mud and dust climbing from the boots up the trouser legs and onto the knees
+ */
 function makeMaterial(team: 0 | 1) {
   const m = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 1, metalness: 0, envMapIntensity: 0.8 });
   m.name = 'soldier';
@@ -84,28 +101,134 @@ function makeMaterial(team: 0 | 1) {
   m.userData.uCamo = { value: SoldierStyle.camo(team) };
   m.userData.uTeam = { value: TEAM_COL[team].clone() };
   m.userData.uNVG = { value: 0 };
+  m.userData.uFaction = { value: team };
   m.onBeforeCompile = (sh) => {
     sh.uniforms.uCamo = m.userData.uCamo;
     sh.uniforms.uTeam = m.userData.uTeam;
     sh.uniforms.uNVG = m.userData.uNVG;
+    sh.uniforms.uFaction = m.userData.uFaction;
+    sh.uniforms.uTime = SOLDIER_SHARED.uTime;
+    sh.uniforms.uStrobe = SOLDIER_SHARED.uStrobe;
+    sh.uniforms.uLight = SOLDIER_SHARED.uLight;
     sh.vertexShader = sh.vertexShader
-      .replace('#include <common>', '#include <common>\nattribute vec3 aMat; varying vec3 vMat; varying vec2 vCamoUv; uniform float uNVG;')
+      .replace('#include <common>', '#include <common>\nattribute vec3 aMat; varying vec3 vMat; varying vec2 vCamoUv; varying vec3 vBind; uniform float uNVG;')
       .replace('#include <begin_vertex>', `#include <begin_vertex>
-        vMat = aMat; vCamoUv = uv;
+        vMat = aMat; vCamoUv = uv; vBind = position;
         // goggles: lowered tubes only when worn down, raised ones otherwise (collapsed to a point)
         if ((aMat.x > 2.5 && aMat.x < 3.5 && uNVG < 0.5) || (aMat.x > 3.5 && aMat.x < 4.5 && uNVG > 0.5)) transformed = vec3(0.0, 1.7, 0.0);`);
     sh.fragmentShader = sh.fragmentShader
-      .replace('#include <common>', '#include <common>\nvarying vec3 vMat; varying vec2 vCamoUv; uniform sampler2D uCamo; uniform vec3 uTeam;')
+      .replace('#include <common>', `#include <common>
+        varying vec3 vMat; varying vec2 vCamoUv; varying vec3 vBind; uniform sampler2D uCamo; uniform vec3 uTeam;
+        uniform float uTime; uniform float uStrobe; uniform float uLight; uniform float uFaction;
+        float sH(vec3 p){ return fract(sin(dot(p, vec3(127.1, 311.7, 74.7))) * 43758.5453); }
+        float sN(vec3 p){ vec3 i = floor(p), f = fract(p); f = f*f*(3.0-2.0*f);
+          return mix(mix(mix(sH(i), sH(i+vec3(1,0,0)), f.x), mix(sH(i+vec3(0,1,0)), sH(i+vec3(1,1,0)), f.x), f.y),
+                     mix(mix(sH(i+vec3(0,0,1)), sH(i+vec3(1,0,1)), f.x), mix(sH(i+vec3(0,1,1)), sH(i+vec3(1,1,1)), f.x), f.y), f.z); }`)
       .replace('#include <color_fragment>', `#include <color_fragment>
         float kind = vMat.x;
-        if (kind < 0.5) diffuseColor.rgb = texture2D(uCamo, vCamoUv).rgb * vColor.rgb;
-        else if (kind < 2.5 && kind > 1.5) diffuseColor.rgb = uTeam;`)
-      .replace('#include <roughnessmap_fragment>', 'float roughnessFactor = vMat.y;')
+        vec3 bp = vBind;
+        float bumpH = 0.0, bumpK = 0.0, roughAdd = 0.0;
+        vec3 glow = vec3(0.0);
+        // how fine a detail this pixel can still show (fades micro detail with distance)
+        float fine = clamp(1.0 - length(fwidth(bp)) * 260.0, 0.0, 1.0);
+        float mid = clamp(1.0 - length(fwidth(bp)) * 40.0, 0.0, 1.0);
+        if (kind < 0.5) {
+          diffuseColor.rgb = texture2D(uCamo, vCamoUv).rgb * vColor.rgb;
+          // rip-stop weave: a fine grid with a heavier thread every 6 mm
+          float wv = sin(bp.x * 2400.0 + bp.z * 2400.0) * sin(bp.y * 2400.0);
+          float rip = max(smoothstep(0.88, 0.97, abs(sin(bp.y * 520.0))), smoothstep(0.88, 0.97, abs(sin((bp.x + bp.z) * 520.0))));
+          bumpH += (wv * 0.00012 + rip * 0.00018) * fine;
+          diffuseColor.rgb *= 1.0 - rip * 0.06 * fine;
+          // wrinkles: soft folds running round the limbs
+          float wr = sN(vec3(bp.x * 22.0, bp.y * 5.0, bp.z * 22.0)) * 0.7 + sN(vec3(bp.x * 50.0, bp.y * 12.0, bp.z * 50.0)) * 0.3;
+          bumpH += wr * 0.0012 * mid;
+          diffuseColor.rgb *= 0.93 + 0.12 * wr;
+          bumpK = 1.0;
+        } else if (kind > 1.5 && kind < 2.5) {
+          diffuseColor.rgb = uTeam;
+        } else if (kind > 6.5 && kind < 7.5) {
+          // nylon webbing: MOLLE rows, bar-tacks, cordura grain
+          float row = fract(bp.y / 0.0381);
+          float gap = smoothstep(0.62, 0.66, row) * (1.0 - smoothstep(0.96, 1.0, row));
+          float tack = smoothstep(0.9, 0.97, abs(sin((bp.x + bp.z * 0.7) * 82.0))) * (1.0 - gap);
+          float grain = sN(bp * 900.0);
+          diffuseColor.rgb *= mix(1.0, 0.62, gap * mid) * (1.0 + tack * 0.12 * fine) * (0.94 + 0.1 * grain * fine);
+          bumpH += (-gap * 0.0012 + grain * 0.00008) * mid;
+          bumpK = 1.0;
+        } else if (kind > 7.5 && kind < 8.5) {
+          // skin: pores and a little shine on the forehead and nose
+          float pore = sN(bp * 1800.0);
+          bumpH += pore * 0.00006 * fine;
+          bumpK = 1.0;
+          roughAdd -= 0.12 * smoothstep(0.1, 0.0, abs(bp.x)) * smoothstep(1.64, 1.7, bp.y);
+          diffuseColor.rgb *= 0.97 + 0.06 * sN(bp * 260.0);
+        } else if (kind > 8.5 && kind < 9.5) {
+          // IR strobe: a short double blink every ~1.2 s, seen only through night vision
+          float ph = fract(uTime * 0.85 + sH(floor(bp * 50.0)));
+          float blink = step(ph, 0.04) + step(abs(ph - 0.11), 0.03);
+          glow += vec3(0.7, 1.0, 0.8) * blink * uStrobe * 14.0;
+          diffuseColor.rgb *= 0.4;
+        } else if (kind > 9.5 && kind < 10.5) {
+          // the shoulder patch, drawn in its own uv (0..1 across the face)
+          vec2 u = fract(vCamoUv);
+          vec3 c;
+          if (uFaction < 0.5) {
+            // Norway: red field, white-edged blue Nordic cross
+            float cx = abs(u.x - 0.36) * 22.0, cy = abs(u.y - 0.5) * 16.0;
+            float m = min(cx, cy);
+            c = m < 1.0 ? vec3(0.0, 0.13, 0.36) : m < 2.0 ? vec3(0.9) : vec3(0.65, 0.05, 0.1);
+            c *= 0.75; // subdued, sewn-on
+          } else {
+            // Nordfront: charcoal with three pale peaks
+            float pk = 0.25 + 0.45 * (1.0 - abs(fract(u.x * 1.5) - 0.5) * 2.0);
+            c = u.y < pk ? vec3(0.62, 0.6, 0.55) : vec3(0.1, 0.1, 0.1);
+          }
+          diffuseColor.rgb = c;
+        } else if (kind > 10.5 && kind < 11.5) {
+          // knit: vertical ribs
+          float rib = sin((bp.x * 0.7 + bp.z) * 700.0);
+          bumpH += rib * 0.0002 * fine;
+          bumpK = 1.0;
+          diffuseColor.rgb *= 0.92 + 0.08 * rib * fine;
+        } else if (kind > 11.5 && kind < 12.5) {
+          float st = sN(bp * 1500.0);
+          bumpH += st * 0.00005 * fine;
+          bumpK = 1.0;
+          roughAdd += (st - 0.5) * 0.1;
+        }
+        // mud and dust: from the boot soles up the trouser legs, heavier on the knees and the shins
+        if (kind < 1.5 || (kind > 6.5 && kind < 7.5)) {
+          float n = sN(bp * 9.0) * 0.6 + sN(bp * 31.0) * 0.4;
+          float dirt = smoothstep(0.42, 0.02, bp.y + n * 0.16) + smoothstep(0.05, 0.0, abs(bp.y - 0.5) - 0.06) * step(0.03, bp.z) * 0.7;
+          dirt = clamp(dirt * (0.55 + 0.45 * n), 0.0, 0.85);
+          diffuseColor.rgb = mix(diffuseColor.rgb, vec3(0.23, 0.2, 0.15), dirt * 0.65);
+          roughAdd += dirt * 0.15;
+        }`)
+      .replace('#include <roughnessmap_fragment>', 'float roughnessFactor = clamp(vMat.y + roughAdd, 0.04, 1.0);')
       .replace('#include <metalnessmap_fragment>', 'float metalnessFactor = vMat.z;')
+      .replace('#include <normal_fragment_maps>', `#include <normal_fragment_maps>
+        {
+          // micro detail as a screen-space bump (no tangents needed)
+          vec3 dpdx = dFdx(-vViewPosition), dpdy = dFdy(-vViewPosition);
+          float dhx = dFdx(bumpH), dhy = dFdy(bumpH);
+          if (bumpK > 0.0) {
+            vec3 r1 = cross(dpdy, normal), r2 = cross(normal, dpdx);
+            float det = dot(dpdx, r1);
+            vec3 grad = sign(det) * (dhx * r1 + dhy * r2);
+            normal = normalize(abs(det) * normal - grad * 1.0);
+          }
+        }`)
       .replace('#include <emissivemap_fragment>', `#include <emissivemap_fragment>
-        if (vMat.x > 1.5 && vMat.x < 2.5) totalEmissiveRadiance += uTeam * 0.12;`);
+        if (vMat.x > 1.5 && vMat.x < 2.5) totalEmissiveRadiance += uTeam * 0.12;
+        totalEmissiveRadiance += glow;
+        {
+          float ndv = clamp(dot(normal, normalize(vViewPosition)), 0.0, 1.0);
+          // cloth sheen at grazing angles (fibres catching the sky), skin's warm subsurface lift
+          if (kind < 0.5 || (kind > 6.5 && kind < 7.5) || (kind > 10.5 && kind < 11.5)) totalEmissiveRadiance += diffuseColor.rgb * pow(1.0 - ndv, 4.0) * 0.16 * uLight;
+          if (kind > 7.5 && kind < 8.5) totalEmissiveRadiance += diffuseColor.rgb * vec3(0.05, 0.016, 0.01) * uLight;
+        }`);
   };
-  m.customProgramCacheKey = () => 'soldier1';
+  m.customProgramCacheKey = () => 'soldier2';
   SoldierStyle.live.add(m);
   return m;
 }
@@ -196,6 +319,7 @@ export class Soldier {
     this.team = t;
     this.material.userData.team = t;
     this.material.userData.uCamo.value = SoldierStyle.camo(t);
+    this.material.userData.uFaction.value = t;
     this.material.userData.uTeam.value.copy(TEAM_COL[t]);
     // gear colours follow the faction
     this.lods = [null, null, null];
@@ -211,7 +335,13 @@ export class Soldier {
   setWeapon(w: WeaponModel | null) {
     if (this.weapon) this.weapon.root.removeFromParent();
     this.weapon = w;
-    if (w) this.model.add(w.root);
+    if (w) {
+      this.model.add(w.root);
+      // roll marks are for close-ups (first person, the bench): a soldier's gun skips the extra draw
+      w.root.traverse((o) => {
+        if (o.name === 'engraving') o.visible = false;
+      });
+    }
   }
 
   /** the anim events raised since the last call (e.g. 'magOut') */

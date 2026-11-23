@@ -67,6 +67,11 @@ export interface HUDState {
   scoped: boolean;
   hint?: string;
   teamNames: [string, string];
+  /** Update 46 handling: barrel heat 0..1+, LMG lock-out, braced on cover, muzzle against a wall */
+  heat?: number;
+  overheated?: boolean;
+  braced?: boolean;
+  obstructed?: boolean;
 }
 /** something on the compass ribbon: bearing in degrees (0 = north) */
 export interface CompassMark { bearing: number; kind: 'flag' | 'ping' | 'wp' | 'foe'; label?: string; rel?: 'f' | 'e' | 'n' }
@@ -359,7 +364,7 @@ export class UI {
         ['G', 'Lethal (hold: cook / aim)'], ['T', 'Tactical'], ['H', 'Field upgrade'], ['V', 'Melee · hold: knife'],
         ['3 4 5', 'Killstreaks'], ['N', 'Night vision'], ['X', 'Ping'], ['M', 'Chart (tactical map)'],
         ['Y', 'Squad orders (hold)'], ['TAB', 'Scoreboard · RMB: cursor'], ['ENTER / U', 'Chat · team chat'], ['K', 'Push to talk'],
-        ['F6', 'Spectate / free camera'], ['F3', 'Performance overlay'], ['ESC', 'Pause · loadout · settings'], ['1–5 (dead)', 'Loadout for next life'],
+        ['L', 'Weapon light'], ['F6', 'Spectate / free camera'], ['F3', 'Performance overlay'], ['ESC', 'Pause · loadout · settings'], ['1–5 (dead)', 'Loadout for next life'],
       ];
       pane.innerHTML = `<div class="ptitle"><small>02 · FELTHÅNDBOK</small>FIELD MANUAL<em>All keys can be rebound in Settings</em></div>
         <div class="manual paper-card"><div class="mg">${rows.map(([k, v], i) => `<div style="--i:${i}"><b>${k}</b><span>${v}</span></div>`).join('')}</div></div>`;
@@ -1006,11 +1011,12 @@ export class UI {
       <div class="streaks ctx"></div>
       <div class="nades ctx"></div>
       <div class="health ctx gone"><span class="hl">HP</span><div class="hb"><i class="hf"></i></div><span class="hv">100</span></div>
-      <div class="ammo ctx"><div class="wn"></div><div class="fm"></div><div class="nums"><b class="mag">30</b><span class="res">/ 120</span></div><div class="pips"></div></div>
+      <div class="ammo ctx"><div class="wn"></div><div class="fm"></div><div class="nums"><b class="mag">30</b><span class="res">/ 120</span></div><div class="pips"></div><div class="heat"><span>BARREL</span><b><i class="hfill"></i></b></div></div>
+      <div class="brace"><i></i><span>BRACED</span></div>
       <div class="fps hidden"></div>
       <div class="scope hidden"><div class="ring"></div></div>`;
     const q = (s: string) => e.querySelector(s) as HTMLElement;
-    for (const k of ['s0', 's1', 'p0', 'p1', 'clock', 'strip', 'marks', 'brg', 'loc', 'crosshair', 'hitmarker', 'hf', 'hv', 'mag', 'res', 'wn', 'fm', 'pips', 'prompt', 'fps', 'scope', 'health', 'ammo', 'streaks', 'nades']) this.els[k] = q('.' + k);
+    for (const k of ['s0', 's1', 'p0', 'p1', 'clock', 'strip', 'marks', 'brg', 'loc', 'crosshair', 'hitmarker', 'hf', 'hv', 'mag', 'res', 'wn', 'fm', 'pips', 'prompt', 'fps', 'scope', 'health', 'ammo', 'streaks', 'nades', 'heat', 'hfill', 'brace']) this.els[k] = q('.' + k);
     this.feedEl = q('.feed');
     this.notifyEl = q('.notify');
     this.dmgEl = q('.dmg');
@@ -1119,9 +1125,15 @@ export class UI {
     c.eqT += dt;
     setCls(e.streaks, `streaks ctx ${c.streakT > 6 && !this.streakReady ? 'quiet' : ''}`);
     setCls(e.nades, `nades ctx ${c.eqT > 5 ? 'quiet' : ''}`);
+    // barrel heat bar (shows once the barrel is warm), the braced chip
+    const heat = s.heat ?? 0;
+    setCls(e.heat, `heat ${heat > 0.18 ? 'on' : ''} ${heat > 0.75 || s.overheated ? 'hot' : ''} ${s.overheated ? 'lock' : ''}`);
+    setStyle(e.hfill, 'width', `${Math.min(100, heat * 100).toFixed(0)}%`);
+    setCls(e.brace, `brace ${s.braced ? 'on' : ''}`);
     // prompt
     let prompt = '';
     if (s.outOfBounds > 0) prompt = `<span class="warn">RETURN TO THE COMBAT AREA</span> ${Math.ceil(s.outOfBounds)}`;
+    else if (s.overheated) prompt = '<span class="warn">OVERHEATED</span> <span class="dim">· LET IT COOL</span>';
     else if (s.hint) prompt = `<span class="dim">${s.hint}</span>`;
     else if (s.reloading) prompt = 'RELOADING';
     else if (s.magSize > 0 && s.mag === 0 && s.reserve === 0) prompt = '<span class="warn">NO AMMO</span>';
