@@ -290,6 +290,18 @@ export class SabBrain {
     }
   }
 
+  /** human players in the match (the local player and remote players' puppets) */
+  private humans(): Combatant[] {
+    const g = this.g;
+    return [g.avatar, ...this.bots().filter((x) => x.netPuppet && x.netHuman)];
+  }
+  /** a bot that just picked the charge up joins the main group on the most direct lane */
+  private becomeCarrier(b: Bot) {
+    const lanes = ROUTES.filter((x) => x.site === this.site);
+    const st = this.atk.get(b.id);
+    if (!lanes.length || !st || (st.role === 'main' && st.route === lanes[0].pts)) return;
+    this.atk.set(b.id, { route: lanes[0].pts, i: 0, stage: lanes[0].pts.length - 2, role: 'main', held: false });
+  }
   private order(b: Bot, kind: 'attack' | 'defend' | 'hold', p: THREE.Vector3, look?: THREE.Vector3, arrive = 2.2, walk = false) {
     const o = b.order;
     if (o && o.kind === kind && o.pos.distanceToSquared(p) < 0.25 && (!look || (o.look && o.look.distanceToSquared(look) < 1))) {
@@ -305,11 +317,14 @@ export class SabBrain {
     void now;
     // a dropped charge: the nearest attacker fetches it
     if (ch.state === 'dropped') {
+      // at round start (it spawns in our spawn) a human attacker close to it gets a few seconds to
+      // grab it first; otherwise the nearest bot goes for it
+      const humanNear = ch.fresh && sab.liveT < 6 && this.humans().some((h) => h.alive && h.team === sab.atk && h.position().distanceTo(ch.pos) < 30);
       const mates = this.bots().filter((x) => x.team === sab.atk);
       const nearest = mates.sort((a, c) => a.position().distanceTo(ch.pos) - c.position().distanceTo(ch.pos))[0];
-      if (nearest === b) {
+      if (nearest === b && !humanNear) {
         this.order(b, 'attack', ch.pos.clone(), undefined, 0.8);
-        sab.tryPickup(b);
+        if (sab.tryPickup(b)) this.becomeCarrier(b);
         return;
       }
     }

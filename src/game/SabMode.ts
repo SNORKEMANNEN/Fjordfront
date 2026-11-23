@@ -72,6 +72,7 @@ export class SabMode {
       exploded: (p, by) => self.exploded(p, by),
       badWire: (c) => self.badWire(c),
       chargeMoved: (st, c) => self.chargeMoved(st, c),
+      chargeSpawn: () => self.chargeSpawnPos(),
       swap: (k) => self.swap(k),
       matchEnd: (w) => self.matchEnd(w),
       callout: (k, c, n) => self.callout(k, c, n),
@@ -136,6 +137,13 @@ export class SabMode {
   }
 
   // ================================================================ hooks
+  /** the charge's place at round start: open paving in the attackers' spawn, in front of the spawn
+   *  line and clear of the station fountain */
+  private chargeSpawnPos() {
+    const p = new THREE.Vector3(6, 0, 56.5);
+    p.y = this.groundY(p.setY(this.g.terrain.heightAt(p.x, p.z) + 0.5));
+    return p;
+  }
   private spawnFor(team: 0 | 1, i: number) {
     const tSide = team === this.sab.atk;
     const pts = SV_SPAWNS.filter((s) => s.team === (tSide ? 0 : 1));
@@ -195,7 +203,7 @@ export class SabMode {
     this.sel = { lethal: null, tactical: null };
     this.pickNades();
     const side = this.sab.side(g.avatar.team);
-    this.ui.say(side === 'atk' ? 'ANGREP' : 'FORSVAR', side === 'atk' ? `PLANT THE CHARGE ON A OR B · RUNDE ${this.sab.round}` : `HOLD BOTH SITES · RUNDE ${this.sab.round}`, side, BUY_TIME - 1);
+    this.ui.say(side === 'atk' ? 'ANGREP' : 'FORSVAR', side === 'atk' ? `HENT LADNINGEN I SPAWN · PICK UP THE CHARGE, PLANT ON A OR B · RUNDE ${this.sab.round}` : `HOLD BOTH SITES · RUNDE ${this.sab.round}`, side, BUY_TIME - 1);
     this.openBuy();
     g.audio.play('uiReady', { bus: 'ui', gain: 0.45, reverb: 0 });
     g.audio.music.bedTo(null, 2);
@@ -316,6 +324,10 @@ export class SabMode {
   }
   private chargeMoved(st: string, c: Combatant | null) {
     const g = this.g;
+    if (st === 'dropped' && !c && this.sab.charge.fresh) {
+      this.chargeState('shut');
+      this.chargeMesh.rotation.set(0, Math.random() * Math.PI * 2, 0);
+    }
     if (st === 'dropped' && this.sab.charge.state === 'dropped') {
       this.chargeMesh.visible = true;
       const p = this.sab.charge.pos;
@@ -988,6 +1000,12 @@ export class SabMode {
     if (s.round !== prev.rd || (s.phase === 'buy' && prev.ph !== 'buy')) this.clientRoundStart();
     if (s.phase === 'live' && prev.ph === 'buy') this.goLive();
     if (s.charge.state === 'planted' && prev.ch !== 'planted') this.planted(s.charge.planter ?? g.avatar, (s.charge.site ?? 'A') as 'A' | 'B', s.charge.pos.clone());
+    // the charge lying loose (the round-start spawn drop, a dead carrier) / picked up
+    if (s.charge.state === 'dropped' && (prev.ch !== 'dropped' || this.chargeMesh.position.distanceToSquared(s.charge.pos) > 0.25 || !this.chargeMesh.visible)) {
+      if (prev.ch !== 'dropped') this.chargeState('shut');
+      this.chargeMoved('dropped', null);
+    }
+    if (s.charge.state === 'carried' && prev.ch !== 'carried') this.chargeMoved('carried', s.charge.holder);
     if (s.charge.state === 'exploded' && prev.ch !== 'exploded') this.exploded(s.charge.pos.clone(), s.charge.planter);
     if (s.charge.state === 'defused' && prev.ch !== 'defused' && s.last) this.defused(s.last.mvp ?? g.avatar, false);
     if (m.last && m.last[6] !== prev.last && s.phase === 'post') {

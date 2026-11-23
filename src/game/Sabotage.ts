@@ -145,6 +145,8 @@ export interface Charge {
   /** the live wire (0..2) chosen at the plant */
   wire: number;
   planter: Combatant | null;
+  /** lying where it spawned at the start of the round, not yet picked up */
+  fresh?: boolean;
 }
 export interface RoundEnd {
   winner: 0 | 1;
@@ -160,6 +162,8 @@ export interface RoundEnd {
 export interface SabHooks {
   /** a round begins: respawn everyone, hand out kits, clean the world */
   roundStart(attackers: 0 | 1): void;
+  /** where the charge lies at the start of a round (the attackers' spawn) */
+  chargeSpawn?(attackers: 0 | 1): THREE.Vector3;
   /** the buy phase is over: release the freeze */
   goLive(): void;
   roundEnd(e: RoundEnd): void;
@@ -265,14 +269,23 @@ export class Sabotage {
     }
     this.charge = { state: 'none', holder: null, pos: new THREE.Vector3(), site: null, wire: Math.floor(Math.random() * 3), planter: null };
     this.hooks.roundStart(this.atk);
-    // the charge goes to an attacker (the game may hand it to someone else after the respawn)
-    const atk = this.seats.filter((s) => s.c.team === this.atk && s.c.alive);
-    if (atk.length) this.giveCharge(atk[Math.floor(Math.random() * atk.length)].c);
+    // the charge spawns on the ground in the attackers' spawn: whoever gets there first takes it
+    const at = this.hooks.chargeSpawn?.(this.atk);
+    if (at) {
+      this.charge.state = 'dropped';
+      this.charge.pos.copy(at);
+      this.charge.fresh = true;
+      this.hooks.chargeMoved('dropped', null);
+    } else {
+      const atk = this.seats.filter((s) => s.c.team === this.atk && s.c.alive);
+      if (atk.length) this.giveCharge(atk[Math.floor(Math.random() * atk.length)].c);
+    }
     const half = this.ot === 0 && this.roundsPlayed === HALF - 1;
     if (half) this.hooks.callout('lastRoundHalf', null);
     if (this.score[0] === this.target - 1 || this.score[1] === this.target - 1) this.hooks.callout('matchPoint', null);
   }
   giveCharge(c: Combatant) {
+    this.charge.fresh = false;
     this.charge.state = 'carried';
     this.charge.holder = c;
     this.charge.pos.copy(c.position());

@@ -290,6 +290,15 @@ URL options: `?quality=low|medium|high|ultra`, `?weather=clear|overcast|rain|sno
 - **Rifle:** support hand moved so it no longer shows through the optic window.
 - **Pistol:** hold reworked.
 
+## Update 44: The charge spawns in the attackers' spawn
+
+- **Nobody is handed the charge any more.** At the start of every round it lies on the ground in the attackers' spawn, on the open paving in front of the spawn line at the station, clear of the fountain.
+- **Any attacker can take it** by walking over it once the buy phase ends. You get a pickup notice ("DU HAR LADNINGEN"), and the round-start banner now tells attackers to pick it up.
+- **Attackers see it** in spawn as the gold dropped-charge icon on the minimap and the tactical map, and as a "LADNING" marker in the world.
+- **Bots leave it for you first.** If a human attacker is within 30 m, the bots wait about 6 seconds after the round goes live. If nobody takes it by then, the nearest bot fetches it.
+- **A bot that picks it up becomes the carrier.** It drops its own role (lurk or fake) and joins the main group on the most direct lane to the site the team picked.
+- **Online:** the spawned and dropped charge now also shows in the world for players who joined someone else's game, not only for the host.
+
 ## Update 43: The charge, reworked
 
 **A new charge, built from scratch**
