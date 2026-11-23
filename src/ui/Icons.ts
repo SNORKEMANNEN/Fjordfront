@@ -131,3 +131,19 @@ export const EMBLEMS: Record<0 | 1, string> = {
 export function emblem(team: number, cls = '') {
   return `<i class="emblem ${cls}">${EMBLEMS[(team === 1 ? 1 : 0) as 0 | 1]}</i>`;
 }
+
+/**
+ * The Nordlys brand mark (Update 45): a hexagonal badge round an aurora-lit pair of peaks over the
+ * fjord line. Each call gets its own gradient id (a gradient defined inside a hidden SVG does not
+ * paint elsewhere in Chrome, so instances never share one).
+ */
+let brandN = 0;
+export function brandMark(cls = '') {
+  const id = `ffbm${brandN++}`;
+  return `<i class="brandmark ${cls}"><svg viewBox="0 0 64 64" xmlns="http://www.w3.org/2000/svg" fill="none">
+    <defs><linearGradient id="${id}" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#5CF2C6"/><stop offset=".55" stop-color="#38CCFF"/><stop offset="1" stop-color="#9C7CFF"/></linearGradient></defs>
+    <path d="M32 3 58 18v28L32 61 6 46V18z" stroke="url(#${id})" stroke-width="2.4"/>
+    <path d="M14 44 25 26l6.5 9L40 20l10 24z" fill="url(#${id})"/>
+    <path d="M12 48.5h40" stroke="currentColor" stroke-width="2.4"/>
+  </svg></i>`;
+}

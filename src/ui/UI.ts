@@ -4,7 +4,7 @@ import { ACTION_LABELS, keysFor, keyLabel, applyKeybinds, Action } from '../core
 import { loadIce, saveIce, testIce } from '../net/Net';
 import { WEAPONS, PRIMARIES, SECONDARIES, WeaponDef } from '../weapons/WeaponDefs';
 import type { WeaponPreview } from './WeaponPreview';
-import { icon, emblem } from './Icons';
+import { icon, emblem, brandMark } from './Icons';
 import { openLoadout } from './LoadoutScreen';
 import { Build } from '../weapons/Attachments';
 import { WeaponId } from '../weapons/WeaponModels';
@@ -114,18 +114,18 @@ export interface UIHandlers {
 
 /** loading-screen lines: the map's own lore, then controls */
 const TIPS: [string, string][] = [
-  ['FRA KARTET · FROM THE CHART', "Kvitvika's harbour freezes over for only a few days each winter — the Gulf Stream keeps the fjord open."],
-  ['FRA KARTET · FROM THE CHART', 'Kystfortet was cut into the headland in 1942. Its guns still point at the fjord mouth; its tunnels still connect the batteries.'],
-  ['FRA KARTET · FROM THE CHART', 'The rorbuer on Brygga were fishermen\'s cabins for the winter cod season. Every one has a back door onto the quay.'],
-  ['FRA KARTET · FROM THE CHART', 'Hjellene — the drying racks — hang stockfish from February to June. Their timber frames stop nothing, but they hide everything.'],
-  ['FRA KARTET · FROM THE CHART', 'The road tunnel under Ryggen has two emergency exits on each side, and hatches up to the ridge.'],
-  ['FRA KARTET · FROM THE CHART', 'Fyret, the lighthouse, has guided boats past the skerries at the fjord mouth since 1894.'],
-  ['KONTROLLER · CONTROLS', 'Double-tap SHIFT for tactical sprint. Crouch while sprinting to slide; jump out of it to keep the speed.'],
-  ['KONTROLLER · CONTROLS', 'Hold Q / E to lean round corners. Aim at a closed door to ease it open a crack and peek.'],
-  ['KONTROLLER · CONTROLS', 'N flips the night-vision goggles down. At night they are the difference between seeing and guessing.'],
-  ['KONTROLLER · CONTROLS', 'Hold Y and flick the mouse to order your squad: attack, defend, follow, hold.'],
-  ['KONTROLLER · CONTROLS', 'Hold V for the combat knife. Throwing knives kill in one hit — walk over them to pick them up.'],
-  ['KONTROLLER · CONTROLS', 'M opens the chart: scroll to zoom, right-click for a waypoint, left-click to ping.'],
+  ['FRA FELTEN · FIELD NOTE', "Kvitvika's harbour freezes over for only a few days each winter — the Gulf Stream keeps the fjord open."],
+  ['FRA FELTEN · FIELD NOTE', 'Kystfortet was cut into the headland in 1942. Its guns still point at the fjord mouth; its tunnels still connect the batteries.'],
+  ['FRA FELTEN · FIELD NOTE', 'The rorbuer on Brygga were fishermen\'s cabins for the winter cod season. Every one has a back door onto the quay.'],
+  ['FRA FELTEN · FIELD NOTE', 'Hjellene — the drying racks — hang stockfish from February to June. Their timber frames stop nothing, but they hide everything.'],
+  ['FRA FELTEN · FIELD NOTE', 'The road tunnel under Ryggen has two emergency exits on each side, and hatches up to the ridge.'],
+  ['FRA FELTEN · FIELD NOTE', 'Fyret, the lighthouse, has guided boats past the skerries at the fjord mouth since 1894.'],
+  ['TAKTIKK · TACTICS', 'Double-tap SHIFT for tactical sprint. Crouch while sprinting to slide; jump out of it to keep the speed.'],
+  ['TAKTIKK · TACTICS', 'Hold Q / E to lean round corners. Aim at a closed door to ease it open a crack and peek.'],
+  ['TAKTIKK · TACTICS', 'N flips the night-vision goggles down. At night they are the difference between seeing and guessing.'],
+  ['TAKTIKK · TACTICS', 'Hold Y and flick the mouse to order your squad: attack, defend, follow, hold.'],
+  ['TAKTIKK · TACTICS', 'Hold V for the combat knife. Throwing knives kill in one hit — walk over them to pick them up.'],
+  ['TAKTIKK · TACTICS', 'M opens the chart: scroll to zoom, right-click for a waypoint, left-click to ping.'],
 ];
 
 export class UI {
@@ -169,7 +169,7 @@ export class UI {
   /** weapon name → white silhouette (data URL) rendered from the game's own 3D models */
   weaponIcon: ((name: string) => string | null) | null = null;
   /** play an interface sound (wired to the audio engine's 'ui' bus by the game) */
-  sfx: (name: 'uiHover' | 'uiConfirm' | 'uiBack' | 'uiReady' | 'uiHorn', gain?: number) => void = () => {};
+  sfx: (name: 'uiHover' | 'uiConfirm' | 'uiBack' | 'uiReady' | 'uiHorn' | 'uiWhoosh', gain?: number) => void = () => {};
   private settingsBack: 'menu' | 'pause' = 'menu';
   private loadoutBack: 'menu' | 'pause' = 'menu';
 
@@ -190,6 +190,18 @@ export class UI {
     this.deathEl = h('div', 'death hidden');
     root.append(this.hud, this.scoreboard, this.deathEl, this.menu, this.pause, this.end, this.settingsEl, this.loadoutEl, this.loading);
     this.wireSounds();
+    // range inputs fill with the aurora up to the thumb (--p), wherever they are
+    root.addEventListener('input', (ev) => {
+      const t = ev.target as HTMLInputElement;
+      if (t?.type === 'range') UI.fillRange(t);
+    }, true);
+  }
+  static fillRange(r: HTMLInputElement) {
+    const lo = +r.min || 0, hi = +r.max || 1;
+    r.style.setProperty('--p', `${(((+r.value - lo) / (hi - lo || 1)) * 100).toFixed(1)}%`);
+  }
+  private fillRanges(el: HTMLElement) {
+    el.querySelectorAll('input[type=range]').forEach((r) => UI.fillRange(r as HTMLInputElement));
   }
 
   /** interface sounds by delegation: a soft tick when the pointer reaches something clickable, a
@@ -219,7 +231,7 @@ export class UI {
     }, true);
   }
 
-  // ---------------------------------------------------------------- loading: a boat crossing the fjord
+  // ---------------------------------------------------------------- loading: aurora over the fjord
   private buildLoading() {
     // adopt the loading screen index.html already painted (no blank frame between page and game)
     const pre = document.getElementById('boot');
@@ -227,14 +239,13 @@ export class UI {
       pre.classList.add('screen', 'loading');
       return pre;
     }
-    return h('div', 'screen loading', `<div class="row"><span class="pct">0%</span><span class="bstatus">Loading</span></div><div class="tip"><small></small><span></span></div>`);
+    return h('div', 'screen loading', `<div class="foot"><div class="tip"><small></small><span></span></div><div class="row"><span class="pct">0%</span><span class="bstatus">Loading</span></div><div class="lbar"><s></s><i></i><b></b></div></div>`);
   }
 
   private loadP = 0;
   private tipI = 0;
   private tipT = 0;
-  private courseLen = 0;
-  /** progress never moves backwards; the boat sails the course as the game loads */
+  /** progress never moves backwards; the aurora bar fills as the game loads */
   private loadDrawT = 0;
   setLoading(p: number, status: string) {
     this.loadP = Math.max(this.loadP, Math.min(1, p));
@@ -244,16 +255,10 @@ export class UI {
     const tnow = performance.now();
     if (this.loadP < 1 && tnow - this.loadDrawT < 160) return;
     this.loadDrawT = tnow;
-    const course = L.querySelector('#course') as SVGPathElement | null;
-    if (course) {
-      if (!this.courseLen) this.courseLen = course.getTotalLength();
-      const len = this.courseLen;
-      const at = len * this.loadP;
-      (L.querySelector('.done') as SVGPathElement).setAttribute('stroke-dasharray', `${at.toFixed(1)} ${len + 10}`);
-      const a = course.getPointAtLength(at), b = course.getPointAtLength(Math.min(len, at + 4));
-      const ang = (Math.atan2(b.y - a.y, b.x - a.x) * 180) / Math.PI;
-      (L.querySelector('.boat') as SVGGElement).setAttribute('transform', `translate(${a.x.toFixed(1)} ${a.y.toFixed(1)}) rotate(${(ang * 0.6).toFixed(1)})`);
-    }
+    const bar = L.querySelector('.lbar i') as HTMLElement | null;
+    if (bar) bar.style.transform = `scaleX(${this.loadP.toFixed(3)})`;
+    const head = L.querySelector('.lbar b') as HTMLElement | null;
+    if (head) head.style.left = `${(this.loadP * 100).toFixed(1)}%`;
     setText(L.querySelector('.bstatus'), status);
     setText(L.querySelector('.pct'), `${pct}%`);
     const now = performance.now();
@@ -262,7 +267,11 @@ export class UI {
       const tip = L.querySelector('.tip') as HTMLElement | null;
       if (tip && this.tipI++ > 0) {
         const [k, v] = TIPS[(this.tipI + Math.floor(Math.random() * 3)) % TIPS.length];
-        tip.innerHTML = `<small>${k}</small><span>${v}</span>`;
+        tip.style.opacity = '0';
+        setTimeout(() => {
+          tip.innerHTML = `<small>${k}</small><span>${v}</span>`;
+          tip.style.opacity = '1';
+        }, 380);
       }
     }
   }
@@ -275,46 +284,64 @@ export class UI {
   // ---------------------------------------------------------------- main menu
   private menuTab: 'play' | 'manual' = 'play';
   private buildMenu() {
+    const mapLine = MAP_ID === 'solvik' ? 'SABOTASJE · SOLVIK, VESTLANDET' : `DOMINATION · ${MAP_ID === 'brosund' ? 'BROSUND, SUNNMØRE' : 'KVITVIKA, NORDLAND'}`;
     const e = h('div', 'screen menu hidden', `
+      <div class="menu-fx" aria-hidden="true"><i class="mfx-side"></i><i class="mfx-floor"></i><i class="mfx-aur a"></i><i class="mfx-aur b"></i><i class="mfx-scan"></i></div>
       <nav class="rail">
-        <div class="mark">${icon('anchor')}</div>
-        <button class="tab on" data-tab="play">${icon('play')}<span>PLAY</span></button>
-        <button class="tab" data-tab="loadout">${icon('loadout')}<span>LOADOUT</span></button>
-        <button class="tab" data-tab="settings">${icon('settings')}<span>SETTINGS</span></button>
-        <button class="tab" data-tab="manual">${icon('manual')}<span>MANUAL</span></button>
+        <div class="mark">${brandMark()}</div>
+        <div class="tabs-nav">
+          <button class="tab on" data-tab="play">${icon('play')}<span>PLAY</span></button>
+          <button class="tab" data-tab="loadout">${icon('loadout')}<span>LOADOUT</span></button>
+          <button class="tab" data-tab="settings">${icon('settings')}<span>SETTINGS</span></button>
+          <button class="tab" data-tab="manual">${icon('manual')}<span>MANUAL</span></button>
+          <i class="tab-ink"></i>
+        </div>
         <div class="grow"></div>
-        <div class="ver">KART<br>NR. 29</div>
+        <div class="netdot"><i></i><span>OFFLINE READY</span></div>
+        <div class="ver">BUILD 45 · NORDLYS</div>
       </nav>
       <div class="menu-body">
-        <div class="brand"><div class="wordmark">FJORDFRONT</div><div class="tagline"><i></i>${MAP_ID === 'solvik' ? 'SABOTASJE · SOLVIK, VESTLANDET' : `DOMINATION · ${MAP_ID === 'brosund' ? 'BROSUND, SUNNMØRE' : 'KVITVIKA, NORDLAND'}`}</div></div>
+        <div class="brand"><div class="kicker"><i></i>${mapLine}</div><div class="wordmark" data-text="FJORDFRONT">FJORDFRONT</div></div>
         <div class="pane"></div>
         <div class="side">
           <div class="news paper-card"><div class="nh"><b>MELDINGER</b><span class="eyebrow">NEWS · PATCH NOTES</span></div><div class="nl"><div class="ni"><div class="serif-note">Reading the logbook…</div></div></div></div>
           <div class="brief paper-card">
             <div class="bh"><b>OPERASJONSORDRE</b><span class="eyebrow red">OPERATION BRIEF</span></div>
-            <div class="chart"><div class="loadingc">Drawing the chart…</div></div>
+            <div class="chart"><div class="loadingc">Plotting the area…</div></div>
             <div class="facts"><div><small>VIND</small><span class="f-wind">—</span></div><div><small>SJØ</small><span class="f-sea">—</span></div><div><small>KL.</small><span class="f-time">—</span></div><div><small>SESONG</small><span class="f-season">—</span></div></div>
             <p>${MAP_ID === 'solvik'
               ? 'Six against six in the fjord town of Solvik. One side carries a demolition charge to the fortress courtyard (<b>A</b>) or the wharf (<b>B</b>); the other holds both — or defuses it. Rounds, no respawns, money for kills and wins. First to seven.'
               : MAP_ID === 'brosund'
               ? 'Hostile forces of <b class="red">NORDFRONT</b> have crossed the sound into Ellingsøya and the undersea tunnel. Fight through the canal town with the <b class="blue">KYSTJEGERNE</b>, take five objectives and hold Brosund.'
               : 'Hostile forces of <b class="red">NORDFRONT</b> hold the old coastal fort above Kvitvika. Push from the harbour with the <b class="blue">KYSTJEGERNE</b>, take three objectives and hold the fjord.'}</p>
-            <div class="sides"><div class="sd k">${emblem(0)}KYSTJEGERNE</div><span class="vs">mot</span><div class="sd n">NORDFRONT${emblem(1)}</div></div>
+            <div class="sides"><div class="sd k">${emblem(0)}KYSTJEGERNE</div><span class="vs">VS</span><div class="sd n">NORDFRONT${emblem(1)}</div></div>
           </div>
         </div>
-        <div class="credits">Chart fonts: Big Shoulders Display · IBM Plex (SIL OFL) · Firearm recordings: Free Firearm Sound Library (CC0) · Voices &amp; effects: ElevenLabs · Music: Stable Audio 2.5 (Stability AI) · FPS arms by DJMaesen (CC BY 4.0) · Kenney Impact Sounds (CC0) · Procedural soldiers, icons &amp; emblems · Water normals: three.js</div>
+        <div class="credits">Type: Saira · Inter · JetBrains Mono (SIL OFL) · Firearm recordings: Free Firearm Sound Library (CC0) · Voices &amp; effects: ElevenLabs · Music: Stable Audio 2.5 (Stability AI) + procedural score · FPS arms by DJMaesen (CC BY 4.0) · Kenney Impact Sounds (CC0) · Procedural soldiers, icons &amp; emblems · Water normals: three.js</div>
       </div>
       <div class="soldier-tag paper-card hidden"></div>`);
-    e.querySelectorAll('.rail .tab').forEach((b) =>
+    const ink = e.querySelector('.tab-ink') as HTMLElement;
+    const moveInk = (b: Element) => {
+      const t = b as HTMLElement;
+      ink.style.transform = `translateX(${t.offsetLeft}px)`;
+      ink.style.width = `${t.offsetWidth}px`;
+    };
+    e.querySelectorAll('.rail .tab').forEach((b) => {
       b.addEventListener('click', () => {
         const t = (b as HTMLElement).dataset.tab!;
         if (t === 'loadout') return this.showLoadout('menu');
         if (t === 'settings') return this.showSettings('menu');
         this.menuTab = t as 'play' | 'manual';
         e.querySelectorAll('.rail .tab').forEach((x) => x.classList.toggle('on', x === b));
+        moveInk(b);
         this.renderPane();
-      }),
-    );
+      });
+      b.addEventListener('pointerenter', () => moveInk(b));
+      b.addEventListener('pointerleave', () => moveInk(e.querySelector('.rail .tab.on')!));
+    });
+    // the indicator needs real layout: place it once the menu is first shown
+    const ro = new ResizeObserver(() => moveInk(e.querySelector('.rail .tab.on')!));
+    ro.observe(e.querySelector('.tabs-nav')!);
     this.menu = e;
     this.renderPane();
     this.loadNews();
@@ -334,19 +361,19 @@ export class UI {
         ['Y', 'Squad orders (hold)'], ['TAB', 'Scoreboard · RMB: cursor'], ['ENTER / U', 'Chat · team chat'], ['K', 'Push to talk'],
         ['F6', 'Spectate / free camera'], ['F3', 'Performance overlay'], ['ESC', 'Pause · loadout · settings'], ['1–5 (dead)', 'Loadout for next life'],
       ];
-      pane.innerHTML = `<div class="ptitle">FELTHÅNDBOK<small>FIELD MANUAL · ALL KEYS CAN BE REBOUND IN SETTINGS</small></div>
-        <div class="manual paper-card"><div class="mg">${rows.map(([k, v]) => `<div><b>${k}</b>${v}</div>`).join('')}</div></div>`;
+      pane.innerHTML = `<div class="ptitle"><small>02 · FELTHÅNDBOK</small>FIELD MANUAL<em>All keys can be rebound in Settings</em></div>
+        <div class="manual paper-card"><div class="mg">${rows.map(([k, v], i) => `<div style="--i:${i}"><b>${k}</b><span>${v}</span></div>`).join('')}</div></div>`;
       return;
     }
-    pane.innerHTML = `<div class="ptitle">VELG OPPDRAG<small>CHOOSE A MISSION</small></div>
+    pane.innerHTML = `<div class="ptitle"><small>01 · VELG OPPDRAG</small>CHOOSE A MISSION</div>
       <div class="modes">
-        <button class="mode paper-card ${MAP_ID === 'solvik' ? '' : 'hot'}" data-mode="dom"><span class="mi">${icon('domination')}</span><span><b>Domination</b><span>12 v 12 against AI squads. Take and hold the flags on Kvitvika or Brosund.</span></span><em>SOLO</em></button>
-        <button class="mode paper-card ${MAP_ID === 'solvik' ? 'hot' : ''}" data-mode="sab"><span class="mi">${icon('charge')}</span><span><b>Sabotasje <small class="new">NY</small></b><span>6 v 6 rounds on Solvik. Plant or defuse the charge, buy your kit, no respawns. First to 7.</span></span><em>SOLO</em></button>
-        <button class="mode paper-card" data-mode="mp"><span class="mi">${icon('multiplayer')}</span><span><b>Multiplayer</b><span>Host a room, join with a code or browse public rooms. Bots fill the empty slots.</span></span><em>ONLINE</em></button>
-        <button class="mode paper-card" data-mode="quick"><span class="mi">${icon('quick')}</span><span><b>Quick Play</b><span>Straight into the fullest public room — or open one if there is none.</span></span><em>ONLINE</em></button>
+        <button class="mode paper-card ${MAP_ID === 'solvik' ? '' : 'hot'}" data-mode="dom"><span class="mi">${icon('domination')}</span><span class="mt"><b>Domination</b><span>12 v 12 against AI squads. Take and hold the flags on Kvitvika or Brosund.</span></span><em>SOLO</em><i class="go">${icon('chevron')}</i></button>
+        <button class="mode paper-card ${MAP_ID === 'solvik' ? 'hot' : ''}" data-mode="sab"><span class="mi">${icon('charge')}</span><span class="mt"><b>Sabotasje <small class="new">NY</small></b><span>6 v 6 rounds on Solvik. Plant or defuse the charge, buy your kit, no respawns. First to 7.</span></span><em>SOLO</em><i class="go">${icon('chevron')}</i></button>
+        <button class="mode paper-card" data-mode="mp"><span class="mi">${icon('multiplayer')}</span><span class="mt"><b>Multiplayer</b><span>Host a room, join with a code or browse public rooms. Bots fill the empty slots.</span></span><em>ONLINE</em><i class="go">${icon('chevron')}</i></button>
+        <button class="mode paper-card" data-mode="quick"><span class="mi">${icon('quick')}</span><span class="mt"><b>Quick Play</b><span>Straight into the fullest public room — or open one if there is none.</span></span><em>ONLINE</em><i class="go">${icon('chevron')}</i></button>
       </div>
       <div class="mapnote"><b>KARTVALG · MAP VOTE</b><span>Deploy and the squads vote between ${MAPS.map((m) => m.name).join(' and ')}.</span></div>
-      <div class="kit paper-card" data-a="kit"><span class="eyebrow red">KIT · <span class="kit-preset"></span></span><div class="kn"></div><div class="ks"></div></div>`;
+      <div class="kit paper-card" data-a="kit"><span class="eyebrow red">AKTIV KIT · <span class="kit-preset"></span></span><div class="kn"></div><div class="ks"></div><span class="kedit">EDIT LOADOUT ${icon('chevron')}</span></div>`;
     pane.querySelector('[data-mode=dom]')!.addEventListener('click', () => this.handlers.onPlay());
     pane.querySelector('[data-mode=sab]')!.addEventListener('click', () => this.handlers.onSabotage?.());
     pane.querySelector('[data-mode=mp]')!.addEventListener('click', () => this.handlers.onMultiplayer?.());
@@ -540,11 +567,13 @@ export class UI {
 
   /** Loadout screen (Update 36): see LoadoutScreen.ts */
   showLoadout(back: 'menu' | 'pause' = 'menu', note = '') {
+    this.sfx('uiWhoosh', 0.7);
     this.loadoutBack = back;
     openLoadout(this, back, note);
   }
 
   showSettings(back: 'menu' | 'pause') {
+    if (this.settingsEl.classList.contains('hidden')) this.sfx('uiWhoosh', 0.7);
     this.settingsBack = back;
     const e = this.settingsEl;
     const s = Settings.data;
@@ -588,6 +617,9 @@ export class UI {
         ${select('weather', 'Weather', [['auto', 'Random'], ['clear', 'Clear (sunny, no clouds)'], ['fair', 'Broken clouds'], ['overcast', 'Overcast'], ['rain', 'Rain'], ['snow', 'Snow showers'], ['storm', 'Atlantic storm (gale, heavy seas)']])}
         ${select('timeOfDay', 'Time of day', [['dynamic', 'Dynamic (time passes)'], ['dawn', 'Morning'], ['day', 'Midday'], ['golden', 'Golden hour'], ['blue', 'Blue hour'], ['night', 'Night — northern lights'], ['midnight', 'Midnight sun']])}
         ${toggle('godRays', 'Sun shafts (god rays)')}
+        ${toggle('lensFx', 'Lens character (edge colour fringing, anamorphic light streaks)')}
+        ${toggle('filmGrain', 'Film grain')}
+        ${toggle('motes', 'Atmospheric motes (sunlit dust and pollen in the air)')}
         ${toggle('showFps', 'Show FPS')}
       </div>
       <div class="tab hidden" data-t="c">
@@ -629,6 +661,7 @@ export class UI {
       </div>
       <div class="row"><button data-a="reset">RESET DEFAULTS</button><button class="primary" data-a="back">BACK</button></div></div>`;
     e.classList.remove('hidden');
+    this.fillRanges(e);
     e.querySelectorAll('.tabs button').forEach((b) =>
       b.addEventListener('click', () => {
         const t = (b as HTMLElement).dataset.t;
@@ -739,6 +772,7 @@ export class UI {
       const sl = e.querySelector('[data-k=sensitivity]') as HTMLInputElement | null;
       if (sl) {
         sl.value = String(ours);
+        UI.fillRange(sl);
         const em = sl.parentElement?.querySelector('em');
         if (em) em.textContent = ours.toFixed(2);
       }
@@ -807,6 +841,7 @@ export class UI {
       }).join('')}
       <div class="row"><button data-a="reset">RESET</button><button class="primary" data-a="back">BACK</button></div></div>`;
     e.classList.remove('hidden');
+    this.fillRanges(e);
     e.querySelectorAll('input').forEach((inp) =>
       inp.addEventListener('input', () => {
         const k = (inp as HTMLInputElement).dataset.k!;
@@ -831,6 +866,7 @@ export class UI {
   }
 
   showPause(v: boolean) {
+    if (v && this.pause.classList.contains('hidden')) this.sfx('uiWhoosh', 0.55);
     this.pause.classList.toggle('hidden', !v);
     if (!v) this.settingsEl.classList.add('hidden');
   }
@@ -997,11 +1033,28 @@ export class UI {
     this.hud.classList.toggle('hidden', !v);
   }
 
+  /**
+   * Deploy / redeploy transition (Update 45). deploy: the view opens from dark letterbox bars
+   * while the place name tracks in over an aurora line; respawn: a quick lift from black with the
+   * aurora line sweeping out from the centre. Never takes the pointer, removes itself.
+   */
+  deployCard(title = '', sub = '', kind: 'deploy' | 'respawn' = 'deploy') {
+    this.root.querySelector('.deploy')?.remove();
+    const el = h('div', `deploy dl-${kind}`, `<i class="dl-top"></i><i class="dl-bot"></i>${kind === 'deploy' ? `<div class="dl-c"><small>${esc(sub)}</small><b>${esc(title)}</b><s></s></div>` : '<s class="dl-line"></s>'}`);
+    this.root.appendChild(el);
+    setTimeout(() => el.remove(), kind === 'deploy' ? 2900 : 1100);
+  }
+
   /** contextual HUD: what changed recently stays bright, what has nothing to say fades */
   private ctx = { hurtT: 99, lastHp: 100, ammoT: 0, lastMag: -1, lastWeapon: '', streakT: 0, eqT: 0, heading: 0 };
   updateHUD(s: HUDState, dt: number) {
     const e = this.els;
     const c = this.ctx;
+    // a score that goes up pops (Web Animations: no forced layout)
+    for (const [el, v] of [[e.s0, s.scores[0]], [e.s1, s.scores[1]]] as const) {
+      const prev = (el as any)._tv;
+      if (prev !== undefined && +prev < v) el.animate([{ transform: 'scale(1.35)', filter: 'brightness(1.8)' }, { transform: 'none', filter: 'none' }], { duration: 420, easing: 'cubic-bezier(.16,1,.3,1)' });
+    }
     setText(e.s0, String(s.scores[0]));
     setText(e.s1, String(s.scores[1]));
     setStyle(e.p0, 'width', `${((s.scores[0] / s.limit) * 100).toFixed(1)}%`);
@@ -1039,6 +1092,11 @@ export class UI {
     e.hf.classList.toggle('low', s.health < 35);
     setText(e.hv, String(Math.ceil(s.health)));
     // ammo: bright while shooting / reloading / aiming / low, quiet otherwise
+    if (s.weapon === c.lastWeapon && s.magSize > 0) {
+      // each shot ticks the count; a finished reload flashes it in the aurora
+      if (s.mag < c.lastMag) e.mag.animate([{ transform: 'translateY(-3px) scale(1.07)' }, { transform: 'none' }], { duration: 110, easing: 'ease-out' });
+      else if (s.mag > c.lastMag + 1) e.mag.animate([{ color: '#5CF2C6', transform: 'scale(1.12)', textShadow: '0 0 18px rgba(92,242,198,.8)' }, { transform: 'none' }], { duration: 480, easing: 'cubic-bezier(.16,1,.3,1)' });
+    }
     if (s.mag !== c.lastMag || s.weapon !== c.lastWeapon || s.reloading || s.ads > 0.3) c.ammoT = 0;
     c.lastMag = s.mag;
     c.lastWeapon = s.weapon;
@@ -1441,11 +1499,11 @@ export class UI {
         const r = i % 2 ? R - 16 : R - 7;
         zz += `${i ? 'L' : 'M'}${(Math.cos(a) * r).toFixed(1)} ${(Math.sin(a) * r).toFixed(1)} `;
       }
-      body = `<path d="${arc(R)}" stroke="#F0453C" stroke-width="9" fill="none" stroke-linecap="round" opacity=".9"/><path d="${zz}" stroke="#F2B544" stroke-width="2.4" fill="none" stroke-linejoin="round"/>`;
+      body = `<path d="${arc(R)}" stroke="#FF4D5E" stroke-width="9" fill="none" stroke-linecap="round" opacity=".9"/><path d="${zz}" stroke="#FFB547" stroke-width="2.4" fill="none" stroke-linejoin="round"/>`;
     } else if (kind === 'fire') {
-      body = `<path d="${arc(R)}" stroke="#F2B544" stroke-width="6" fill="none" stroke-dasharray="7 6" stroke-linecap="round"/>`;
+      body = `<path d="${arc(R)}" stroke="#FFB547" stroke-width="6" fill="none" stroke-dasharray="7 6" stroke-linecap="round"/>`;
     } else {
-      body = `<path d="${arc(R)}" stroke="#F0453C" stroke-width="5" fill="none" stroke-linecap="round"/><path d="M-6 ${-R + 8}L0 ${-R + 18}L6 ${-R + 8}" stroke="#F4EFE3" stroke-width="2" fill="none" stroke-linejoin="round"/>`;
+      body = `<path d="${arc(R)}" stroke="#FF4D5E" stroke-width="5" fill="none" stroke-linecap="round"/><path d="M-6 ${-R + 8}L0 ${-R + 18}L6 ${-R + 8}" stroke="#F2F7FB" stroke-width="2" fill="none" stroke-linejoin="round"/>`;
     }
     const svg = h('div', '', `<svg viewBox="-160 -160 320 320" style="filter:drop-shadow(0 0 2px rgba(5,10,20,.6))"><g transform="rotate(${((angle * 180) / Math.PI).toFixed(1)})">${body}</g></svg>`);
     svg.dataset.life = kind === 'explosion' ? '2.2' : '1.6';

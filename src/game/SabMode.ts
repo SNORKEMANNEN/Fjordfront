@@ -215,7 +215,7 @@ export class SabMode {
     const g = this.g;
     g.player.frozen = false;
     for (const b of this.liveBots()) b.busy = false;
-    g.audio.play('uiHorn', { bus: 'ui', gain: 0.45, reverb: 0 });
+    g.audio.play('roundStart', { bus: 'ui', gain: 0.6, reverb: 0 });
     g.radio.say('ann', this.sab.side(g.avatar.team) === 'atk' ? 'sabAttack' : 'sabDefend', g.time, { prio: 2, ttl: 3 });
     this.ui.say('KJØR!', 'GO GO GO', 'go', 1.4);
   }

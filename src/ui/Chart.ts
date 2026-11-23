@@ -3,32 +3,37 @@ import { ROADS, BUILDINGS, LANDMARKS, PLAY_HALF, BuildingDef, MAP_ID, capHeightA
 import { AREA, SV_BLOCKS, SV_PALACE, SV_LOFT, SV_KJELLER, SV_CHURCH, SV_SITES } from '../world/maps/Solvik';
 
 /**
- * Sjøkart: the map drawn the way a Norwegian nautical chart is — cream paper land with brown
- * contour lines and pale woodland tint, the sea in depth bands (darkest blue in the shallows,
- * fading to white in deep water) with blue isobaths and italic depth soundings, an inked
- * coastline, red roads, black buildings, cartographic names, a compass rose and a scale bar.
+ * The night chart (Update 45, over the Update 29 "Sjøkart" drawing code): a tactical map at
+ * polar night — dark slate land with frost contour lines, relief shading and a green-black
+ * woodland tint, the sea in deep-navy depth bands with cyan isobaths and depth soundings, a
+ * glowing coastline, pale roads, slate buildings, place names, a compass rose and a scale bar.
  * One raster of the whole area is built once and shared by the tactical map, the minimap, the
  * menu's operation brief and the room-browser thumbnails.
  */
 export const INK = {
-  paper: '#EDE6D6',
-  paperDark: '#E0D5BD',
-  ink: '#14213D',
-  ink2: '#2B3A55',
-  sea: '#3E7CB1',
-  red: '#D7262E',
-  contour: 'rgba(132, 92, 52, 0.55)',
-  friend: '#2F7DC4',
-  foe: '#D7262E',
-  gold: '#C98A12',
+  /** the night chart (Update 45): dark slate land, deep-navy sea, frost ink, the aurora for "you" */
+  paper: '#0A131D',
+  paperDark: '#101C29',
+  ink: '#DCE8F2',
+  ink2: '#9FB3C6',
+  sea: '#7FD8F5',
+  red: '#FF4D5E',
+  contour: 'rgba(120, 200, 235, 0.22)',
+  friend: '#4DB5FF',
+  foe: '#FF4D5E',
+  gold: '#FFB547',
+  you: '#5CF2C6',
+  bld: '#71859A',
+  casing: '#03070C',
+  halo: 'rgba(4, 8, 14, 0.88)',
 };
-/** fonts (self-hosted, OFL): display, condensed labels, italic serif for water names, mono numbers */
+/** fonts (self-hosted, OFL): Saira for display and labels, Inter for notes, JetBrains Mono for numbers */
 export const FONT = {
-  display: "'Big Shoulders Display', 'Arial Narrow', sans-serif",
-  cond: "'IBM Plex Sans Condensed', 'Arial Narrow', sans-serif",
-  sans: "'IBM Plex Sans', system-ui, sans-serif",
-  serif: "'IBM Plex Serif', Georgia, serif",
-  mono: "'IBM Plex Mono', ui-monospace, monospace",
+  display: "'Saira', 'Arial Narrow', sans-serif",
+  cond: "'Saira', 'Arial Narrow', sans-serif",
+  sans: "'Inter', system-ui, sans-serif",
+  serif: "'Inter', system-ui, sans-serif",
+  mono: "'JetBrains Mono', ui-monospace, monospace",
 };
 /** the raster covers [-B, B] in both axes */
 export const B = PLAY_HALF + 14;
@@ -72,7 +77,7 @@ export function chartRaster(t: Terrain) {
   const hs = new Float32Array(S * S);
   for (let j = 0; j < S; j++) for (let i = 0; i < S; i++) hs[j * S + i] = chartHeight(t, -B + ((i + 0.5) / S) * 2 * B, -B + ((j + 0.5) / S) * 2 * B);
   const m = (2 * B) / S;
-  const P = [237, 230, 214]; // paper
+  const P = [24, 35, 48]; // night slate
   for (let j = 0; j < S; j++) {
     for (let i = 0; i < S; i++) {
       const k = j * S + i, o = k * 4;
@@ -82,36 +87,36 @@ export function chartRaster(t: Terrain) {
       if (h < 0) {
         // depth bands: 0–2 m darkest, 2–5, 5–10, deeper = near white (chart convention)
         const d = -h;
-        const band = d < 2 ? [150, 190, 219] : d < 5 ? [178, 208, 228] : d < 10 ? [204, 223, 236] : [226, 236, 242];
+        const band = d < 2 ? [24, 62, 88] : d < 5 ? [18, 50, 74] : d < 10 ? [14, 40, 61] : [10, 29, 47];
         [r, g, b] = band;
         // isobaths at 2, 5, 10 m
         for (const iso of [2, 5, 10]) {
           if ((-h < iso) !== (-hR < iso) || (-h < iso) !== (-hD < iso)) {
-            r = 92; g = 140; b = 182;
+            r = 48; g = 120; b = 160;
           }
         }
       } else {
         // paper, very gentle hill shading from the north-west + pale green woodland
         const hx = hs[j * S + Math.min(S - 1, i + 1)] - hs[j * S + Math.max(0, i - 1)];
         const hz = hs[Math.min(S - 1, j + 1) * S + i] - hs[Math.max(0, j - 1) * S + i];
-        const shade = Math.max(0.84, Math.min(1.04, 1 - ((hx * 0.9 + hz * 0.7) / (2 * m)) * 0.16));
+        const shade = Math.max(0.6, Math.min(1.35, 1 - ((hx * 0.9 + hz * 0.7) / (2 * m)) * 0.42));
         const wx = -B + ((i + 0.5) / S) * 2 * B, wz = -B + ((j + 0.5) / S) * 2 * B;
         const [forest] = t.splatAt(wx, wz);
-        r = P[0] - forest * 26; g = P[1] - forest * 10; b = P[2] - forest * 34;
-        // hypsometric tint: higher ground a touch warmer
+        r = P[0] - forest * 6; g = P[1] + forest * 6; b = P[2] - forest * 10;
+        // hypsometric tint: higher ground a touch lighter and colder
         const elev = Math.min(1, h / 50);
-        r = (r - elev * 6) * shade; g = (g - elev * 12) * shade; b = (b - elev * 22) * shade;
+        r = (r + elev * 14) * shade; g = (g + elev * 18) * shade; b = (b + elev * 24) * shade;
         // contours every 5 m, index contour every 25 m
         const c0 = Math.floor(h / 5), cR = Math.floor(hR / 5), cD = Math.floor(hD / 5);
         if (c0 !== cR || c0 !== cD) {
           const idx = Math.max(c0, cR, cD) % 5 === 0;
-          const a = idx ? 0.62 : 0.34;
-          r = r * (1 - a) + 132 * a; g = g * (1 - a) + 92 * a; b = b * (1 - a) + 52 * a;
+          const a = idx ? 0.42 : 0.2;
+          r = r * (1 - a) + 120 * a; g = g * (1 - a) + 196 * a; b = b * (1 - a) + 226 * a;
         }
       }
-      // coastline in ink
+      // the coastline glows
       if ((h < 0) !== (hR < 0) || (h < 0) !== (hD < 0)) {
-        r = 20; g = 33; b = 61;
+        r = 110; g = 214; b = 236;
       }
       img.data[o] = r; img.data[o + 1] = g; img.data[o + 2] = b; img.data[o + 3] = 255;
     }
@@ -131,7 +136,7 @@ export function rasterHeight(x: number, z: number) {
 
 export interface View { sx(x: number): number; sy(z: number): number; ppm: number }
 
-/** red roads (asphalt), brown gravel, dashed dirt tracks — chart / topo style */
+/** pale roads (asphalt) with dark casing, tan gravel, dashed dirt tracks */
 export function drawRoads(c: CanvasRenderingContext2D, v: View, zoom = 1) {
   c.lineCap = 'round';
   c.lineJoin = 'round';
@@ -140,10 +145,10 @@ export function drawRoads(c: CanvasRenderingContext2D, v: View, zoom = 1) {
       const w = Math.max(r.kind === 'dirt' ? 1 : 1.6, r.width * v.ppm * 0.8);
       if (pass === 0) {
         if (r.kind === 'dirt') continue;
-        c.strokeStyle = INK.ink;
-        c.lineWidth = w + 1.6;
+        c.strokeStyle = INK.casing;
+        c.lineWidth = w + 1.8;
       } else {
-        c.strokeStyle = r.kind === 'asphalt' ? '#E2563C' : r.kind === 'gravel' ? '#E9C98F' : 'rgba(20,33,61,0.75)';
+        c.strokeStyle = r.kind === 'asphalt' ? '#C9D5E0' : r.kind === 'gravel' ? '#A8977A' : 'rgba(200,220,236,0.5)';
         c.lineWidth = r.kind === 'dirt' ? Math.max(1, 1.1 * Math.min(2, zoom)) : w;
         if (r.kind === 'dirt') c.setLineDash([Math.max(3, 4 * zoom), Math.max(2.5, 3 * zoom)]);
       }
@@ -155,13 +160,13 @@ export function drawRoads(c: CanvasRenderingContext2D, v: View, zoom = 1) {
   }
 }
 
-/** buildings as solid ink blocks (containers hatched) */
+/** buildings as slate blocks (containers hatched) */
 export function drawBuildings(c: CanvasRenderingContext2D, v: View) {
   if (MAP_ID === 'solvik') {
     // Solvik: the paved lanes in pale stone, the blocks and walls in ink, the two sites ringed in red
-    c.fillStyle = '#E8D9B8';
+    c.fillStyle = '#1F2D3C';
     for (const r of Object.values(AREA)) c.fillRect(v.sx(r.x0), v.sy(r.z0), (r.x1 - r.x0) * v.ppm, (r.z1 - r.z0) * v.ppm);
-    c.fillStyle = INK.ink;
+    c.fillStyle = INK.bld;
     for (const r of [...SV_BLOCKS, SV_PALACE, SV_LOFT, SV_KJELLER, SV_CHURCH]) c.fillRect(v.sx(r.x0), v.sy(r.z0), (r.x1 - r.x0) * v.ppm, (r.z1 - r.z0) * v.ppm);
     // the fortress walls round A
     for (const [x0, z0, x1, z1] of [[-76, -76, -70, -18.5], [-74, -76, -21, -66], [-70, -22.5, -60.5, -18.5], [-53.5, -22.5, -50, -18.5], [-24, -66, -20, -56], [-24, -50, -20, -46], [-62, -66, -36, -61.5]])
@@ -180,7 +185,7 @@ export function drawBuildings(c: CanvasRenderingContext2D, v: View) {
     c.rotate(-b.rot);
     const pw = Math.max(2.2, w * v.ppm), pd = Math.max(2.2, d * v.ppm);
     if (b.kind === 'containers') {
-      c.strokeStyle = INK.ink;
+      c.strokeStyle = INK.bld;
       c.lineWidth = 1;
       c.strokeRect(-pw / 2, -pd / 2, pw, pd);
       c.beginPath();
@@ -192,7 +197,7 @@ export function drawBuildings(c: CanvasRenderingContext2D, v: View) {
       c.stroke();
       c.globalAlpha = 1;
     } else {
-      c.fillStyle = b.kind === 'tower' || b.kind === 'mast' || b.kind === 'lighthouse' ? INK.red : INK.ink;
+      c.fillStyle = b.kind === 'tower' || b.kind === 'mast' || b.kind === 'lighthouse' ? INK.gold : INK.bld;
       c.fillRect(-pw / 2, -pd / 2, pw, pd);
     }
     c.restore();
@@ -202,7 +207,7 @@ export function drawBuildings(c: CanvasRenderingContext2D, v: View) {
 /** italic depth soundings scattered over the water, spaced on a screen grid */
 export function drawSoundings(c: CanvasRenderingContext2D, v: View, W: number, H: number, step = 54) {
   c.font = `italic 500 ${Math.round(Math.max(9, Math.min(13, step / 5)))}px ${FONT.serif}`;
-  c.fillStyle = 'rgba(43,58,85,0.78)';
+  c.fillStyle = 'rgba(140,196,230,0.5)';
   c.textAlign = 'center';
   c.textBaseline = 'middle';
   const inv = (sx: number, sy: number) => {
@@ -260,7 +265,7 @@ export function placeLabel(c: CanvasRenderingContext2D, text: string, x: number,
     c.font = `600 ${size}px ${FONT.cond}`;
     (c as any).letterSpacing = `${Math.round(size * 0.22)}px`;
     c.lineWidth = 3.2;
-    c.strokeStyle = 'rgba(237,230,214,0.92)';
+    c.strokeStyle = INK.halo;
     c.strokeText(text.toUpperCase(), x, y);
     c.fillStyle = kind === 'here' ? INK.red : INK.ink;
     c.fillText(text.toUpperCase(), x, y);
@@ -316,7 +321,7 @@ export function compassRose(c: CanvasRenderingContext2D, x: number, y: number, r
       c.lineTo(Math.sin(a) * r * len, -Math.cos(a) * r * len);
       c.lineTo(Math.sin(a + side * wdt * 2.2) * r * wdt * 2, -Math.cos(a + side * wdt * 2.2) * r * wdt * 2);
       c.closePath();
-      c.fillStyle = side < 0 ? INK.ink2 : 'rgba(237,230,214,0.95)';
+      c.fillStyle = side < 0 ? INK.ink2 : 'rgba(10,19,29,0.95)';
       c.fill();
       c.stroke();
     }
@@ -440,7 +445,7 @@ export function inkCharge(c: CanvasRenderingContext2D, x: number, y: number, s: 
   // the panel half and the bricks half
   c.fillStyle = INK.paper;
   c.fillRect(x - w / 2 + w * 0.12, y - h * 0.22, w * 0.3, h * 0.44);
-  c.fillStyle = state === 'planted' ? '#f6c3c0' : '#d9c79a';
+  c.fillStyle = state === 'planted' ? '#ffb3bb' : '#E8C48A';
   c.fillRect(x + w * 0.06, y - h * 0.3, w * 0.32, h * 0.6);
   // antenna + lamp
   c.strokeStyle = body;
@@ -494,7 +499,7 @@ export function inkArrow(c: CanvasRenderingContext2D, x: number, y: number, yaw:
 /** objective: a letter inside a double inked ring, with the capture progress as a heavy arc */
 export function inkObjective(c: CanvasRenderingContext2D, x: number, y: number, r: number, letter: string, color: string, capColor: string | null, progress: number, seed: number, blink = false) {
   c.save();
-  c.fillStyle = 'rgba(237,230,214,0.82)';
+  c.fillStyle = 'rgba(6,11,18,0.82)';
   c.beginPath();
   c.arc(x, y, r, 0, Math.PI * 2);
   c.fill();
@@ -542,11 +547,17 @@ export function chartThumb(t: Terrain, w: number, h: number, flags: { x: number;
   }
   flags.forEach((f, i) => inkObjective(c, v.sx(f.x), v.sy(f.z), Math.max(8, w / 30), f.letter, INK.red, null, 0, i * 11 + 3));
   if (opts.rose) compassRose(c, w - Math.min(w, h) * 0.13, Math.min(w, h) * 0.15, Math.min(w, h) * 0.09, 0.9);
-  // neat line (chart border)
-  c.strokeStyle = INK.ink;
-  c.lineWidth = 1.5;
-  c.strokeRect(3, 3, w - 6, h - 6);
-  c.lineWidth = 0.6;
-  c.strokeRect(6, 6, w - 12, h - 12);
+  // a soft frame and corner ticks
+  c.strokeStyle = 'rgba(160,205,240,0.28)';
+  c.lineWidth = 1;
+  c.strokeRect(4.5, 4.5, w - 9, h - 9);
+  c.strokeStyle = INK.you;
+  c.lineWidth = 1.6;
+  const k = Math.min(w, h) * 0.06;
+  c.beginPath();
+  for (const [x, y, sx, sy] of [[4.5, 4.5, 1, 1], [w - 4.5, 4.5, -1, 1], [4.5, h - 4.5, 1, -1], [w - 4.5, h - 4.5, -1, -1]]) {
+    c.moveTo(x, y + sy * k); c.lineTo(x, y); c.lineTo(x + sx * k, y);
+  }
+  c.stroke();
   return cv;
 }

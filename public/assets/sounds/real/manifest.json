@@ -361,40 +361,6 @@
    "loop": false
   }
  ],
- "uiHover": [
-  {
-   "file": "uiHover_0.ogg",
-   "loop": false
-  },
-  {
-   "file": "uiHover_1.ogg",
-   "loop": false
-  }
- ],
- "uiConfirm": [
-  {
-   "file": "uiConfirm_0.ogg",
-   "loop": false
-  }
- ],
- "uiBack": [
-  {
-   "file": "uiBack_0.ogg",
-   "loop": false
-  }
- ],
- "uiReady": [
-  {
-   "file": "uiReady_0.ogg",
-   "loop": false
-  }
- ],
- "uiHorn": [
-  {
-   "file": "uiHorn_0.ogg",
-   "loop": false
-  }
- ],
  "medal": [
   {
    "file": "medal_0.ogg",

@@ -44,6 +44,12 @@ export interface SettingsData {
   level: 'kvitvika' | 'brosund' | 'solvik';
   timeOfDay: 'dynamic' | 'dawn' | 'day' | 'golden' | 'blue' | 'night' | 'midnight';
   godRays: boolean;
+  /** Update 45: fine film grain in the grade */
+  filmGrain: boolean;
+  /** Update 45: lens character — edge chromatic aberration and the anamorphic bloom streak */
+  lensFx: boolean;
+  /** Update 45: atmospheric motes (sunlit dust and pollen round the camera) */
+  motes: boolean;
   masterVolume: number;
   sfxVolume: number;
   ambienceVolume: number;
@@ -109,6 +115,9 @@ const DEFAULTS: SettingsData = {
   level: 'kvitvika',
   timeOfDay: 'dynamic',
   godRays: true,
+  filmGrain: true,
+  lensFx: true,
+  motes: true,
   masterVolume: 0.8,
   sfxVolume: 1,
   ambienceVolume: 0.7,

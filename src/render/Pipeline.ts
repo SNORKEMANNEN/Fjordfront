@@ -135,9 +135,11 @@ class WorldPostPass extends Pass {
 
 
 /**
- * Cheap bloom: bright parts thresholded into a quarter-resolution target, blurred there and again
- * at an eighth, and added by the grade pass (no separate composite). ~6 tiny passes instead of the
- * ~12 (from half resolution) of UnrealBloomPass.
+ * Cheap bloom: bright parts thresholded into a quarter-resolution target, blurred there, again at
+ * an eighth and once more at a sixteenth (the wide, soft halo round the sun and lamps), and added
+ * by the grade pass (no separate composite). ~9 tiny passes instead of the ~12 (from half
+ * resolution) of UnrealBloomPass. The grade also smears the eighth level sideways into a faint
+ * anamorphic streak (Update 45).
  */
 class LiteBloomPass extends Pass {
   strength = 0.35;
@@ -152,7 +154,7 @@ class LiteBloomPass extends Pass {
     super();
     this.needsSwap = false;
     const opts = { type: THREE.HalfFloatType, depthBuffer: false } as const;
-    for (let i = 0; i < 2; i++) {
+    for (let i = 0; i < 3; i++) {
       this.rtA.push(new THREE.WebGLRenderTarget(1, 1, opts));
       this.rtB.push(new THREE.WebGLRenderTarget(1, 1, opts));
     }
@@ -191,8 +193,8 @@ class LiteBloomPass extends Pass {
     this.blur = new FullScreenQuad(this.blurMat);
   }
   setSize(w: number, h: number) {
-    for (let i = 0; i < 2; i++) {
-      const d = i === 0 ? 4 : 8;
+    for (let i = 0; i < 3; i++) {
+      const d = i === 0 ? 4 : i === 1 ? 8 : 16;
       const ww = Math.max(1, Math.round(w / d)), hh = Math.max(1, Math.round(h / d));
       this.rtA[i].setSize(ww, hh);
       this.rtB[i].setSize(ww, hh);
@@ -205,7 +207,7 @@ class LiteBloomPass extends Pass {
     this.preMat.uniforms.uThr.value = this.threshold;
     let src: THREE.Texture = readBuffer.texture;
     let texel = new THREE.Vector2(1 / readBuffer.width, 1 / readBuffer.height);
-    for (let i = 0; i < 2; i++) {
+    for (let i = 0; i < 3; i++) {
       const a = this.rtA[i], b = this.rtB[i];
       // level 0 thresholds the scene; level 1 downsamples level 0
       this.preMat.uniforms.tSrc.value = src;
@@ -226,10 +228,21 @@ class LiteBloomPass extends Pass {
     }
     g.tBloom0.value = this.rtA[0].texture;
     g.tBloom1.value = this.rtA[1].texture;
+    g.tBloom2.value = this.rtA[2].texture;
   }
 }
 
-/** Filmic tonemapping + colour grade + lens effects + bloom composite + sRGB output (no separate output pass). */
+/**
+ * Filmic tonemapping + colour grade + lens effects + bloom composite + sRGB output (no separate
+ * output pass).
+ *
+ * The "Nordlys" grade (Update 45): contrast-adaptive sharpening before the tone curve (stronger
+ * when the dynamic resolution renders below the screen), AgX with a gentle filmic S-curve,
+ * vibrance instead of flat saturation (dull colours gain, already-vivid ones are left alone),
+ * a split tone — cold teal in the shadows, warm amber in the highlights — that follows the light
+ * of the hour, a soft lens vignette, chromatic aberration only toward the frame edge (and when
+ * hurt or suppressed), a faint anamorphic streak off the brightest lights, and fine luminance grain.
+ */
 class GradePass extends Pass {
   quad: FullScreenQuad;
   mat: THREE.ShaderMaterial;
@@ -240,12 +253,12 @@ class GradePass extends Pass {
         tDiffuse: { value: null },
         uExposure: { value: 1.0 },
         uTime: { value: 0 },
-        uVignette: { value: 0.32 },
+        uVignette: { value: 0.26 },
         uDamage: { value: 0 },
         uFlash: { value: 0 },
-        uCA: { value: 0.0015 },
-        uGrain: { value: 0.035 },
-        uSat: { value: 0.92 },
+        uCA: { value: 0.0011 },
+        uGrain: { value: 0.022 },
+        uSat: { value: 1.0 },
         uSuppression: { value: 0 },
         uRes: { value: new THREE.Vector2(1, 1) },
         uUnderwater: { value: 0 },
@@ -260,16 +273,25 @@ class GradePass extends Pass {
         uFar: { value: 3000 },
         tBloom0: { value: null },
         tBloom1: { value: null },
+        tBloom2: { value: null },
         uBloom: { value: 0 },
+        uStreak: { value: 0.16 },
         uTint: { value: new THREE.Color(1, 1, 1) },
         uSatBoost: { value: 1 },
+        uVibrance: { value: 0.28 },
+        uContrast: { value: 0.16 },
+        uSharpen: { value: 0.35 },
+        uSplitShadow: { value: new THREE.Color(0.93, 1.0, 1.07) },
+        uSplitHigh: { value: new THREE.Color(1.05, 1.0, 0.93) },
+        uSplit: { value: 1 },
         // heat shimmer over fresh explosions: screen uv, radius (screen heights), strength
         uHeat: { value: [new THREE.Vector4(), new THREE.Vector4(), new THREE.Vector4(), new THREE.Vector4()] },
       },
       vertexShader: `varying vec2 vUv; void main(){ vUv = uv; gl_Position = vec4(position.xy, 0.0, 1.0); }`,
       fragmentShader: /* glsl */ `
-        uniform sampler2D tBloom0; uniform sampler2D tBloom1; uniform float uBloom;
-        uniform vec3 uTint; uniform float uSatBoost;
+        uniform sampler2D tBloom0; uniform sampler2D tBloom1; uniform sampler2D tBloom2; uniform float uBloom; uniform float uStreak;
+        uniform vec3 uTint; uniform float uSatBoost; uniform float uVibrance; uniform float uContrast; uniform float uSharpen;
+        uniform vec3 uSplitShadow; uniform vec3 uSplitHigh; uniform float uSplit;
         uniform sampler2D tDiffuse; uniform float uExposure; uniform float uTime; uniform float uVignette;
         uniform float uDamage; uniform float uFlash; uniform float uCA; uniform float uGrain; uniform float uSat;
         uniform float uSuppression; uniform vec2 uRes; uniform float uUnderwater;
@@ -290,12 +312,12 @@ class GradePass extends Pass {
           v = clamp(log2(max(v, 1e-10)), -12.47393, 4.026069);
           v = (v + 12.47393) / 16.49999;
           v = agxContrast(v);
-          // punchy-ish look
-          v = pow(v, vec3(1.08));
+          v = pow(v, vec3(1.06));
           v = mi * v;
           return pow(max(v, 0.0), vec3(2.2));
         }
         float rand(vec2 c){ return fract(sin(dot(c, vec2(12.9898, 78.233))) * 43758.5453); }
+        float luma(vec3 c){ return dot(c, vec3(0.2126, 0.7152, 0.0722)); }
         ${SAFE_GLSL}
         uniform vec4 uHeat[4];
         void main(){
@@ -310,23 +332,58 @@ class GradePass extends Pass {
           }
           vec2 dc = uv - 0.5;
           float r2 = dot(dc, dc);
-          float ca = uCA * (1.0 + uSuppression * 3.0 + uDamage * 2.0);
+          // lens CA: nothing in the middle third, growing toward the corners (more when hurt / pinned)
+          float ca = uCA * (smoothstep(0.03, 0.5, r2) + uSuppression * 3.0 + uDamage * 2.5);
           vec3 c;
-          c.r = texture2D(tDiffuse, uv - dc * ca * 4.0 * r2 * 4.0).r;
+          c.r = texture2D(tDiffuse, uv - dc * ca * 3.0).r;
           c.g = texture2D(tDiffuse, uv).g;
-          c.b = texture2D(tDiffuse, uv + dc * ca * 4.0 * r2 * 4.0).b;
-          if (uBloom > 0.001) c += (texture2D(tBloom0, uv).rgb * 0.6 + texture2D(tBloom1, uv).rgb * 0.8) * uBloom;
+          c.b = texture2D(tDiffuse, uv + dc * ca * 3.0).b;
+          c = safe3(c);
+          // contrast-adaptive sharpening on luminance (no colour fringes, no halos on flat areas)
+          if (uSharpen > 0.001) {
+            vec2 px = 1.0 / uRes;
+            float ln = luma(safe3(texture2D(tDiffuse, uv + vec2(0.0, px.y)).rgb));
+            float ls = luma(safe3(texture2D(tDiffuse, uv - vec2(0.0, px.y)).rgb));
+            float le = luma(safe3(texture2D(tDiffuse, uv + vec2(px.x, 0.0)).rgb));
+            float lw = luma(safe3(texture2D(tDiffuse, uv - vec2(px.x, 0.0)).rgb));
+            float lc = luma(c);
+            float mn = min(lc, min(min(ln, ls), min(le, lw))), mx = max(lc, max(max(ln, ls), max(le, lw)));
+            // CAS-style amount: full on soft edges, backing off where the contrast is already high
+            float amt = uSharpen * sqrt(clamp(min(mn, 2.0 - mx) / max(mx, 1e-4), 0.0, 1.0));
+            float sharp = lc + (lc - (ln + ls + le + lw) * 0.25) * amt * 2.0;
+            c *= clamp(sharp / max(lc, 1e-4), 0.75, 1.35);
+          }
+          if (uBloom > 0.001) {
+            vec3 bl = texture2D(tBloom0, uv).rgb * 0.55 + texture2D(tBloom1, uv).rgb * 0.7 + texture2D(tBloom2, uv).rgb * 0.85;
+            // anamorphic streak: the eighth-resolution bloom smeared sideways, a cold blue tint
+            vec3 st = vec3(0.0);
+            for (int i = 1; i <= 5; i++) {
+              float o = float(i) * float(i) * 0.0075;
+              float wgt = 1.0 / float(i);
+              st += (texture2D(tBloom1, uv + vec2(o, 0.0)).rgb + texture2D(tBloom1, uv - vec2(o, 0.0)).rgb) * wgt;
+            }
+            bl += st * vec3(0.55, 0.8, 1.25) * uStreak * 0.25;
+            c += bl * uBloom;
+          }
           c = safe3(c);
           c *= uExposure;
           c = agx(c);
-          // grade: cool shadows, neutral-warm highlights, slight desaturation
-          float l = dot(c, vec3(0.2126, 0.7152, 0.0722));
-          c = mix(vec3(l), c, uSat * uSatBoost * (1.0 - uSuppression * 0.4) * (1.0 - uDamage * 0.5));
+          // filmic S-curve in perceptual space round mid-grey (keeps the toe, more snap in the mids)
+          vec3 pc = pow(clamp(c, 0.0, 1.0), vec3(1.0 / 2.2));
+          pc = mix(pc, pc * pc * (3.0 - 2.0 * pc), uContrast);
+          c = pow(pc, vec3(2.2));
+          // vibrance + saturation: dull colours gain more than vivid ones
+          float l = luma(c);
+          float satNow = (max(c.r, max(c.g, c.b)) - min(c.r, min(c.g, c.b))) / max(max(c.r, max(c.g, c.b)), 1e-4);
+          float vib = 1.0 + uVibrance * (1.0 - satNow);
+          c = mix(vec3(l), c, uSat * uSatBoost * vib * (1.0 - uSuppression * 0.4) * (1.0 - uDamage * 0.5));
+          c = max(c, 0.0);
           c *= uTint;
-          vec3 shadowTint = vec3(0.95, 1.0, 1.06);
-          vec3 highTint = vec3(1.03, 1.0, 0.96);
-          c *= mix(shadowTint, highTint, smoothstep(0.0, 0.7, l));
-          c = pow(c, vec3(1.04));
+          // split tone: cold teal shadows, warm amber highlights (strength follows the hour)
+          vec3 split = mix(uSplitShadow, uSplitHigh, smoothstep(0.05, 0.75, l));
+          c *= mix(vec3(1.0), split, uSplit);
+          // a breath of lift in the blacks (never crushed to pure black, slightly blue)
+          c = c + vec3(0.004, 0.006, 0.01) * (1.0 - smoothstep(0.0, 0.12, l));
           // underwater
           c = mix(c, vec3(0.03, 0.12, 0.14) + c * vec3(0.2, 0.5, 0.55), uUnderwater);
           // ---- night vision (image intensifier) ----
@@ -364,8 +421,7 @@ class GradePass extends Pass {
             // intensifier with automatic brightness control (soft saturation)
             float I = 1.0 - exp(-L * uNVGGain);
             I = I / (1.0 + I * 0.25) * 1.12;
-            // tube contrast: deep shadows stay dark, lit surfaces and lights pop (steeper toe so the
-            // image has blacks and mid-tones instead of a flat bright green)
+            // tube contrast: deep shadows stay dark, lit surfaces and lights pop
             I = pow(I, 1.7) * 0.95;
             // scintillation: sparkling noise, strongest in the dark parts of the image
             float n1 = rand(floor(uv * uRes * 0.7) + fract(uTime * 37.0) * 91.0) - 0.5;
@@ -383,16 +439,19 @@ class GradePass extends Pass {
             phos += vec3(0.45, 1.0, 0.55) * uNVGFlash * tube;
             c = mix(c, phos, uNVG);
           }
-          // vignette
-          float vig = smoothstep(0.85, 0.2, length(dc * vec2(1.0, 0.85)) * (1.0 + uVignette));
-          c *= mix(1.0, vig, 0.6 + uSuppression * 0.3);
-          // damage: red edges + desat
-          float edge = smoothstep(0.25, 0.75, length(dc));
-          c = mix(c, vec3(0.35, 0.02, 0.02), uDamage * edge * 0.8);
+          // lens vignette: a natural cos^4-like falloff, deepened when pinned down
+          vec2 vq = dc * vec2(uRes.x / uRes.y, 1.0) * 0.82;
+          float vig = 1.0 / pow(1.0 + dot(vq, vq) * (1.0 + uVignette * 2.2), 2.0);
+          c *= mix(1.0, vig, 0.75 + uSuppression * 0.25);
+          // damage: a hot red bleed from the frame edge, pulsing gently
+          float edge = smoothstep(0.18, 0.72, length(dc * vec2(1.0, 1.15)));
+          float pulse = 0.85 + 0.15 * sin(uTime * 7.0);
+          c = mix(c, vec3(0.42, 0.015, 0.03), uDamage * edge * 0.82 * pulse);
           c += uFlash;
-          // film grain
-          float g = rand(uv * uRes + fract(uTime) * 100.0) - 0.5;
-          c += g * uGrain * (1.0 - l * 0.6);
+          // fine luminance grain (film-like: strongest in the mids, gone in the highlights)
+          float g = rand(uv * uRes + fract(uTime * 7.31) * 100.0) - 0.5;
+          float lg = luma(c);
+          c += g * uGrain * (0.35 + lg) * (1.0 - smoothstep(0.55, 1.0, lg));
           // display encoding (sRGB) done here instead of a separate output pass
           c = max(c, 0.0);
           c = mix(c * 12.92, 1.055 * pow(c, vec3(1.0 / 2.4)) - 0.055, step(0.0031308, c));
@@ -511,6 +570,8 @@ export class Pipeline {
     this.bloom.setSize(rw, rh);
     this.grade.mat.uniforms.uRes.value.set(rw, rh);
     this.world.mat.uniforms.uRes.value.set(rw, rh);
+    // sharpen a little at native resolution, more as the image is upscaled
+    this.grade.mat.uniforms.uSharpen.value = 0.28 + 0.6 * (1 - s);
   }
 
   render(dt: number, fx: { dofFocus: number; dof: number; damage: number; flash: number; suppression: number; underwater: number; exposure?: number; rays?: number; sunDir?: THREE.Vector3; sunColor?: THREE.Color; heat?: { p: THREE.Vector3; t: number; life: number; r: number }[] }) {

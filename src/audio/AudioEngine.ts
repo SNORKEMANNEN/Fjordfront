@@ -219,33 +219,45 @@ async function impact(surface: string): Promise<AudioBuffer> {
 }
 
 async function mech(kind: string): Promise<AudioBuffer> {
-  const LEN: Record<string, number> = { uiHorn: 2.6, uiReady: 1.1, uiConfirm: 0.5, smokeHiss: 7, snapPulse: 1.6, servo: 0.9, zap: 0.8, trophyDeploy: 1.0, carFire: 3, debris: 1.2, bipod: 0.4, fireIgnite: 1.4 };
+  const LEN: Record<string, number> = { uiHorn: 2.6, uiReady: 1.4, uiConfirm: 0.6, smokeHiss: 7, snapPulse: 1.6, servo: 0.9, zap: 0.8, trophyDeploy: 1.0, carFire: 3, debris: 1.2, bipod: 0.4, fireIgnite: 1.4 };
   return render(LEN[kind] ?? 0.6, (ctx, out) => {
     const t = 0.002;
     switch (kind) {
-      // ---- Update 29: interface sounds (chart-room: soft paper ticks, brass, a ship's horn) ----
+      // ---- Update 45: Nordlys interface sounds — glass, ice and air (cold crystalline partials,
+      // a soft sub knock under every confirm, nothing harsh) ----
       case 'uiHover':
-        // a short, soft tick: a pencil tapping the chart table
-        burst(ctx, out, t, { dur: 0.012, attack: 0.0005, decay: 0.008, gain: 0.22, type: 'bandpass', freq: 2400, q: 2.2 });
-        tone(ctx, out, t, 1900, 1750, 0.03, 0.05, 'sine', 0.025);
+        // a soft glassy tick
+        burst(ctx, out, t, { dur: 0.008, attack: 0.0004, decay: 0.006, gain: 0.14, type: 'highpass', freq: 5200 });
+        tone(ctx, out, t, 3520, 3380, 0.05, 0.03, 'sine', 0.05);
+        tone(ctx, out, t, 1760, 1720, 0.04, 0.012, 'sine', 0.04);
         break;
       case 'uiConfirm':
-        // brass "tock" and a rising two-note confirm
-        burst(ctx, out, t, { dur: 0.02, attack: 0.0005, decay: 0.014, gain: 0.35, type: 'bandpass', freq: 1500, q: 1.6 });
-        tone(ctx, out, t, 220, 150, 0.06, 0.25, 'sine', 0.06);
-        tone(ctx, out, t + 0.025, 784, 784, 0.16, 0.14, 'triangle', 0.18);
-        tone(ctx, out, t + 0.085, 1175, 1175, 0.22, 0.12, 'triangle', 0.26);
+        // a crystalline rising fifth over a soft sub knock, a breath of air after it
+        tone(ctx, out, t, 120, 62, 0.09, 0.2, 'sine', 0.1);
+        burst(ctx, out, t, { dur: 0.012, attack: 0.0005, decay: 0.01, gain: 0.16, type: 'bandpass', freq: 3200, q: 1.2 });
+        for (const [f, d, a] of [[1174.7, 0, 0.12], [1760, 0.055, 0.11]] as const) {
+          tone(ctx, out, t + d, f, f, 0.42, a, 'sine', 0.42);
+          tone(ctx, out, t + d, f * 2.01, f * 2.01, 0.2, a * 0.22, 'sine', 0.2);
+          tone(ctx, out, t + d, f * 3.98, f * 3.98, 0.08, a * 0.07, 'sine', 0.08);
+        }
+        burst(ctx, out, t + 0.02, { dur: 0.2, attack: 0.03, decay: 0.16, gain: 0.03, type: 'highpass', freq: 6500 });
         break;
       case 'uiBack':
-        // the same voice, falling
-        burst(ctx, out, t, { dur: 0.016, attack: 0.0005, decay: 0.012, gain: 0.25, type: 'bandpass', freq: 1200, q: 1.6 });
-        tone(ctx, out, t + 0.01, 988, 988, 0.12, 0.1, 'triangle', 0.14);
-        tone(ctx, out, t + 0.06, 659, 659, 0.16, 0.1, 'triangle', 0.2);
+        // the same glass, falling, softer
+        burst(ctx, out, t, { dur: 0.01, attack: 0.0005, decay: 0.008, gain: 0.1, type: 'bandpass', freq: 2400, q: 1.2 });
+        for (const [f, d, a] of [[1318.5, 0, 0.09], [880, 0.06, 0.1]] as const) {
+          tone(ctx, out, t + d, f, f * 0.995, 0.3, a, 'sine', 0.3);
+          tone(ctx, out, t + d, f * 2.01, f * 2.0, 0.14, a * 0.2, 'sine', 0.14);
+        }
+        tone(ctx, out, t, 100, 60, 0.07, 0.12, 'sine', 0.08);
         break;
       case 'uiReady':
-        // ship's bell: a struck bar with long inharmonic partials
-        for (const [r, a] of [[1, 1], [2.32, 0.5], [3.98, 0.32], [5.9, 0.18]] as const) tone(ctx, out, t, 880 * r, 880 * r * 0.999, 1.0 / Math.sqrt(r), 0.16 * a, 'sine', 0.9 / Math.sqrt(r));
-        burst(ctx, out, t, { dur: 0.01, decay: 0.008, gain: 0.25, type: 'highpass', freq: 3000 });
+        // ready: an ice-bell arpeggio (D F A D), each struck bar with inharmonic partials
+        [1174.7, 1396.9, 1760, 2349.3].forEach((f, i) => {
+          for (const [r, a] of [[1, 1], [2.76, 0.32], [5.4, 0.12]] as const) tone(ctx, out, t + i * 0.045, f * r, f * r * 0.999, 1.1 / Math.sqrt(r), 0.075 * a, 'sine', 1.1 / Math.sqrt(r));
+        });
+        tone(ctx, out, t, 147, 73, 0.2, 0.16, 'sine', 0.25);
+        burst(ctx, out, t, { dur: 0.3, attack: 0.04, decay: 0.25, gain: 0.03, type: 'highpass', freq: 7000 });
         break;
       case 'uiHorn': {
         // match found: a low two-tone ship horn, swelling and fading over the water
@@ -843,7 +855,9 @@ export class AudioEngine {
     // hitmarker + elimination sounds supplied for the game (public/assets/sounds/ui); they
     // replace the designed ones after designSounds() runs
     const provided: Bank = {};
-    await Promise.all(([['hit', 'hitmarker'], ['headshot', 'hitmarker'], ['kill', 'killsound'], ['killHead', 'killsound']] as const).map(async ([key, f]) => {
+    await Promise.all(([['hit', 'hitmarker'], ['headshot', 'hitmarker'], ['kill', 'killsound'], ['killHead', 'killsound'],
+      // Update 45 stingers (ElevenLabs sound generation, tools/audio45_build.py)
+      ['uiHorn', 'match_found'], ['uiDeploy', 'deploy'], ['uiWhoosh', 'whoosh'], ['roundStart', 'round_start']] as const).map(async ([key, f]) => {
       try {
         const r = await fetch(`${import.meta.env.BASE_URL}assets/sounds/ui/${f}.ogg`);
         if (r.ok) provided[key] = [await this.ctx.decodeAudioData(await r.arrayBuffer())];

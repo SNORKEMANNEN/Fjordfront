@@ -137,12 +137,8 @@ BANK = {
     ] + [[L('FEETHmn_ShoeDirtWalk_OS_0%d.ogg' % i, 0.0, 0.34), L('ki_rock_tumble.ogg', 0.3 * i, 0.15, 'highpass=f=2000', -15)] for i in (1, 2, 3)], {'peak': -1}),
     'step_water': ([[L('tw_step_water.ogg', s, n)] for s, n in ((0.08, 0.6), (1.014, 0.6), (1.798, 0.55), (2.502, 0.55), (3.206, 0.6))], {'peak': -1}),
     # ---------------- interface & match stings ----------------
-    'uiHover': ([[L('ki_if_tick-001.ogg', 0.0, 0.05, 'highpass=f=1200')], [L('ki_if_tick-002.ogg', 0.0, 0.04, 'highpass=f=1200')]], {'peak': -6}),
-    'uiConfirm': ([[L('ki_if_confirmation-003.ogg', 0.0, 0.32), L('UIClick_MetalConfirm_OS_01.ogg', 0.0, 0.3, '', -8)]], {'peak': -3}),
-    'uiBack': ([[L('ki_if_back-002.ogg', 0.0, 0.09), L('UIClick_MetalBack_OS_01.ogg', 0.0, 0.25, '', -10)]], {'peak': -4}),
-    'uiReady': ([[L('ki_gondola_bell.ogg', 0.0, 1.9)]], {'peak': -3}),
-    # match found: an orchestra hit with a bell under it
-    'uiHorn': ([[L('kj_hit03.ogg', 0.0, 0.75, P(0.85)), L('ki_gondola_bell.ogg', 0.0, 1.6, P(0.75), -10, 0.02)]], {'peak': -2}),
+    # (Update 45: uiHover / uiConfirm / uiBack / uiReady are designed in AudioEngine.ts; uiHorn is the
+    # ElevenLabs "match found" stinger from tools/audio45_build.py)
     'medal': ([[L('UIAlert_Notification_OS_05.ogg', 0.0, 0.24)], [L('UIAlert_Notification_OS_04.ogg', 0.0, 0.2)]], {'peak': -4}),
     # flag taken: a radio squelch and a rising two-tone (the HQ net confirming), no music
     'flagWon': ([[L('67620__qubodup__radio_click_1.flac', 0.0, 0.3, '', -2), L('67619__qubodup__radio_beep_1.flac', 0.0, 0.12, '', 0, 0.07), L('67619__qubodup__radio_beep_1.flac', 0.0, 0.12, P(1.335), 0, 0.22), L('67620__qubodup__radio_click_1.flac', 0.12, 0.18, P(1.1), -6, 0.38)]], {'peak': -3}),

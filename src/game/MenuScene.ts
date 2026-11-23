@@ -28,6 +28,10 @@ export class MenuScene {
   private head = new THREE.Vector3();
   /** look a little down past the soldier (a viewpoint over a town) */
   private lookDown = 0;
+  /** seconds since the menu was (re)shown: the camera eases in from a wider, lower start */
+  private introT = 0;
+  /** where the rim light sits (behind the soldier, high, on the far side from the camera) */
+  rimPos = new THREE.Vector3();
   /** clear(a, b): nothing solid between two points (physics line of sight) */
   constructor(private scene: THREE.Scene, private terrain: Terrain, private buildWeapon: (id: WeaponId) => WeaponModel, private clear: (a: THREE.Vector3, b: THREE.Vector3) => boolean) {
     this.root.name = 'menuSoldier';
@@ -157,7 +161,10 @@ export class MenuScene {
   }
 
   show(v: boolean) {
-    if (v && !this.root.parent) this.scene.add(this.root);
+    if (v && !this.root.parent) {
+      this.scene.add(this.root);
+      this.introT = 0;
+    }
     if (!v && this.root.parent) this.scene.remove(this.root);
   }
 
@@ -182,13 +189,18 @@ export class MenuScene {
     const fwd = new THREE.Vector3(-Math.sin(this.camYaw), 0, -Math.cos(this.camYaw));
     const right = new THREE.Vector3(Math.cos(this.camYaw), 0, -Math.sin(this.camYaw));
     const wide = viewW / Math.max(1, viewH);
-    const dist = 6.2 + Math.max(0, 1.6 - wide) * 2.5;
-    const p = this.spot.clone().addScaledVector(fwd, dist).addScaledVector(right, 0.9 + Math.sin(this.t * 0.07) * 0.12);
-    p.y += 1.35 + Math.sin(this.t * 0.11) * 0.04;
+    // intro: a slow push-in and rise over the first seconds (ease-out), then the breathing drift
+    this.introT += dt;
+    const k = 1 - Math.pow(1 - Math.min(1, this.introT / 3.2), 3);
+    const dist = 6.2 + Math.max(0, 1.6 - wide) * 2.5 + (1 - k) * 2.6;
+    const p = this.spot.clone().addScaledVector(fwd, dist).addScaledVector(right, 0.9 + Math.sin(this.t * 0.07) * 0.12 - (1 - k) * 0.8);
+    p.y += 1.35 + Math.sin(this.t * 0.11) * 0.04 - (1 - k) * 0.35;
+    // the rim light: behind the soldier, high, on the side away from the camera's offset
+    this.rimPos.copy(this.spot).addScaledVector(fwd, -1.7).addScaledVector(right, -1.1).setY(this.spot.y + 2.6);
     cam.position.copy(p);
     const look = this.spot.clone().addScaledVector(right, 0.9 + 0.12 * Math.min(1.2, wide / 1.78)).setY(this.spot.y + 1.0 - this.lookDown);
     cam.lookAt(look);
-    cam.fov = 38;
+    cam.fov = 38 + (1 - k) * 4;
     cam.updateProjectionMatrix();
     cam.updateMatrixWorld();
     this.head.copy(this.spot).y += 2.25;
