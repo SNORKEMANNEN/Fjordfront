@@ -752,11 +752,15 @@ export class Game {
     };
     this.wmats = makeWeaponMaterials(this.mats);
     // loadout screen: studio preview + silhouette thumbnails of every gun
-    this.ui.previewFactory = () => new WeaponPreview((id, b) => {
-      const m = WEAPON_BUILDERS[id as WeaponId](this.wmats);
-      if (b) attachVisuals(m, id as WeaponId, WEAPONS[id as WeaponId], b, this.wmats);
-      return m.root;
-    });
+    this.ui.previewFactory = () => {
+      // the bench draws in its own GL context: give it copies of the baked gun textures
+      this.mats.makePortable(Object.values(this.wmats));
+      return new WeaponPreview((id, b) => {
+        const m = WEAPON_BUILDERS[id as WeaponId](this.wmats);
+        if (b) attachVisuals(m, id as WeaponId, WEAPONS[id as WeaponId], b, this.wmats);
+        return m.root;
+      });
+    };
     // weapon silhouettes from the game's own models (kill feed, death card, kit card)
     this.silhouettes = new Silhouettes(r, (id) => WEAPON_BUILDERS[id as WeaponId](this.wmats).root);
     this.ui.weaponIcon = (n) => this.silhouettes.get(n);

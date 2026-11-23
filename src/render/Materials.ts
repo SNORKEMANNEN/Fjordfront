@@ -55,6 +55,24 @@ export class MaterialLib {
     return s;
   }
 
+  /**
+   * Point these materials' baked maps at CPU-side copies (Update 46) so a second WebGL context —
+   * the loadout bench's own canvas — can draw them too. Same pixels, same sampling; only the
+   * surfaces these materials actually use are read back, once.
+   */
+  makePortable(mats: Iterable<THREE.Material>) {
+    for (const m of mats) {
+      const sm = m as THREE.MeshStandardMaterial;
+      if (!sm.isMeshStandardMaterial) continue;
+      for (const slot of ['map', 'normalMap', 'roughnessMap'] as const) {
+        const t = sm[slot];
+        if (!t || (t as THREE.DataTexture).isDataTexture) continue;
+        const p = this.baker.portable(t);
+        if (p) sm[slot] = p;
+      }
+    }
+  }
+
   /** A PBR material using a baked surface. Cached by key. */
   std(surface: string, opts: StdOpts = {}, key?: string): THREE.MeshStandardMaterial {
     const k = key ?? surface + JSON.stringify(opts);

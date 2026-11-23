@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import { addLaser, addWeaponLight } from './Laser';
-import { PartBuilder, profile, cyl, lathe, rbox, picatinny, pin, bez, socket, P2, setFinish, patchWeaponMaterial, engraving } from './ModelKit';
+import { PartBuilder, profile, cyl, lathe, rbox, picatinny, pin, bez, socket, P2, setFinish, patchWeaponMaterial, engraving, shapeFromProfile } from './ModelKit';
 import { MaterialLib, patchSurfaceMaterial } from '../render/Materials';
 
 export interface WeaponModel {
@@ -22,9 +22,17 @@ export type WeaponMats = Record<string, THREE.Material>;
 export function makeWeaponMaterials(L: MaterialLib): WeaponMats {
   const gm = L.surface('gunMetal');
   const poly = L.surface('polymer');
-  const metal = L.std('gunMetal', { metalness: 0.72, roughness: 1.0, tile: 0.18, envMapIntensity: 1.1 }, 'w.metal');
-  const steel = L.std('gunMetal', { metalness: 0.92, roughness: 0.8, tile: 0.12, color: 0x9a9a9a, envMapIntensity: 1.2 }, 'w.steel');
-  const polymer = L.std('polymer', { metalness: 0.0, roughness: 1.0, tile: 0.12, envMapIntensity: 0.9 }, 'w.poly');
+  // (Update 46) black anodised aluminium reads as a dark dielectric with a satin sheen, not as a
+  // mirror: lower metalness and a darker base; parkerised steel stays metallic but greyer
+  // The baked albedo maps are near-black (≈0.035 linear), so the tint lifts them (>1) to a
+  // neutral charcoal that still reads at dusk; steel skips the map for a real grey metal F0.
+  const metal = L.std('gunMetal', { metalness: 0.3, roughness: 0.78, tile: 0.18, envMapIntensity: 1.0 }, 'w.metal');
+  metal.color.setRGB(1.12, 1.13, 1.16);
+  const steel = new THREE.MeshStandardMaterial({ color: 0x5d5f61, metalness: 0.86, roughness: 0.58, normalMap: gm.normal, envMapIntensity: 1.0 });
+  steel.normalScale.set(0.5, 0.5);
+  patchSurfaceMaterial(steel, 1 / 0.12);
+  const polymer = L.std('polymer', { metalness: 0.0, roughness: 1.0, tile: 0.12, envMapIntensity: 0.8 }, 'w.poly');
+  polymer.color.setRGB(1.1, 1.1, 1.12);
   const tan = new THREE.MeshStandardMaterial({ color: 0x8c7a5c, roughness: 0.62, metalness: 0.05, normalMap: poly.normal, envMapIntensity: 0.8 });
   tan.normalScale.set(0.6, 0.6);
   patchSurfaceMaterial(tan, 1 / 0.12);
@@ -72,6 +80,21 @@ export function makeWeaponMaterials(L: MaterialLib): WeaponMats {
     tritium: new THREE.MeshBasicMaterial({ color: new THREE.Color(0.6, 2.4, 0.5), toneMapped: false }),
     white: new THREE.MeshStandardMaterial({ color: 0xd8d8d0, roughness: 0.5 }),
   };
+}
+
+/**
+ * Extrude a cross-section (w, v around the bore) along the barrel from u0 to u1 (Update 46):
+ * handguards, tubes and receivers that are shaped in section rather than in profile. Optional
+ * inner holes make it a tube (the barrel shows through the end).
+ */
+function alongBore(pts: P2[], u0: number, u1: number, v: number, opts: { round?: number; bevel?: number; holes?: P2[][] } = {}) {
+  const sh = shapeFromProfile(pts, opts.round ?? 0.004);
+  for (const h of opts.holes ?? []) sh.holes.push(shapeFromProfile(h, (opts.round ?? 0.004) * 0.7) as unknown as THREE.Path);
+  const b = opts.bevel ?? 0.0012;
+  const g = new THREE.ExtrudeGeometry(sh, { depth: Math.max(1e-4, u1 - u0 - b * 2), bevelEnabled: b > 0, bevelThickness: b, bevelSize: b * 0.8, bevelSegments: 2, curveSegments: 4 });
+  g.translate(0, v, -(u1 - b));
+  g.computeVertexNormals();
+  return g;
 }
 
 /** Rotate a geometry around the barrel axis (at height v) by angle a. */
@@ -344,26 +367,28 @@ export function buildCarbine(mats: WeaponMats): WeaponModel {
   b.add('metal', rbox(0.036, 0.06, 0.004, 0.016, -0.0172, -0.0142, 0.0012));
   // --- pistol grip ---
   b.add('polymer', profile(pistolGrip(), 0.03, { round: 0.008, bevel: 0.004 }));
-  // --- handguard (free-float, octagonal) ---
+  // --- handguard (Update 46): a slim free-float M-LOK tube in section — flat sides with the slots,
+  // chamfered corners, a lightening-cut belly, the top rail its full length, and a hand stop ---
   {
-    const hg = new THREE.CylinderGeometry(0.0255, 0.0255, 0.345, 8, 1, false);
-    hg.rotateY(Math.PI / 8);
-    hg.rotateX(-Math.PI / 2);
-    hg.translate(0, bore, -(0.141 + 0.345 / 2));
-    b.add('metal', hg);
-    // M-LOK slots on 3 faces
+    const outer: P2[] = [[-0.0175, -0.0262], [0.0175, -0.0262], [0.0248, -0.019], [0.0248, 0.0158], [0.019, 0.0236], [-0.019, 0.0236], [-0.0248, 0.0158], [-0.0248, -0.019]];
+    const inner: P2[] = [[-0.0152, -0.0232], [0.0152, -0.0232], [0.0218, -0.0168], [0.0218, 0.0142], [0.0166, 0.0206], [-0.0166, 0.0206], [-0.0218, 0.0142], [-0.0218, -0.0168]];
+    b.add('metal', alongBore(outer, 0.141, 0.486, bore, { round: 0.0035, holes: [inner] }));
+    // M-LOK slots down both flat sides
     for (let i = 0; i < 5; i++) {
       const u = 0.17 + i * 0.058;
-      for (const a of [Math.PI / 2, -Math.PI / 2, Math.PI, Math.PI * 0.75, -Math.PI * 0.75]) {
-        const s = rbox(u, u + 0.032, bore + 0.0225, bore + 0.0245, -0.0035, 0.0035, 0.0012);
-        b.add('dark', aroundBore(s, bore, a));
+      for (const sd of [1, -1]) {
+        b.add('dark', rbox(u, u + 0.032, bore - 0.0035, bore + 0.0035, sd > 0 ? 0.0251 : -0.0262, sd > 0 ? 0.0262 : -0.0251, 0.0014));
       }
+      // lightening cuts along the belly
+      if (i < 4) b.add('dark', rbox(u + 0.006, u + 0.04, bore - 0.0276, bore - 0.0266, -0.007, 0.007, 0.0016));
     }
-    // barrel nut ring + top rail along handguard
+    // anti-rotation tabs where it meets the upper, the barrel nut ring
     b.add('metal', cyl(0.0225, 0.137, 0.148, bore, 0, 24));
+    for (const sd of [1, -1]) b.add('metal', rbox(0.132, 0.146, bore + 0.018, bore + 0.0232, sd * 0.012 - 0.003, sd * 0.012 + 0.003, 0.001));
     for (const g of picatinny(0.148, 0.48, bore + 0.0234)) b.add('metal', g);
-    // QD sling cup
+    // QD sling cup and a hand stop under the front of the handguard
     b.add('steel', cyl(0.006, 0.16, 0.17, bore - 0.024, -0.016, 12));
+    b.add('polymer', profile([[0.425, bore - 0.0262], [0.462, bore - 0.0262], [0.466, bore - 0.03], [0.46, bore - 0.036], [0.452, bore - 0.0372], [0.444, bore - 0.034], [0.432, bore - 0.0285]], 0.017, { round: 0.003, bevel: 0.0018 }));
   }
   // --- barrel, gas block, flash hider ---
   b.add('steel', cyl(0.0094, 0.14, 0.535, bore, 0, 20));
