@@ -85,6 +85,8 @@ import { heldProp } from '../character/HeldProps';
 import { FieldOps } from './FieldOps';
 import { Scavenge } from './Scavenge';
 import { Gear, FIELDS, FieldId } from './Gear';
+import { SquadSpawn } from './SquadSpawn';
+import { Traverse } from './Traverse';
 
 type GameState = 'loading' | 'menu' | 'playing' | 'paused' | 'ended';
 const TACTICAL_COUNT: Record<string, number> = { flash: 2, stun: 2, smoke: 1, stim: 1, snapshot: 1, decoy: 2, sensor: 2, glow: 3, gas: 1, wedge: 2, breach: 2 };
@@ -209,6 +211,10 @@ export class Game {
   scav!: Scavenge;
   /** Update 47: the new field kit (fires, gas, sensors, wedges, crates, beacons, radar) */
   gear!: Gear;
+  /** Update 47: where you come back (squadmates, rally points, beacons) */
+  squadSpawn!: SquadSpawn;
+  /** Update 47: ledge hang, rappel, grappling hook, blind fire */
+  traverse!: Traverse;
   ballistics!: Ballistics;
   scope = new Scope(512);
   private scopeModel: unknown = null;
@@ -869,6 +875,8 @@ export class Game {
     this.field = new FieldOps(this);
     this.scav = new Scavenge(this);
     this.gear = new Gear(this);
+    this.squadSpawn = new SquadSpawn(this);
+    this.traverse = new Traverse(this);
     this.combat.downHook = (v, sh, def, part, dmg) => this.field.tryDown(v, sh, part, def.cls, dmg, def.name);
     this.combat.plateHook = (v, pt, dir, broke, sh) => this.field.plateHit(v, pt, dir, broke, sh === this.avatar);
     this.dom = new Domination(this.scene, this.nav, this.terrain);
@@ -1076,13 +1084,14 @@ export class Game {
   }
   // ---- player orders
   private wheel: { el: HTMLDivElement; x: number; y: number; sel: number } | null = null;
-  private static ORDERS: { kind: Order['kind'] | 'cancel'; label: string; sub: string }[] = [
+  private static ORDERS: { kind: Order['kind'] | 'cancel' | 'rally'; label: string; sub: string }[] = [
     { kind: 'attack', label: 'ATTACK', sub: 'where you look' },
     { kind: 'defend', label: 'DEFEND', sub: 'where you look' },
     { kind: 'follow', label: 'FOLLOW ME', sub: 'stay with you' },
     { kind: 'hold', label: 'HOLD', sub: 'stay put' },
     { kind: 'regroup', label: 'REGROUP', sub: 'on you, then free' },
     { kind: 'cancel', label: 'AS YOU WERE', sub: 'cancel orders' },
+    { kind: 'rally', label: 'RALLY POINT', sub: 'squad spawns here' },
   ];
   private updateOrderWheel() {
     const inp = this.input;
@@ -1131,7 +1140,8 @@ export class Game {
           const r = this.sab.brain.playerOrder(SabBrain.ORDERS[sel].kind);
           if (r) this.ui.notify('LAGET · SQUAD', r);
           this.audio.play('radio', { gain: 0.25, bus: 'ui', reverb: 0, rate: 1.2 });
-        } else this.issueOrder(Game.ORDERS[sel].kind as Order['kind'] | 'cancel');
+        } else if (Game.ORDERS[sel].kind === 'rally') this.squadSpawn.placeRally();
+        else this.issueOrder(Game.ORDERS[sel].kind as Order['kind'] | 'cancel');
       }
     }
   }
@@ -1676,6 +1686,8 @@ export class Game {
     this.field.reset();
     this.scav.clear();
     this.gear.clear();
+    this.squadSpawn.clear();
+    this.traverse.clear();
     for (const b of this.bots) {
       const s = this.match.pickSpawn(b.team);
       b.spawn(s.pos, s.yaw);
@@ -1745,8 +1757,12 @@ export class Game {
     // your own legs / killcam stand-in wear your side's uniform
     this.legs?.setTeam(this.avatar.team);
     this.ghost?.setTeam(this.avatar.team);
-    const s = this.match.pickSpawn(this.avatar.team);
+    // (Update 47) the spawn picked on the death screen: a squadmate, a rally point, a beacon
+    const pick = this.squadSpawn.resolve();
+    this.squadSpawn.hide();
+    const s = pick ?? this.match.pickSpawn(this.avatar.team);
     this.player.teleport(s.pos, s.yaw);
+    if (pick && !this.testMode) this.ui.notify('DEPLOYED', pick.label);
     this.player.dead = false;
     this.avatar.alive = true;
     this.avatar.health = 100;
@@ -1893,6 +1909,7 @@ export class Game {
     this.updateHandling(dt);
     w.hurt = this.avatar.alive ? clamp((100 - this.avatar.health) / 100, 0, 1) : 0;
     w.handsBusy = this.field.handsBusy;
+    this.traverse.update(dt);
     w.update(dt, this.indoor);
     this.updateBarrelFx(dt);
     this.updateWeaponLight(dt);
@@ -1923,7 +1940,7 @@ export class Game {
     if (c4Tap) {
       this.lastUseTap = -9;
       this.startDetonate();
-    } else if (inp.wasPressed('spot') && a.alive && !this.sab?.usesF() && !this.field.usesF() && !this.scav.usesF()) {
+    } else if (inp.wasPressed('spot') && a.alive && !this.sab?.usesF() && !this.field.usesF() && !this.scav.usesF() && !this.traverse.usesF()) {
       // F: clip onto a zipline in reach, else open / close the door you are looking at, else spot
       const d = this.doorFocus();
       if (zipHere && !this.player.mantle && !this.player.ladder) {
@@ -1933,7 +1950,7 @@ export class Game {
       } else if (d) this.useDoor(d);
       else this.trySpot();
     }
-    this.ui.interactHint(a.alive && this.state === 'playing' ? this.field.hint() || this.scav.hint() || (this.world.zips.ride ? '[SPACE] LET GO' : zipHere ? (zipHere.line.cabin ? '[F] RIDE THE CABLE CAR' : '[F] ZIPLINE') : this.doorFocus() ? (Math.abs(this.doorFocus()!.target) > 0.5 ? '[F] CLOSE DOOR' : '[F] OPEN DOOR') : '') : '');
+    this.ui.interactHint(a.alive && this.state === 'playing' ? this.field.hint() || this.traverse.hint() || this.scav.hint() || (this.world.zips.ride ? '[SPACE] LET GO' : zipHere ? (zipHere.line.cabin ? '[F] RIDE THE CABLE CAR' : '[F] ZIPLINE') : this.doorFocus() ? (Math.abs(this.doorFocus()!.target) > 0.5 ? '[F] CLOSE DOOR' : '[F] OPEN DOOR') : '') : '');
     if (a.alive && this.weapons.enabled) this.playerActions(dt);
     if (inp.wasPressed('ping') && a.alive) this.ping();
     if (inp.wasPressed('scoreboard')) {
@@ -1972,6 +1989,7 @@ export class Game {
         if (inp.wasPressed(k)) this.ui.selectPreset(i);
       });
       this.ui.showDeath(true, this.killerName, this.killerWeapon, this.respawnT + (this.killcamSlot >= 0 ? 4 : 0), this.killerTeam);
+      this.squadSpawn.updateDead();
       if (this.respawnT <= 0 && this.match.phase === 'live') {
         if (this.killcamSlot >= 0 && this.startKillcam()) return;
         this.respawnPlayer();
@@ -1983,6 +2001,7 @@ export class Game {
       this.field.update(dt);
       this.scav.update(dt);
       this.gear.update(dt);
+      this.squadSpawn.update(dt);
     }
     // ---------------- bots ----------------
     if (this.voting) this.updateVote(dt);
@@ -2009,7 +2028,7 @@ export class Game {
       }
       b.update(dt, this.time);
       if (!b.alive && b.respawnT <= 0 && this.match.phase === 'live' && !this.sab) {
-        const s = this.match.pickSpawn(b.team);
+        const s = this.squadSpawn.botSpawn(b) ?? this.match.pickSpawn(b.team);
         b.spawn(s.pos, s.yaw);
         this.field.issuePlates(b, 'bot');
       }
@@ -3294,7 +3313,7 @@ export class Game {
   /** Grenade (G, hold to cook), melee (V), killstreaks (3 / 4 / 5). */
   private playerActions(dt = 1 / 60) {
     // (Update 47) downed, or both hands on a casualty: no equipment
-    if (this.avatar.downed || this.field.handsBusy) return;
+    if (this.avatar.downed || this.field.handsBusy || this.player.climb) return;
     const inp = this.input;
     const w = this.weapons;
     const vm = this.vm;
@@ -4999,6 +5018,8 @@ export class Game {
     }
     if (name === 'velcro') this.audio.play('velcro', { gain: 0.7, reverb: 0 });
     if (name === 'grab') this.audio.play('cloth', { gain: 0.7, rate: 0.8, reverb: 0 });
+    if (name === 'grappleFire') this.traverse.fired();
+    if (name === 'grabLedge') this.audio.play('cloth', { gain: 0.4, reverb: 0 });
     if (name === 'wedgeIn') {
       if (!this.gear.placeWedge()) {
         this.tacCount++;

@@ -224,3 +224,85 @@ export function wedgePlace(t: number, pos: THREE.Vector3, rot: THREE.Vector3, c:
     c.jolt(0.3, 0.1, 0.1);
   });
 }
+
+// ============================================================================ climbing
+/** hanging from a ledge: the gun swings onto the sling, both hands over the edge at the top of
+ *  the view, fingers hooked; shimmying walks the hands along it */
+export function ledgeHands(t: number, pos: THREE.Vector3, rot: THREE.Vector3, c: EqCtx) {
+  gunAway(t, pos, rot, [[0, 0], [0.12, 1], [0.86, 1], [1, 0]]);
+  const held = c.held;
+  const shimmy = (c.data.shimmy as number | undefined) ?? 0;
+  const strain = Math.sin(held * 2.1) * 0.004;
+  const fl = c.freeL, fr = c.freeR;
+  const b = kf(t, [[0, 0], [0.1, 1], [0.86, 1], [1, 0]]);
+  fl.b = b;
+  fr.b = b;
+  const stepL = Math.max(0, Math.sin(shimmy * 7)) * 0.03, stepR = Math.max(0, Math.sin(shimmy * 7 + Math.PI)) * 0.03;
+  kv(t, [[0, [-0.17, -0.32, -0.3]], [0.12, [-0.2, 0.06, -0.4]], [1, [-0.2, 0.06, -0.4]]], fl.p);
+  kv(t, [[0, [0.14, -0.3, -0.2]], [0.12, [0.19, 0.055, -0.41]], [1, [0.19, 0.055, -0.41]]], fr.p);
+  fl.p.y += stepL + strain;
+  fr.p.y += stepR + strain;
+  // palms down on the top, fingers curled over the far side
+  fl.q.copy(handFrame(V(0.1, -0.25, -1), V(0, -1, 0.15)));
+  fr.q.copy(handFrame(V(-0.1, -0.25, -1), V(0, -1, 0.15)));
+  fl.pose = POSES.hold;
+  c.setRPose(POSES.hold);
+  c.noWrapL();
+  pos.y += Math.sin(held * 2.1) * 0.006;
+  once(c, 'g', t, 0.1, () => c.ev('grabLedge'));
+}
+
+/** on the rope: the left fist high on it, the right low as the brake, the gun slung; the hands
+ *  slide while you descend, a jolt on the kick-off */
+export function rappelHands(t: number, pos: THREE.Vector3, rot: THREE.Vector3, c: EqCtx) {
+  gunAway(t, pos, rot, [[0, 0], [0.12, 1], [0.86, 1], [1, 0]], 0.9);
+  const held = c.held;
+  const slide = (c.data.slide as number | undefined) ?? 0;
+  const fl = c.freeL, fr = c.freeR;
+  const b = kf(t, [[0, 0], [0.1, 1], [0.86, 1], [1, 0]]);
+  fl.b = b;
+  fr.b = b;
+  kv(t, [[0, [-0.17, -0.32, -0.3]], [0.12, [-0.03, -0.02, -0.33]], [1, [-0.03, -0.02, -0.33]]], fl.p);
+  kv(t, [[0, [0.14, -0.3, -0.2]], [0.12, [0.03, -0.24, -0.29]], [1, [0.03, -0.24, -0.29]]], fr.p);
+  // the brake hand feeds rope as you go down
+  fr.p.y += Math.sin(held * 9) * 0.015 * slide;
+  fl.p.y += Math.sin(held * 9 + 1.5) * 0.008 * slide;
+  fl.q.copy(handFrame(V(1, 0, -0.2), V(0.1, 0, -1)));
+  fr.q.copy(handFrame(V(-1, 0.1, -0.2), V(-0.1, 0, -1)));
+  fl.pose = POSES.grip;
+  c.setRPose(POSES.grip);
+  c.noWrapL();
+  pos.x += Math.sin(held * 1.3) * 0.004;
+}
+
+/** the grapple launcher on the left: up into view, aimed, the shot (the hook leaves, the arm
+ *  kicks), then held out straight while the line reels you in */
+export function grappleArm(t: number, pos: THREE.Vector3, rot: THREE.Vector3, c: EqCtx) {
+  const item = c.item();
+  const g = kf(t, [[0, 0], [0.15, 1], [0.85, 1], [1, 0]]);
+  pos.x += 0.03 * g;
+  pos.y -= 0.04 * g;
+  rot.z -= 0.12 * g;
+  const fl = c.freeL;
+  fl.b = kf(t, [[0, 0], [0.12, 1], [0.86, 1], [1, 0]]);
+  const kick = kf(t, [[0, 0], [0.3, 0], [0.33, 1], [0.45, 0]]);
+  kv(t, [[0, [-0.17, -0.32, -0.3]], [0.2, [-0.12, -0.13, -0.42]], [0.86, [-0.12, -0.13, -0.42]], [1, [-0.17, -0.32, -0.3]]], fl.p);
+  fl.p.z += 0.05 * kick;
+  fl.p.y += 0.02 * kick;
+  // a fist round the pistol grip, the launcher pointing down the line of sight
+  fl.q.copy(handFrame(V(0.05, 0.1, -1), V(1, 0, 0)));
+  fl.pose = POSES.grip;
+  c.noWrapL();
+  const ps = c.palmAt('L', fl.p, fl.q, 0.012);
+  item.position.copy(ps).add(V(0.0, 0.035, -0.03).applyQuaternion(fl.q));
+  item.quaternion.copy(fl.q).multiply(euler(-0.1, 0, 0));
+  item.userData.posed = true;
+  item.visible = t > 0.05 && t < 0.92;
+  const hook = item.getObjectByName('hook');
+  if (hook) hook.visible = t < 0.32;
+  (item.userData.setProngs as ((k: number) => void) | undefined)?.(t < 0.32 ? 0 : 1);
+  once(c, 'f', t, 0.32, () => {
+    c.ev('grappleFire');
+    c.jolt(0.8, 0.6, 0.3);
+  });
+}

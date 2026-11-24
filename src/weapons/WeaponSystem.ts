@@ -207,6 +207,11 @@ export class WeaponSystem {
   downedLock = false;
   /** (Update 47) both hands on a casualty: no firing, no aiming */
   handsBusy = false;
+  /** (Update 47) blind fire: the gun held up over cover (0) or round a corner (±1 = lean side),
+   *  0..1 how far up / out it is; the game sets `blindWant` from the key */
+  blindWant = false;
+  blind = 0;
+  blindSide = 0;
   switchTo(i: number) {
     if (this.downedLock && i !== 1) return;
     if (i === this.current || (i >= this.slots.length && !(i === 2 && this.knife)) || this.switching) return;
@@ -333,6 +338,10 @@ export class WeaponSystem {
   }
 
   update(dt: number, indoor: number) {
+    // (Update 47) blind fire comes up / out over a quarter second; the side follows your lean
+    const bw = this.blindWant && !this.player.sprinting && !this.player.mantle ? 1 : 0;
+    this.blind = damp(this.blind, bw, bw ? 9 : 12, dt);
+    if (bw) this.blindSide = this.lean < -0.3 ? -1 : this.lean > 0.3 ? 1 : 0;
     const inp = this.input;
     const p = this.player;
     const s = this.cur;
@@ -424,7 +433,7 @@ export class WeaponSystem {
     const busy = this.switching || (this.reloading && !d.perShell);
     const cycling = this.vm.action?.type === 'bolt' || this.vm.action?.type === 'karCycle';
     const handsBusy = !!this.vm.action && ['throw', 'stim', 'uav', 'designate', 'melee', 'nvg', 'tactical', 'detPress'].includes(this.vm.action.type);
-    const wantAds = d.cls !== 'Melee' && this.enabled && this.adsHeld && !busy && !handsBusy && !p.sprinting && !p.mantle && !(p.sliding && d.cls === 'Sniper') && this.obstruct < 0.75 && !this.handsBusy;
+    const wantAds = d.cls !== 'Melee' && this.enabled && this.adsHeld && !busy && !handsBusy && !p.sprinting && !p.mantle && !(p.sliding && d.cls === 'Sniper') && this.obstruct < 0.75 && !this.handsBusy && this.blind < 0.2;
     if (wantAds && p.sprinting) p.sprinting = false;
     if (this.adsHeld && p.sprinting && !busy) {
       p.sprinting = false;
@@ -568,6 +577,8 @@ export class WeaponSystem {
       lean: this.lean,
       obstruct: this.obstruct,
       brace: this.brace,
+      blind: this.blind,
+      blindSide: this.blindSide,
       heat: s.heat ?? 0,
       pitch: p.pitch,
       hurt: this.hurt,
@@ -673,7 +684,7 @@ export class WeaponSystem {
     }
 
     // directions
-    const spreadDeg = this.spread();
+    const spreadDeg = this.spread() * (1 + 5 * this.blind) + 2.5 * this.blind;
     const cam = this.rig.camera;
     const fwd = new THREE.Vector3(0, 0, -1).applyQuaternion(cam.quaternion);
     const up = new THREE.Vector3(0, 1, 0).applyQuaternion(cam.quaternion);
@@ -722,6 +733,8 @@ export class WeaponSystem {
     const mz = this.vm.socketCameraSpace('muzzle').project(this.vmCamera);
     const ej = this.vm.socketCameraSpace('eject').project(this.vmCamera);
     const origin = cam.getWorldPosition(new THREE.Vector3());
+    // blind fire: the rounds leave from the gun held up over the cover / out round the corner
+    if (this.blind > 0.5) origin.addScaledVector(this.blindSide ? rt : up, (this.blindSide || 1) * 0.5 * this.blind);
     this.hooks.onShot({ def: d, origin, dirs, muzzleScreen: mz, ejectScreen: ej, tracer: this.burstCount % d.tracerEvery === 1 || d.tracerEvery === 1 });
     if (d.modes[0] === 'pump' || d.modes[0] === 'bolt') {
       if (s.mag > 0 || d.modes[0] === 'bolt') this.cycleTimer = d.modes[0] === 'bolt' ? 0.26 : 0.14;

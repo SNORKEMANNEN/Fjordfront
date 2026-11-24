@@ -9,7 +9,7 @@ import { sd9Reload, mp18Reload, AnimCtx } from './SmgAnims';
 import { mp7Reload, mp7Inspect } from './Mp7Anims';
 import { akReload, karReload, karCycle, RifleCtx, KarPlan } from './RifleAnims';
 import { lethalGrenade, lethalKnife, lethalC4, tacticalThrow, detPress, knifePickup, EqCtx } from './EquipAnims';
-import { plateInsert, reviveHands, dragBody, wedgePlace } from './FieldAnims';
+import { plateInsert, reviveHands, dragBody, wedgePlace, ledgeHands, rappelHands, grappleArm } from './FieldAnims';
 import { knifeAction, knifeCarry } from './KnifeAnim';
 import { chargePlant, chargeDefuse, ChargeCtx } from './ChargeAnims';
 import { WeaponModel } from './WeaponModels';
@@ -201,7 +201,7 @@ export type ActionType = 'reload' | 'reloadEmpty' | 'inspect' | 'inspectMag' | '
   | 'claymore' | 'c4Throw' | 'detonate' | 'stickyThrow' | 'snapshotThrow' | 'decoyThrow' | 'trophy'
   | 'karReload' | 'karCycle'
   | 'lethalFrag' | 'lethalSticky' | 'lethalKnife' | 'lethalC4' | 'tactical' | 'detPress' | 'knifePickup'
-  | 'plate' | 'revive' | 'dragBody' | 'wedge'
+  | 'plate' | 'revive' | 'dragBody' | 'wedge' | 'ledge' | 'rappel' | 'grapple'
   | 'sabPlant' | 'sabDefuse';
 
 export interface Action {
@@ -255,6 +255,9 @@ export interface VMContext {
   hurt?: number;
   /** 0..1 winded after a sprint (Update 46): the gun heaves with the breathing */
   winded?: number;
+  /** (Update 47) blind fire 0..1 and side (0 over the top, ±1 round a corner) */
+  blind?: number;
+  blindSide?: number;
 }
 
 /** Hand orientation (camera space) while holding the UAV tablet: fingers right and a little up, palm to the camera. */
@@ -1441,6 +1444,24 @@ export class Viewmodel {
       rot.z += 0.34 * ob;
       rot.y += -0.22 * ob;
     }
+    // ---------------- blind fire (Update 47) ----------------
+    // over the top: the gun goes up above your head, canted, you see its belly against the sky;
+    // round a corner: arms out to the side, the gun turned in, only the muzzle end peeking past
+    const bl = easeInOutCubic(clamp(c.blind ?? 0, 0, 1));
+    if (bl > 1e-4) {
+      const sd = c.blindSide ?? 0;
+      if (sd === 0) {
+        pos.y += 0.2 * bl;
+        pos.z += 0.06 * bl;
+        rot.x += 0.12 * bl;
+        rot.z += 0.22 * bl + Math.sin(this.t * 9) * 0.01 * bl;
+      } else {
+        pos.x += 0.22 * sd * bl;
+        pos.z += 0.05 * bl;
+        rot.y -= 0.55 * sd * bl;
+        rot.z += 0.5 * sd * bl;
+      }
+    }
     // ---------------- braced on cover (Update 46) ----------------
     const brT = clamp(c.brace ?? 0, 0, 1);
     this.braceBlend = damp(this.braceBlend, brT, 9, dt);
@@ -2388,6 +2409,15 @@ export class Viewmodel {
         break;
       case 'wedge':
         wedgePlace(t, pos, rot, this.eqCtx(a));
+        break;
+      case 'ledge':
+        ledgeHands(t, pos, rot, this.eqCtx(a));
+        break;
+      case 'rappel':
+        rappelHands(t, pos, rot, this.eqCtx(a));
+        break;
+      case 'grapple':
+        grappleArm(t, pos, rot, this.eqCtx(a));
         break;
       case 'sabPlant':
       case 'sabDefuse': {

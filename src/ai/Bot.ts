@@ -339,6 +339,10 @@ export class Bot implements Combatant {
   plates: number[] = [];
   spare = 0;
   private plateT = -1;
+  /** (Update 47) fighting right now: hit recently or an enemy in sight (no spawning on them) */
+  get inCombat() {
+    return this.lastDamageT < 4 || (!!this.target && this.lastSeenT < 1.5);
+  }
   /** temperament: how this soldier fights (set by the game from its role / seed) */
   personality: 'steady' | 'rusher' | 'cautious' | 'medic' | 'marksman' = 'steady';
   private crawlT = 0;

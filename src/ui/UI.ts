@@ -1508,6 +1508,28 @@ export class UI {
     el.classList.toggle('on', !!text);
   }
 
+  /** (Update 47) the spawn picker on the death screen (null hides it) */
+  private spawnEl: HTMLElement | null = null;
+  private spawnKey = '';
+  spawnPicker(opts: { kind: string; label: string; sub: string; ok: boolean }[] | null, sel: number, onPick?: (i: number) => void) {
+    if (!opts) {
+      this.spawnEl?.classList.add('hidden');
+      this.spawnKey = '';
+      return;
+    }
+    if (!this.spawnEl) {
+      this.spawnEl = h('div', 'spawnpick hidden');
+      this.root.appendChild(this.spawnEl);
+    }
+    const key = opts.map((o) => `${o.label}${o.sub}${o.ok}`).join('|') + '#' + sel;
+    this.spawnEl.classList.remove('hidden');
+    if (key === this.spawnKey) return;
+    this.spawnKey = key;
+    const ic: Record<string, string> = { base: 'anchor', squad: 'squad', rally: 'objective', beacon: 'beacon' };
+    this.spawnEl.innerHTML = `<div class="sph"><span>DEPLOY · SPAWN POINT</span><em><kbd>Q</kbd><kbd>E</kbd></em></div><div class="spl">${opts.map((o, i) => `<button class="spo ${o.kind} ${i === sel ? 'on' : ''} ${o.ok ? '' : 'off'}" data-i="${i}"><span class="spi">${icon(ic[o.kind] ?? 'anchor')}</span><b>${esc(o.label)}</b><small>${esc(o.sub)}</small></button>`).join('')}</div>`;
+    this.spawnEl.querySelectorAll('.spo').forEach((b) => b.addEventListener('click', () => onPick?.(+(b as HTMLElement).dataset.i!)));
+  }
+
   /** (Update 47) CS gas: the edges smear yellow-green, everything blurs and swims */
   private gasEl: HTMLElement | null = null;
   gasFx(k: number) {
