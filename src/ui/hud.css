@@ -470,3 +470,21 @@
 .spawnpick .spo.off { opacity: .42; cursor: default; }
 .spawnpick .spo.off small { color: var(--foe); }
 .spawnpick .spo.beacon .spi, .spawnpick .spo.rally .spi { color: #8fd4ff; }
+
+/* map intro flyover (Update 47) */
+.mapintro { position: absolute; inset: 0; z-index: 40; pointer-events: none; }
+.mapintro .mi-top, .mapintro .mi-bot { position: absolute; left: 0; right: 0; height: 11vh; background: #02060b; animation: miBar .9s var(--ease-out) backwards; }
+.mapintro .mi-top { top: 0; transform-origin: top; } .mapintro .mi-bot { bottom: 0; transform-origin: bottom; }
+@keyframes miBar { from { transform: scaleY(0); } }
+.mapintro.out .mi-top, .mapintro.out .mi-bot { transform: scaleY(.45); transition: transform 2.2s var(--ease-out); }
+.mapintro.done { opacity: 0; transition: opacity .6s; }
+.mapintro.done .mi-top, .mapintro.done .mi-bot { transform: scaleY(0); transition: transform .6s var(--ease-out); }
+.mapintro .mi-card { position: absolute; left: 7vw; bottom: calc(11vh + 5vh); display: grid; gap: 6px; opacity: 0; transform: translateY(18px); filter: blur(8px); transition: opacity .7s var(--ease-out), transform .9s var(--ease-out), filter .7s var(--ease-out); }
+.mapintro .mi-card.on { opacity: 1; transform: none; filter: none; }
+.mapintro .mi-card b { transition: letter-spacing 1.4s var(--ease-out); letter-spacing: .5em; }
+.mapintro .mi-card.on b { letter-spacing: .16em; }
+.mapintro .mi-card small { font: 600 12px var(--f-mono); letter-spacing: .3em; color: var(--aurora); text-shadow: 0 0 12px rgba(92, 242, 198, .5); }
+.mapintro .mi-card b { font: 800 clamp(40px, 7vw, 96px) var(--f-display); font-stretch: 118%; letter-spacing: .16em; color: #fff; line-height: .95; text-shadow: 0 4px 40px rgba(0, 0, 0, .55); }
+.mapintro .mi-card s { display: block; height: 2px; width: 220px; background: var(--grad-aurora); box-shadow: 0 0 14px rgba(92, 242, 198, .6); }
+.mapintro .mi-skip { position: absolute; right: 4vw; bottom: calc(11vh / 2 - 9px); font: 600 10px var(--f-cond); letter-spacing: .28em; color: rgba(226, 238, 248, .55); }
+.mapintro .mi-skip kbd { font: 700 10px var(--f-mono); padding: 1px 6px; margin-right: 6px; border: 1px solid rgba(226, 238, 248, .3); border-radius: 3px; }

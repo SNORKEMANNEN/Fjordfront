@@ -88,6 +88,7 @@ import { Gear, FIELDS, FieldId } from './Gear';
 import { SquadSpawn } from './SquadSpawn';
 import { Traverse } from './Traverse';
 import { Commander } from '../ai/Commander';
+import { MapIntro } from './MapIntro';
 
 type GameState = 'loading' | 'menu' | 'playing' | 'paused' | 'ended';
 const TACTICAL_COUNT: Record<string, number> = { flash: 2, stun: 2, smoke: 1, stim: 1, snapshot: 1, decoy: 2, sensor: 2, glow: 3, gas: 1, wedge: 2, breach: 2 };
@@ -218,6 +219,8 @@ export class Game {
   traverse!: Traverse;
   /** Update 47: one adaptive commander per side */
   commanders: [Commander, Commander] | null = null;
+  /** Update 47: the flyover before you deploy */
+  intro!: MapIntro;
   /** bots' field upgrades: next time each may deploy one */
   private botFieldT = new Map<number, number>();
   ballistics!: Ballistics;
@@ -883,6 +886,7 @@ export class Game {
     this.squadSpawn = new SquadSpawn(this);
     this.traverse = new Traverse(this);
     this.commanders = [new Commander(this, 0), new Commander(this, 1)];
+    this.intro = new MapIntro(this);
     this.combat.downHook = (v, sh, def, part, dmg) => this.field.tryDown(v, sh, part, def.cls, dmg, def.name);
     this.combat.plateHook = (v, pt, dir, broke, sh) => this.field.plateHit(v, pt, dir, broke, sh === this.avatar);
     this.dom = new Domination(this.scene, this.nav, this.terrain);
@@ -1715,7 +1719,21 @@ export class Game {
     this.match.initialSpawns = false;
     this.state = 'playing';
     this.minuteCalled = false;
-    if (!this.testMode) this.ui.deployCard(MAP_NAME.toUpperCase(), solvik ? 'SABOTASJE · 6 V 6' : this.netg?.active ? 'FLERSPILLER · MULTIPLAYER' : 'DOMINATION · 12 V 12');
+    if (!this.testMode) {
+      const mode = solvik ? 'SABOTASJE · 6 V 6' : this.netg?.active ? 'FLERSPILLER · MULTIPLAYER' : 'DOMINATION · 12 V 12';
+      if (this.netg?.active) this.ui.deployCard(MAP_NAME.toUpperCase(), mode);
+      else {
+        // (Update 47) the flyover first; you are frozen at your spawn until it hands over
+        this.player.frozen = true;
+        this.weapons.enabled = false;
+        this.intro.start(mode, () => {
+          this.player.frozen = false;
+          if (this.avatar.alive) this.weapons.enabled = true;
+          this.vm.root.visible = this.avatar.alive;
+          this.ui.deployCard('', '', 'respawn');
+        });
+      }
+    }
     // Sabotasje: rounds, no vote (Solvik is its own map)
     if (solvik) {
       this.sab ??= new SabMode(this);
@@ -1946,6 +1964,7 @@ export class Game {
     }
     this.vmCamRoll += (this.vm.camRoll - this.vmCamRoll) * (1 - Math.exp(-dt * 8));
     if (a.alive) this.rig.update(dt, this.player, zoom, w.ads, -this.peekLean * this.leanRollMul + this.vmCamRoll);
+    if (this.intro?.active) this.intro.apply(dt);
     this.viewmodelFov(w.ads);
     this.nvgFrame(dt);
     if (!a.alive) {
