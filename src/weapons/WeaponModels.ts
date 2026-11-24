@@ -33,6 +33,9 @@ export function makeWeaponMaterials(L: MaterialLib): WeaponMats {
   patchSurfaceMaterial(steel, 1 / 0.12);
   const polymer = L.std('polymer', { metalness: 0.0, roughness: 1.0, tile: 0.12, envMapIntensity: 0.8 }, 'w.poly');
   polymer.color.setRGB(1.1, 1.1, 1.12);
+  // what the baked stand-ins (bots' guns, far LODs) use: the colour these read as at a distance
+  metal.userData.flatColor = 0x2b2d30;
+  polymer.userData.flatColor = 0x26272a;
   const tan = new THREE.MeshStandardMaterial({ color: 0x8c7a5c, roughness: 0.62, metalness: 0.05, normalMap: poly.normal, envMapIntensity: 0.8 });
   tan.normalScale.set(0.6, 0.6);
   patchSurfaceMaterial(tan, 1 / 0.12);

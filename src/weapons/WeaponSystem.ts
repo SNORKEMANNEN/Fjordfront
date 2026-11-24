@@ -189,7 +189,12 @@ export class WeaponSystem {
     this.vm.play('draw', instant ? 0.5 : 0.24 + s.def.weight * 0.17, [[0.0, 'draw']], () => (this.switching = false));
   }
 
+  /** (Update 47) downed: the sidearm only */
+  downedLock = false;
+  /** (Update 47) both hands on a casualty: no firing, no aiming */
+  handsBusy = false;
   switchTo(i: number) {
+    if (this.downedLock && i !== 1) return;
     if (i === this.current || (i >= this.slots.length && !(i === 2 && this.knife)) || this.switching) return;
     this.switching = true;
     this.reloading = false;
@@ -405,7 +410,7 @@ export class WeaponSystem {
     const busy = this.switching || (this.reloading && !d.perShell);
     const cycling = this.vm.action?.type === 'bolt' || this.vm.action?.type === 'karCycle';
     const handsBusy = !!this.vm.action && ['throw', 'stim', 'uav', 'designate', 'melee', 'nvg', 'tactical', 'detPress'].includes(this.vm.action.type);
-    const wantAds = d.cls !== 'Melee' && this.enabled && this.adsHeld && !busy && !handsBusy && !p.sprinting && !p.mantle && !(p.sliding && d.cls === 'Sniper') && this.obstruct < 0.75;
+    const wantAds = d.cls !== 'Melee' && this.enabled && this.adsHeld && !busy && !handsBusy && !p.sprinting && !p.mantle && !(p.sliding && d.cls === 'Sniper') && this.obstruct < 0.75 && !this.handsBusy;
     if (wantAds && p.sprinting) p.sprinting = false;
     if (this.adsHeld && p.sprinting && !busy) {
       p.sprinting = false;
@@ -452,7 +457,7 @@ export class WeaponSystem {
     // stim and the UAV tablet are one-handed: the right hand keeps shooting
     const oneHand = !!this.vm.action && (this.vm.action.type === 'stim' || this.vm.action.type === 'uav' || this.vm.action.type === 'tactical' || this.vm.action.type === 'detPress');
     const canFire = d.cls !== 'Melee' && !this.switching && !this.reloading && this.sprintBlock <= 0 && this.cooldown <= 0 && !p.mantle && (this.vm.action === null || this.vm.action.type === 'inspect' || oneHand)
-      && this.obstruct < 0.75 && !s.overheated;
+      && this.obstruct < 0.75 && !s.overheated && !this.handsBusy;
     if (canFire && ((s.mode === 'auto' && trig) || this.wantFire) && this.vm.action && (this.vm.action.type === 'inspect')) this.vm.cancelAction();
     // 3-round burst: one pull fires three at a raised cyclic, then a short reset
     if (s.mode === 'burst' && this.wantFire && this.burstLeft === 0 && canFire && s.mag > 0) {

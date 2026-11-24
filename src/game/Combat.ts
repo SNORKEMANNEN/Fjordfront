@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import { Physics, RayHit } from '../core/Physics';
-import { Combatant, HitPart, armorAbsorb } from './Combatant';
+import { Combatant, HitPart, armorAbsorb, plateAbsorb } from './Combatant';
 import { WeaponDef } from '../weapons/WeaponDefs';
 import { Effects } from '../fx/Effects';
 import { lerp, smoothstep } from '../core/math';
@@ -28,6 +28,10 @@ export class Combat {
   friendlyFire = false;
   /** vehicles (killstreak helicopters): ray test + damage, checked alongside combatants */
   vehicleHit: ((o: THREE.Vector3, d: THREE.Vector3, max: number, shooter: Combatant) => { dist: number; apply: (dmg: number) => void } | null) | null = null;
+  /** (Update 47) lethal damage: return true when the victim goes down instead of dying */
+  downHook: ((victim: Combatant, shooter: Combatant, def: WeaponDef, part: HitPart, dmg: number) => boolean) | null = null;
+  /** (Update 47) a torso hit landed on (or broke) an armour plate */
+  plateHook: ((victim: Combatant, point: THREE.Vector3, dir: THREE.Vector3, broke: boolean, shooter: Combatant) => void) | null = null;
   constructor(private physics: Physics, private fx: Effects, private ev: CombatEvents) {}
 
   /**
@@ -74,6 +78,16 @@ export class Combat {
         if (best.part === 'head') dmg *= def.headMul;
         else if (best.part === 'limb') dmg *= def.limbMul;
         dmg = armorAbsorb(best.c, dmg, best.part, def.cls);
+        if (best.c.plates) {
+          const pr = plateAbsorb(best.c, dmg, best.part, def.cls);
+          if (pr.hitPlate) this.plateHook?.(best.c, best.point, dir, pr.broke >= 0, shooter);
+          dmg = pr.through;
+          if (dmg <= 0.01) {
+            // all of it stopped by the plate: a shove, no wound
+            best.c.onDamaged(shooter, 0, dir, best.part);
+            return { victim: best.c, part: best.part, point: best.point, killed: false, damage: 0, worldHit: null, end: best.point };
+          }
+        }
         const before = best.c.health;
         best.c.health = Math.max(0, best.c.health - dmg);
         best.c.onDamaged(shooter, dmg, dir, best.part);
@@ -82,7 +96,8 @@ export class Combat {
         // never clouds your view)
         if (best.c.isPlayer) this.fx.impact(best.point, dir.clone().negate(), 'flesh', dir, best.part === 'head');
         else this.fx.fleshHit(best.point, dir, best.part === 'head', dmg);
-        const killed = before > 0 && best.c.health <= 0;
+        let killed = before > 0 && best.c.health <= 0;
+        if (killed && this.downHook?.(best.c, shooter, def, best.part, dmg)) killed = false;
         if (killed) {
           best.c.alive = false;
           this.ev.onKill(shooter, best.c, def, best.part === 'head', penetrations > 0);

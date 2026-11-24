@@ -109,7 +109,7 @@ type Weights = [string, number][];
 const K_CAMO = 0, K_FLAT = 1, K_TEAM = 2, K_NVG_DOWN = 3, K_NVG_UP = 4, K_GLASS = 5;
 /** Update 46 kinds: 7 nylon webbing (MOLLE rows), 8 skin, 9 helmet strobe (blinks under NVG),
  *  10 the shoulder flag patch, 11 knit (balaclava, beanie), 12 rubberised / hard plastic */
-const K_WEB = 7, K_SKIN = 8, K_STROBE = 9, K_PATCH = 10, K_KNIT = 11, K_HARD = 12;
+const K_WEB = 7, K_SKIN = 8, K_STROBE = 9, K_PATCH = 10, K_KNIT = 11, K_HARD = 12, K_PLATE = 13;
 const TILE = 0.3;
 
 class SkinBuilder {
@@ -694,8 +694,9 @@ export function buildSoldierGeometry(look: SoldierLook, team: 0 | 1, q: 0 | 1 | 
       g.computeVertexNormals();
       return g;
     };
-    B.rigid(plate(0.3, 0.32), [['Spine2', 0.75], ['Spine1', 0.25]], [0, 1.255, 0.142], gear, K_WEB, { rough: 0.88 });
-    B.rigid(plate(0.3, 0.33), [['Spine2', 0.8], ['Spine1', 0.2]], [0, 1.27, -0.135], gear, K_WEB, { rough: 0.88 });
+    // (Update 47) the plate bags are their own kind: hits crack and spall them (Soldier uPlate)
+    B.rigid(plate(0.3, 0.32), [['Spine2', 0.75], ['Spine1', 0.25]], [0, 1.255, 0.142], gear, K_PLATE, { rough: 0.88 });
+    B.rigid(plate(0.3, 0.33), [['Spine2', 0.8], ['Spine1', 0.2]], [0, 1.27, -0.135], gear, K_PLATE, { rough: 0.88 });
     B.tube([{ c: V(0, 1.2, 0.0), rx: 0.188, rz: 0.142, w: S1 }, { c: V(0, 1.1, 0.0), rx: 0.178, rz: 0.134, w: [['Spine1', 0.5], ['Spine', 0.5]] }], segs, gear, K_WEB, { rough: 0.88, ex: 2.6 });
     for (const s of [1, -1]) {
       B.rigid(rbox(0.065, 0.025, 0.28, 0.01), S2, [0.1 * s, 1.445, 0.0], gear, K_WEB, { rough: 0.88 });

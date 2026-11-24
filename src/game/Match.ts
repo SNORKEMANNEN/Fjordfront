@@ -14,6 +14,8 @@ export interface KillEvent {
   headshot: boolean;
   wallbang: boolean;
   t: number;
+  /** (Update 47) not a kill: someone went down, or was revived */
+  kind?: 'down' | 'revive';
 }
 
 export type MatchPhase = 'warmup' | 'live' | 'ended';

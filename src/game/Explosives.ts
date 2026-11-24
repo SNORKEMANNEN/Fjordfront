@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import { NETF } from '../net/NetFlags';
 import { Physics } from '../core/Physics';
-import { Combatant, armorAbsorb } from './Combatant';
+import { Combatant, armorAbsorb, plateAbsorb } from './Combatant';
 import { WeaponDef } from '../weapons/WeaponDefs';
 import { Effects } from '../fx/Effects';
 import { Viewmodel } from '../weapons/Viewmodel';
@@ -119,6 +119,10 @@ export interface ExplosionHooks {
   fire?(p: THREE.Vector3, owner: Combatant, g: Grenade): void;
   /** active-protection systems: return true to shoot this grenade down */
   intercept?(g: Grenade): boolean;
+  /** (Update 47) lethal blast damage: true = the victim goes down instead of dying */
+  down?(victim: Combatant, owner: Combatant, def: WeaponDef, dmg: number): boolean;
+  /** (Update 47) the blast landed on an armour plate */
+  plate?(victim: Combatant, broke: boolean): void;
 }
 
 /**
@@ -505,7 +509,13 @@ export class Explosives {
         if (d > 2.2) continue;
         k *= 0.25;
       }
-      const dmg = armorAbsorb(c, maxDmg * k, 'body', 'Explosive');
+      let dmg = armorAbsorb(c, maxDmg * k, 'body', 'Explosive');
+      if (c.plates && dmg > 0) {
+        // plates take part of a blast (fragments into the front); the rest is concussion
+        const pr = plateAbsorb(c, dmg * 0.5, 'body', 'Explosive');
+        if (pr.hitPlate) this.hooks.plate?.(c, pr.broke >= 0);
+        dmg = dmg * 0.5 + pr.through;
+      }
       if (dmg < 2) continue;
       const before = c.health;
       c.health = Math.max(0, c.health - dmg);
@@ -513,6 +523,7 @@ export class Explosives {
       c.onDamaged(owner, dmg, dir);
       this.hooks.damage(c, owner, dmg, dir, def);
       if (before > 0 && c.health <= 0) {
+        if (this.hooks.down?.(c, owner, def, maxDmg * k)) continue;
         c.alive = false;
         kills++;
         this.hooks.kill(owner, c, def);

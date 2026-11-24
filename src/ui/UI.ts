@@ -72,6 +72,8 @@ export interface HUDState {
   overheated?: boolean;
   braced?: boolean;
   obstructed?: boolean;
+  /** Update 47: armour plates (each 0..1) and spares carried */
+  plates?: { plates: number[]; spare: number };
 }
 /** something on the compass ribbon: bearing in degrees (0 = north) */
 export interface CompassMark { bearing: number; kind: 'flag' | 'ping' | 'wp' | 'foe'; label?: string; rel?: 'f' | 'e' | 'n' }
@@ -1010,13 +1012,14 @@ export class UI {
       <div class="flagmarks"></div>
       <div class="streaks ctx"></div>
       <div class="nades ctx"></div>
-      <div class="health ctx gone"><span class="hl">HP</span><div class="hb"><i class="hf"></i></div><span class="hv">100</span></div>
+      <div class="health ctx gone"><span class="hl">HP</span><div class="hb"><i class="hf"></i></div><span class="hv">100</span><div class="plates"><i class="pl"><b></b></i><i class="pl"><b></b></i><span class="psp"><em>O</em>×3</span></div></div>
+      <div class="downedui hidden"><div class="dvig"></div><div class="dcard"><svg class="dring" viewBox="0 0 120 120"><circle class="bg" cx="60" cy="60" r="52"/><circle class="fg" cx="60" cy="60" r="52"/><circle class="rv" cx="60" cy="60" r="44"/></svg><div class="dsec">28</div><div class="dtitle">NEDE · DOWNED</div><div class="dsub"></div><div class="dgive"><span>HOLD <kbd>F</kbd> GIVE UP</span><b><i></i></b></div></div></div>
       <div class="ammo ctx"><div class="wn"></div><div class="fm"></div><div class="nums"><b class="mag">30</b><span class="res">/ 120</span></div><div class="pips"></div><div class="heat"><span>BARREL</span><b><i class="hfill"></i></b></div></div>
       <div class="brace"><i></i><span>BRACED</span></div>
       <div class="fps hidden"></div>
       <div class="scope hidden"><div class="ring"></div></div>`;
     const q = (s: string) => e.querySelector(s) as HTMLElement;
-    for (const k of ['s0', 's1', 'p0', 'p1', 'clock', 'strip', 'marks', 'brg', 'loc', 'crosshair', 'hitmarker', 'hf', 'hv', 'mag', 'res', 'wn', 'fm', 'pips', 'prompt', 'fps', 'scope', 'health', 'ammo', 'streaks', 'nades', 'heat', 'hfill', 'brace']) this.els[k] = q('.' + k);
+    for (const k of ['s0', 's1', 'p0', 'p1', 'clock', 'strip', 'marks', 'brg', 'loc', 'crosshair', 'hitmarker', 'hf', 'hv', 'mag', 'res', 'wn', 'fm', 'pips', 'prompt', 'fps', 'scope', 'health', 'ammo', 'streaks', 'nades', 'heat', 'hfill', 'brace', 'plates', 'psp', 'downedui']) this.els[k] = q('.' + k);
     this.feedEl = q('.feed');
     this.notifyEl = q('.notify');
     this.dmgEl = q('.dmg');
@@ -1093,7 +1096,21 @@ export class UI {
     if (s.health < c.lastHp - 0.5) c.hurtT = 0;
     c.lastHp = s.health;
     c.hurtT += dt;
-    setCls(e.health, `health ctx ${s.health >= 99.5 && c.hurtT > 3 ? 'gone' : ''}`);
+    // (Update 47) armour plates: a segment per plate under the bar, spares by the key
+    const pl = s.plates;
+    const platesFull = !pl || !pl.plates.length || pl.plates.every((k) => k >= 0.999);
+    if (pl && pl.plates.length) {
+      const segs = e.plates.querySelectorAll('.pl') as NodeListOf<HTMLElement>;
+      pl.plates.forEach((k, i) => {
+        if (!segs[i]) return;
+        setStyle(segs[i].firstElementChild as HTMLElement, 'width', `${(k * 100).toFixed(0)}%`);
+        segs[i].classList.toggle('broken', k <= 0);
+      });
+      setHTML(e.psp, `<em>O</em>×${pl.spare}`);
+      e.plates.classList.toggle('canfix', pl.spare > 0 && !platesFull);
+    }
+    e.plates.classList.toggle('hidden', !pl || !pl.plates.length);
+    setCls(e.health, `health ctx ${s.health >= 99.5 && c.hurtT > 3 && platesFull ? 'gone' : ''}`);
     setStyle(e.hf, 'width', `${s.health.toFixed(0)}%`);
     e.hf.classList.toggle('low', s.health < 35);
     setText(e.hv, String(Math.ceil(s.health)));
@@ -1179,7 +1196,7 @@ export class UI {
 
   /** Hitmarker shapes: ticks (normal), short thin ticks (limb / armour), gold ticks + diamond (head),
    *  red X with an expanding ring (kill), grey (through cover). Scales with damage. */
-  hitmarker(kill: boolean, head: boolean, damage = 30, kind: '' | 'limb' | 'through' | 'low' = '') {
+  hitmarker(kill: boolean, head: boolean, damage = 30, kind: '' | 'limb' | 'through' | 'low' | 'plate' | 'plateBreak' = '') {
     const tpl = this.els.hitmarker;
     const el = tpl.cloneNode(true) as HTMLElement;
     el.className = `hitmarker live ${kill ? 'kill' : ''} ${head ? 'head' : ''} ${kind}`;
@@ -1472,6 +1489,26 @@ export class UI {
     el.classList.toggle('on', !!text);
   }
 
+  /** (Update 47) a hold-progress ring under the crosshair (revive, plant, beacon...): null hides it */
+  private ringEl: HTMLElement | null = null;
+  actionRing(k: number | null, label = '', cls = '') {
+    if (k === null) {
+      this.ringEl?.classList.remove('on');
+      return;
+    }
+    if (!this.ringEl) {
+      this.ringEl = h('div', 'aring', `<svg viewBox="0 0 64 64"><circle class="bg" cx="32" cy="32" r="27"/><circle class="fg" cx="32" cy="32" r="27"/></svg><span></span>`);
+      this.hud.appendChild(this.ringEl);
+    }
+    const el = this.ringEl;
+    el.className = `aring on ${cls}`;
+    const C = 2 * Math.PI * 27;
+    const fg = el.querySelector('.fg') as SVGCircleElement;
+    fg.style.strokeDasharray = `${C}`;
+    fg.style.strokeDashoffset = `${(C * (1 - Math.max(0, Math.min(1, k)))).toFixed(1)}`;
+    setText(el.querySelector('span') as HTMLElement, label);
+  }
+
   /** Grenade danger icons around the crosshair, pointing at nearby live grenades. */
   grenadeWarn(angles: number[]) {
     let el = this.hud.querySelector('.nadewarn') as HTMLElement | null;
@@ -1531,6 +1568,47 @@ export class UI {
     setTimeout(() => n.remove(), 2400);
   }
 
+  // ---------------------------------------------------------------- downed (Update 47)
+  /** show / hide the downed overlay */
+  downed(v: boolean) {
+    const el = this.els.downedui;
+    if (!el) return;
+    el.classList.toggle('hidden', !v);
+    this.hud.classList.toggle('isdown', v);
+    if (v) {
+      el.classList.remove('rise');
+      void el.offsetWidth;
+      el.classList.add('rise');
+    }
+  }
+  /** bleed-out ring, revive ring, who is coming, give-up bar */
+  downedState(st: { bleed: number; secs: number; prog: number; helper: string; dist: number; giveUp: number; dragged: boolean }) {
+    const el = this.els.downedui;
+    if (!el) return;
+    const C = 2 * Math.PI * 52, C2 = 2 * Math.PI * 44;
+    const fg = el.querySelector('.fg') as SVGCircleElement, rv = el.querySelector('.rv') as SVGCircleElement;
+    fg.style.strokeDasharray = `${C}`;
+    fg.style.strokeDashoffset = `${(C * (1 - st.bleed)).toFixed(1)}`;
+    rv.style.strokeDasharray = `${C2}`;
+    rv.style.strokeDashoffset = `${(C2 * (1 - st.prog)).toFixed(1)}`;
+    el.classList.toggle('critical', st.bleed < 0.3);
+    el.classList.toggle('reviving', st.prog > 0.01);
+    setText(el.querySelector('.dsec') as HTMLElement, st.prog > 0.01 ? `${Math.round(st.prog * 100)}%` : String(st.secs));
+    const sub = st.prog > 0.01 ? `<b class="ok">${esc(st.helper)}</b> IS REVIVING YOU` : st.dragged ? `<b class="ok">${esc(st.helper || 'A TEAMMATE')}</b> IS DRAGGING YOU TO COVER` : st.helper ? `<b class="ok">${esc(st.helper)}</b> IS COMING · ${Math.round(st.dist)} M` : 'CALLING FOR A MEDIC…';
+    setHTML(el.querySelector('.dsub') as HTMLElement, sub);
+    setStyle(el.querySelector('.dgive i') as HTMLElement, 'width', `${(st.giveUp * 100).toFixed(0)}%`);
+  }
+  /** a plate cracked / broke / went in: the plate strip reacts */
+  plateFlash(broke: boolean, added = false) {
+    const el = this.els.plates;
+    if (!el) return;
+    const cls = added ? 'added' : broke ? 'brk' : 'hit';
+    el.classList.remove('added', 'brk', 'hit');
+    void el.offsetWidth;
+    el.classList.add(cls);
+    this.els.health?.classList.remove('gone');
+  }
+
   // ---------------------------------------------------------------- kill feed
   /** what goes between the names: the weapon's silhouette, or a glyph for knives / explosions / fire */
   private feedWeapon(w: string) {
@@ -1555,7 +1633,11 @@ export class UI {
     }
     this.lastFeedKey = key;
     this.feedEl.innerHTML = feed
-      .map((f) => `<div class="k ${f.killer === this.meName || f.victim === this.meName ? 'mine' : ''}" data-t="${f.t}"><span class="${f.killerTeam === 0 ? 'blue' : 'red'}">${esc(f.killer)}</span>${this.feedWeapon(f.weapon)}${f.headshot ? icon('headshot', 'hs') : ''}${f.wallbang ? icon('wallbang') : ''}<span class="${f.victimTeam === 0 ? 'blue' : 'red'}">${esc(f.victim)}</span></div>`)
+      .map((f) => f.kind === 'revive'
+        ? `<div class="k revive ${f.killer === this.meName || f.victim === this.meName ? 'mine' : ''}" data-t="${f.t}"><span class="${f.killerTeam === 0 ? 'blue' : 'red'}">${esc(f.killer)}</span><i class="fk">✚ REVIVED</i><span class="${f.victimTeam === 0 ? 'blue' : 'red'}">${esc(f.victim)}</span></div>`
+        : f.kind === 'down'
+          ? `<div class="k down ${f.killer === this.meName || f.victim === this.meName ? 'mine' : ''}" data-t="${f.t}"><span class="${f.killerTeam === 0 ? 'blue' : 'red'}">${esc(f.killer)}</span>${this.feedWeapon(f.weapon)}<i class="fk">▼ DOWNED</i><span class="${f.victimTeam === 0 ? 'blue' : 'red'}">${esc(f.victim)}</span></div>`
+          : `<div class="k ${f.killer === this.meName || f.victim === this.meName ? 'mine' : ''}" data-t="${f.t}"><span class="${f.killerTeam === 0 ? 'blue' : 'red'}">${esc(f.killer)}</span>${this.feedWeapon(f.weapon)}${f.headshot ? icon('headshot', 'hs') : ''}${f.wallbang ? icon('wallbang') : ''}<span class="${f.victimTeam === 0 ? 'blue' : 'red'}">${esc(f.victim)}</span></div>`)
       .join('');
   }
 

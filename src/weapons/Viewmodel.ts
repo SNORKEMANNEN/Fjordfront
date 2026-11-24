@@ -9,6 +9,7 @@ import { sd9Reload, mp18Reload, AnimCtx } from './SmgAnims';
 import { mp7Reload, mp7Inspect } from './Mp7Anims';
 import { akReload, karReload, karCycle, RifleCtx, KarPlan } from './RifleAnims';
 import { lethalGrenade, lethalKnife, lethalC4, tacticalThrow, detPress, knifePickup, EqCtx } from './EquipAnims';
+import { plateInsert, reviveHands, dragBody } from './FieldAnims';
 import { knifeAction, knifeCarry } from './KnifeAnim';
 import { chargePlant, chargeDefuse, ChargeCtx } from './ChargeAnims';
 import { WeaponModel } from './WeaponModels';
@@ -200,6 +201,7 @@ export type ActionType = 'reload' | 'reloadEmpty' | 'inspect' | 'inspectMag' | '
   | 'claymore' | 'c4Throw' | 'detonate' | 'stickyThrow' | 'snapshotThrow' | 'decoyThrow' | 'trophy'
   | 'karReload' | 'karCycle'
   | 'lethalFrag' | 'lethalSticky' | 'lethalKnife' | 'lethalC4' | 'tactical' | 'detPress' | 'knifePickup'
+  | 'plate' | 'revive' | 'dragBody'
   | 'sabPlant' | 'sabDefuse';
 
 export interface Action {
@@ -2374,6 +2376,15 @@ export class Viewmodel {
         break;
       case 'knifePickup':
         knifePickup(t, pos, rot, this.eqCtx(a));
+        break;
+      case 'plate':
+        plateInsert(t, pos, rot, this.eqCtx(a));
+        break;
+      case 'revive':
+        reviveHands(t, pos, rot, this.eqCtx(a));
+        break;
+      case 'dragBody':
+        dragBody(t, pos, rot, this.eqCtx(a));
         break;
       case 'sabPlant':
       case 'sabDefuse': {

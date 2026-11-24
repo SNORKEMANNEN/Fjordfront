@@ -4,7 +4,9 @@ import { Settings } from '../game/Settings';
 export type Action =
   | 'forward' | 'back' | 'left' | 'right' | 'jump' | 'crouch' | 'prone' | 'sprint'
   | 'reload' | 'inspect' | 'primary' | 'secondary' | 'swap' | 'melee' | 'scoreboard' | 'fire' | 'ads' | 'fireMode' | 'spot' | 'tuning' | 'grenade' | 'tactical' | 'streak1' | 'streak2' | 'streak3' | 'nvg' | 'ping' | 'map' | 'leanL' | 'leanR' | 'field' | 'light' | 'orders' | 'aidebug'
-  | 'chatTeam' | 'talk' | 'spectate' | 'drop';
+  | 'chatTeam' | 'talk' | 'spectate' | 'drop'
+  /** Update 47: armour plate, grappling hook, blind fire */
+  | 'plate' | 'grapple' | 'blind';
 
 /** default bindings (key code or Mouse0-4 → action) */
 export const DEFAULT_BINDS: Record<string, Action> = {
@@ -14,6 +16,7 @@ export const DEFAULT_BINDS: Record<string, Action> = {
   Digit1: 'primary', Digit2: 'secondary', KeyQ: 'leanL', KeyE: 'leanR', KeyV: 'melee', KeyX: 'ping', Tab: 'scoreboard', KeyB: 'fireMode', KeyF: 'spot', Backquote: 'tuning', F2: 'tuning',
   KeyG: 'grenade', KeyT: 'tactical', KeyH: 'field', KeyN: 'nvg', KeyM: 'map', KeyY: 'orders', F4: 'aidebug', Digit3: 'streak1', Digit4: 'streak2', Digit5: 'streak3',
   KeyU: 'chatTeam', KeyK: 'talk', F6: 'spectate', KeyJ: 'drop', KeyL: 'light',
+  KeyO: 'plate', Mouse3: 'plate', KeyP: 'grapple', AltLeft: 'blind',
   Mouse0: 'fire', Mouse2: 'ads', Mouse1: 'ping', Mouse4: 'reload',
 };
 /** the rebindable actions, in the order the Controls tab lists them */
@@ -23,7 +26,7 @@ export const ACTION_LABELS: [Action, string][] = [
   ['leanL', 'Lean left'], ['leanR', 'Lean right'],
   ['fire', 'Fire'], ['ads', 'Aim down sights'], ['reload', 'Reload'], ['fireMode', 'Fire mode'], ['inspect', 'Inspect weapon'],
   ['primary', 'Primary weapon'], ['secondary', 'Sidearm'], ['melee', 'Melee / knife (hold)'],
-  ['grenade', 'Lethal'], ['tactical', 'Tactical'], ['field', 'Field upgrade'],
+  ['grenade', 'Lethal'], ['tactical', 'Tactical'], ['field', 'Field upgrade'], ['plate', 'Armour plate (hold: all)'], ['grapple', 'Grappling hook'], ['blind', 'Blind fire (hold)'],
   ['streak1', 'Killstreak 1'], ['streak2', 'Killstreak 2'], ['streak3', 'Killstreak 3'],
   ['spot', 'Use / spot'], ['ping', 'Ping'], ['nvg', 'Night vision'], ['light', 'Weapon light'], ['map', 'Tactical map'], ['orders', 'Squad orders'],
   ['scoreboard', 'Scoreboard'], ['chatTeam', 'Team chat'], ['talk', 'Push to talk'], ['spectate', 'Spectate / free camera'], ['drop', 'Drop weapon / charge (Sabotasje)'],
@@ -94,7 +97,7 @@ export class Input {
   constructor(private el: HTMLElement) {
     applyKeybinds();
     window.addEventListener('keydown', (e) => {
-      if (e.code === 'Tab') e.preventDefault();
+      if (e.code === 'Tab' || e.code === 'AltLeft') e.preventDefault();
       if (this.typing) return;
       const a = BINDS[e.code];
       if (!a || e.repeat) return;

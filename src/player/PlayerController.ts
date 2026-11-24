@@ -92,6 +92,10 @@ export class PlayerController {
   onWaterTime = 0;
   frozen = false;
   dead = false;
+  /** (Update 47) downed: flat on the ground, a slow crawl, no stance change, no jumping */
+  downed = false;
+  /** (Update 47) movement cap while busy (dragging a casualty, reviving: 0 = rooted) */
+  busyCap = -1;
   /** Smoothed values for camera/viewmodel */
   speed01 = 0;
   lookDX = 0;
@@ -199,8 +203,16 @@ export class PlayerController {
     if (inp.wasPressed('jump')) this.jumpBuffered = T.jumpBuffer;
     else this.jumpBuffered = Math.max(0, this.jumpBuffered - dt);
 
+    // ---- downed (Update 47): pinned flat, crawling ----
+    if (this.downed) {
+      this.wantStance = 'prone';
+      this.sprinting = this.tactical = false;
+      if (this.sliding) this.endSlide(false);
+      this.jumpBuffered = 0;
+      if (body.stance !== 'prone') body.setStance('prone', true);
+    }
     // ---- stance input ----
-    if (inp.wasPressed('crouch')) {
+    if (!this.downed && inp.wasPressed('crouch')) {
       this.crouchHoldTime = 0;
       if (this.sprinting && body.grounded && !this.sliding && this.slideCooldown <= 0 && this.horizSpeed() > 5.2) {
         this.startSlide();
@@ -221,7 +233,7 @@ export class PlayerController {
         this.startSlide();
       }
     }
-    if (inp.isDown('crouch')) {
+    if (!this.downed && inp.isDown('crouch')) {
       this.crouchHoldTime += dt;
       if (this.crouchHoldTime > 0.45 && !this.sliding && this.wantStance === 'crouch' && body.grounded && this.horizSpeed() < 3) {
         this.wantStance = 'prone';
@@ -229,12 +241,13 @@ export class PlayerController {
       }
     }
     if (inp.wasReleased('crouch') && !Settings.data.toggleCrouch && this.wantStance === 'crouch') this.wantStance = 'stand';
-    if (inp.wasPressed('prone') && this.sprinting && body.grounded && !this.sliding && !this.diving && this.horizSpeed() > 4.5) this.startDive(fwd);
+    if (this.downed) { /* no stance change */ }
+    else if (inp.wasPressed('prone') && this.sprinting && body.grounded && !this.sliding && !this.diving && this.horizSpeed() > 4.5) this.startDive(fwd);
     else if (inp.wasPressed('prone')) this.wantStance = this.wantStance === 'prone' ? 'crouch' : 'prone';
 
     // ---- sprint / tactical sprint ----
     this.tacCooldown = Math.max(0, this.tacCooldown - dt);
-    const canSprint = forwardHeld && !this.sliding && this.ads < 0.5 && !this.blockSprint && body.stance !== 'prone';
+    const canSprint = forwardHeld && !this.sliding && this.ads < 0.5 && !this.blockSprint && body.stance !== 'prone' && !this.downed && this.busyCap < 0;
     if (inp.wasPressed('sprint') && canSprint) {
       if (this.sprinting && !this.tactical && this.tacFuel > 0.6 && this.tacCooldown <= 0) {
         this.tactical = true;
@@ -296,6 +309,8 @@ export class PlayerController {
       if (this.sprinting) max = this.tactical ? T.tactical : T.sprint;
       max *= lerp(1, this.adsSpeedMul, this.ads);
       max *= this.weaponSpeedMul * this.statusSpeedMul;
+      if (this.downed) max = Math.min(max, 0.55);
+      if (this.busyCap >= 0) max = Math.min(max, this.busyCap);
       const target = wish.clone().multiplyScalar(max);
       const hv = new THREE.Vector3(this.vel.x, 0, this.vel.z);
       if (onGround) {
@@ -318,7 +333,7 @@ export class PlayerController {
 
     // ---- jump / mantle ----
     const canCoyote = this.sinceGrounded < T.coyote && this.vel.y <= 0.5;
-    if (this.jumpBuffered > 0) {
+    if (this.jumpBuffered > 0 && !this.downed && this.busyCap < 0) {
       if (this.tryMantle(true)) {
         this.jumpBuffered = 0;
         return;
@@ -400,6 +415,18 @@ export class PlayerController {
   }
 
   /** kneel where you stand (planting / defusing roots you crouched, even while frozen) */
+  /** (Update 47) kneel for a revive (and stand back up after): the stance you wanted is kept */
+  private kneelSaved: 'stand' | 'crouch' | 'prone' | null = null;
+  kneel(on: boolean) {
+    if (on && this.kneelSaved === null) {
+      this.kneelSaved = this.wantStance;
+      if (this.wantStance === 'stand') this.wantStance = 'crouch';
+    } else if (!on && this.kneelSaved !== null) {
+      this.wantStance = this.kneelSaved;
+      this.kneelSaved = null;
+    }
+  }
+
   forceCrouch(dt: number) {
     this.wantStance = 'crouch';
     if (this.body.stance === 'stand' && this.body.setStance('crouch')) this.ev.onStance('crouch');

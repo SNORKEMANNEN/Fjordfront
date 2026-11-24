@@ -454,7 +454,9 @@ export function makeTrophy() {
   return finish(g);
 }
 
+import { FIELD_BUILDERS } from './FieldModels';
 export const EQUIP_BUILDERS = {
+  ...FIELD_BUILDERS,
   claymore: makeClaymore, c4: makeC4, detonator: makeDetonator, sticky: makeSticky, snapshot: makeSnapshot, decoy: makeDecoy, trophy: makeTrophy, molotov: makeMolotov,
   charge: makeCharge, cutters: makeCutters,
 };

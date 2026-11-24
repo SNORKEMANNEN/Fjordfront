@@ -82,6 +82,7 @@ import { BlastFx } from '../fx/BlastFx';
 import { ArcPreview } from '../fx/ArcPreview';
 import { heldCode } from '../character/SoldierAnim';
 import { heldProp } from '../character/HeldProps';
+import { FieldOps } from './FieldOps';
 
 type GameState = 'loading' | 'menu' | 'playing' | 'paused' | 'ended';
 const TACTICAL_COUNT: Record<string, number> = { flash: 2, stun: 2, smoke: 1, stim: 1, snapshot: 1, decoy: 2 };
@@ -106,6 +107,10 @@ class PlayerAvatar implements Combatant {
   /** body armour / helmet (Sabotasje) */
   armor = 0;
   helmet = false;
+  /** (Update 47) downed, armour plates */
+  downed = false;
+  plates?: number[];
+  spare = 0;
   onHurt: (from: Combatant | null, amt: number, dir: THREE.Vector3) => void = () => {};
   /** sideways head/shoulder offset while leaning (world m): bots see and shoot the leaned head */
   lean = new THREE.Vector3();
@@ -196,6 +201,8 @@ export class Game {
   nav!: NavGraph;
   bots: Bot[] = [];
   combat!: Combat;
+  /** Update 47: downed / revive / drag / plates / roles */
+  field!: FieldOps;
   ballistics!: Ballistics;
   scope = new Scope(512);
   private scopeModel: unknown = null;
@@ -850,6 +857,10 @@ export class Game {
     this.scene.add(this.legs.root);
     this.match.onEnd = (w) => this.onMatchEnd(w);
     this.combat.combatants = this.match.players;
+    // ---- Update 47: going down instead of dying, armour plates
+    this.field = new FieldOps(this);
+    this.combat.downHook = (v, sh, def, part, dmg) => this.field.tryDown(v, sh, part, def.cls, dmg, def.name);
+    this.combat.plateHook = (v, pt, dir, broke, sh) => this.field.plateHit(v, pt, dir, broke, sh === this.avatar);
     this.dom = new Domination(this.scene, this.nav, this.terrain);
     this.dom.onEvent = (e) => this.onFlagEvent(e);
     this.match.spawns.bias = (p, team) => this.flagSpawnBias(p, team);
@@ -1250,6 +1261,12 @@ export class Game {
           },
           smokeBlocks: (a, b) => this.explosives?.smokeBlocks(a, b) ?? false,
           voice: (b, line) => this.botVoice(b, line),
+          reviveTick: (b, who, dt) => this.field.reviveTick(b, who, dt),
+          drag: (b, who, to, yaw) => this.field.drag(b, who, to, yaw),
+          dragEnd: (b, who) => this.field.dragEnd(b, who),
+          replated: (b) => {
+            if (b.position().distanceTo(this.camera.position) < 25) this.audio.play('velcro', { pos: b.chest(new THREE.Vector3()), gain: 0.5, ref: 3 });
+          },
           callout: (from, pos, enemy) => {
             // the radio carries it further than a shout; the position is second-hand (fuzzed in hear)
             for (const m of this.bots) if (m !== from && m.alive && m.team === from.team && m.position().distanceTo(from.position()) < 90 && !m.target) m.hear(pos, enemy ?? null, 0.6);
@@ -1646,9 +1663,11 @@ export class Game {
     this.vmScene.environment = this.scene.environment;
     this.match.initialSpawns = true;
     this.respawnPlayer();
+    this.field.reset();
     for (const b of this.bots) {
       const s = this.match.pickSpawn(b.team);
       b.spawn(s.pos, s.yaw);
+      this.field.issuePlates(b, 'bot');
     }
     this.match.initialSpawns = false;
     this.state = 'playing';
@@ -1719,6 +1738,7 @@ export class Game {
     this.player.dead = false;
     this.avatar.alive = true;
     this.avatar.health = 100;
+    this.field.issuePlates(this.avatar, this.field.role);
     this.applyLoadout();
     this.weapons.enabled = true;
     this.frags = LETHAL_COUNT[this.loadout.lethal] ?? 2;
@@ -1860,6 +1880,7 @@ export class Game {
     this.physics.step();
     this.updateHandling(dt);
     w.hurt = this.avatar.alive ? clamp((100 - this.avatar.health) / 100, 0, 1) : 0;
+    w.handsBusy = this.field.handsBusy;
     w.update(dt, this.indoor);
     this.updateBarrelFx(dt);
     this.updateWeaponLight(dt);
@@ -1890,7 +1911,7 @@ export class Game {
     if (c4Tap) {
       this.lastUseTap = -9;
       this.startDetonate();
-    } else if (inp.wasPressed('spot') && a.alive && !this.sab?.usesF()) {
+    } else if (inp.wasPressed('spot') && a.alive && !this.sab?.usesF() && !this.field.usesF()) {
       // F: clip onto a zipline in reach, else open / close the door you are looking at, else spot
       const d = this.doorFocus();
       if (zipHere && !this.player.mantle && !this.player.ladder) {
@@ -1900,7 +1921,7 @@ export class Game {
       } else if (d) this.useDoor(d);
       else this.trySpot();
     }
-    this.ui.interactHint(a.alive && this.state === 'playing' ? (this.world.zips.ride ? '[SPACE] LET GO' : zipHere ? (zipHere.line.cabin ? '[F] RIDE THE CABLE CAR' : '[F] ZIPLINE') : this.doorFocus() ? (Math.abs(this.doorFocus()!.target) > 0.5 ? '[F] CLOSE DOOR' : '[F] OPEN DOOR') : '') : '');
+    this.ui.interactHint(a.alive && this.state === 'playing' ? this.field.hint() || (this.world.zips.ride ? '[SPACE] LET GO' : zipHere ? (zipHere.line.cabin ? '[F] RIDE THE CABLE CAR' : '[F] ZIPLINE') : this.doorFocus() ? (Math.abs(this.doorFocus()!.target) > 0.5 ? '[F] CLOSE DOOR' : '[F] OPEN DOOR') : '') : '');
     if (a.alive && this.weapons.enabled) this.playerActions(dt);
     if (inp.wasPressed('ping') && a.alive) this.ping();
     if (inp.wasPressed('scoreboard')) {
@@ -1918,7 +1939,7 @@ export class Game {
     // ---------------- health & bounds ----------------
     a.lastHitT += dt;
     if (a.alive) {
-      if (a.lastHitT > 4 && a.health < 100 && !this.sab) a.health = Math.min(100, a.health + dt * 30);
+      if (a.lastHitT > 4 && a.health < 100 && !this.sab && !a.downed) a.health = Math.min(100, a.health + dt * 30);
       const p = this.player.pos;
       const out = Math.abs(p.x) > PLAY_HALF || Math.abs(p.z) > PLAY_HALF || (p.y < 0.4 && shoreDist(p.x, p.z) < -8 && !inTunnel(p.x, p.y, p.z));
       if (out) {
@@ -1945,6 +1966,8 @@ export class Game {
       }
     }
 
+    // ---------------- the field (Update 47): casualties, revives, plates ----------------
+    if (!this.voting) this.field.update(dt);
     // ---------------- bots ----------------
     if (this.voting) this.updateVote(dt);
     for (const b of this.bots) {
@@ -1972,6 +1995,7 @@ export class Game {
       if (!b.alive && b.respawnT <= 0 && this.match.phase === 'live' && !this.sab) {
         const s = this.match.pickSpawn(b.team);
         b.spawn(s.pos, s.yaw);
+        this.field.issuePlates(b, 'bot');
       }
     }
     if (this.sab) {
@@ -2102,6 +2126,7 @@ export class Game {
       overheated: !!s.overheated,
       braced: w.brace > 0.5,
       obstructed: w.obstruct > 0.75,
+      plates: this.field.plateState(a),
     }, dt);
     w.spread();
     this.ui.compassMarks(this.compassMarks(p));
@@ -3027,6 +3052,8 @@ export class Game {
   // ================================================================ grenades, melee, killstreaks
   private setupExplosives() {
     this.explosives = new Explosives(this.scene, this.physics, this.fx, {
+      down: (v, att, def, dmg) => this.field?.tryDown(v, att, 'body', 'Explosive', dmg, def.name) ?? false,
+      plate: (v, broke) => this.field?.plateHit(v, v.chest(new THREE.Vector3()), new THREE.Vector3(0, -1, 0), broke, false),
       damage: (v, att, amt) => {
         this.logDamage(v, att);
         this.sab?.onDamage(v, att, amt);
@@ -3238,6 +3265,8 @@ export class Game {
 
   /** Grenade (G, hold to cook), melee (V), killstreaks (3 / 4 / 5). */
   private playerActions(dt = 1 / 60) {
+    // (Update 47) downed, or both hands on a casualty: no equipment
+    if (this.avatar.downed || this.field.handsBusy) return;
     const inp = this.input;
     const w = this.weapons;
     const vm = this.vm;
@@ -4908,6 +4937,18 @@ export class Game {
       if (this.audio.has(`shellIn@${d.id}`)) this.audio.play(`shellIn@${d.id}`, { gain: 0.28, rate: 1.6, reverb: 0.04, vary: 0.06 });
     }
     if (name === 'magDrop') this.dropPlayerMag(d);
+    // (Update 47) plates and casualties
+    if (name === 'plateOut') this.audio.play('velcro', { gain: 0.55, rate: 1.1, reverb: 0 });
+    if (name === 'plateIn') {
+      this.field.plateIn();
+      this.audio.play('plateSlide', { gain: 0.7, reverb: 0.02 });
+    }
+    if (name === 'velcro') this.audio.play('velcro', { gain: 0.7, reverb: 0 });
+    if (name === 'grab') this.audio.play('cloth', { gain: 0.7, rate: 0.8, reverb: 0 });
+    if (name === 'reviveCap') this.audio.play('stimCap', { gain: 0.6, reverb: 0, vary: 0.06 });
+    if (name === 'reviveJab') this.audio.play('injectorToss', { gain: 0.3, rate: 1.6, reverb: 0 });
+    if (name === 'kneel') this.audio.play('legs', { gain: 0.35, rate: 0.9, reverb: 0 });
+    if (name === 'compress') this.audio.play('cloth', { gain: 0.25, rate: 1.3, reverb: 0, vary: 0.1 });
     if (name === 'nvgGrab') this.audio.play('click', { gain: 0.35, reverb: 0, rate: 0.7 });
     if (name === 'nvgDown') {
       this.nvg.engage();
@@ -5413,6 +5454,7 @@ export class Game {
   }
 
   private onKill(killer: Combatant, victim: Combatant, weapon: string, headshot: boolean, wallbang: boolean) {
+    this.field?.forget(victim);
     // online: a soldier owned by another machine only dies when its owner says so
     if (NETF.active && victim instanceof Bot && victim.netPuppet && !NETF.allowPuppetDeath) return;
     this.awardAssists(killer, victim);

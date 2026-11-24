@@ -127,7 +127,7 @@ export class Domination {
       if (!r) return;
       const owner = r[0] as Owner;
       if (owner !== f.owner) {
-        const by = players.filter((p) => p.alive && this.inZone(f, p.position()));
+        const by = players.filter((p) => p.alive && !p.downed && this.inZone(f, p.position()));
         if (owner === -1) this.onEvent({ kind: 'neutralized', flag: f, team: (1 - (f.owner as number)) as 0 | 1, by });
         else this.onEvent({ kind: 'captured', flag: f, team: owner as 0 | 1, by });
       }
@@ -136,7 +136,7 @@ export class Domination {
       f.progress = r[2];
       f.contested = r[3] > 0;
       f.inside = [0, 0];
-      for (const p of players) if (p.alive && this.inZone(f, p.position())) f.inside[p.team]++;
+      for (const p of players) if (p.alive && !p.downed && this.inZone(f, p.position())) f.inside[p.team]++;
       this.visual(f, time);
     });
   }
@@ -218,7 +218,7 @@ export class Domination {
       const by: Combatant[] = [];
       f.inside = [0, 0];
       for (const p of players) {
-        if (!p.alive || !this.inZone(f, p.position())) continue;
+        if (!p.alive || p.downed || !this.inZone(f, p.position())) continue;
         f.inside[p.team]++;
         by.push(p);
       }

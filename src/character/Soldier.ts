@@ -102,11 +102,13 @@ function makeMaterial(team: 0 | 1) {
   m.userData.uTeam = { value: TEAM_COL[team].clone() };
   m.userData.uNVG = { value: 0 };
   m.userData.uFaction = { value: team };
+  m.userData.uPlate = { value: new THREE.Vector2() };
   m.onBeforeCompile = (sh) => {
     sh.uniforms.uCamo = m.userData.uCamo;
     sh.uniforms.uTeam = m.userData.uTeam;
     sh.uniforms.uNVG = m.userData.uNVG;
     sh.uniforms.uFaction = m.userData.uFaction;
+    sh.uniforms.uPlate = m.userData.uPlate;
     sh.uniforms.uTime = SOLDIER_SHARED.uTime;
     sh.uniforms.uStrobe = SOLDIER_SHARED.uStrobe;
     sh.uniforms.uLight = SOLDIER_SHARED.uLight;
@@ -119,7 +121,7 @@ function makeMaterial(team: 0 | 1) {
     sh.fragmentShader = sh.fragmentShader
       .replace('#include <common>', `#include <common>
         varying vec3 vMat; varying vec2 vCamoUv; varying vec3 vBind; uniform sampler2D uCamo; uniform vec3 uTeam;
-        uniform float uTime; uniform float uStrobe; uniform float uLight; uniform float uFaction;
+        uniform float uTime; uniform float uStrobe; uniform float uLight; uniform float uFaction; uniform vec2 uPlate;
         float sH(vec3 p){ return fract(sin(dot(p, vec3(127.1, 311.7, 74.7))) * 43758.5453); }
         float sN(vec3 p){ vec3 i = floor(p), f = fract(p); f = f*f*(3.0-2.0*f);
           return mix(mix(mix(sH(i), sH(i+vec3(1,0,0)), f.x), mix(sH(i+vec3(0,1,0)), sH(i+vec3(1,1,0)), f.x), f.y),
@@ -146,6 +148,37 @@ function makeMaterial(team: 0 | 1) {
           bumpK = 1.0;
         } else if (kind > 1.5 && kind < 2.5) {
           diffuseColor.rgb = uTeam;
+        } else if (kind > 12.5 && kind < 13.5) {
+          // (Update 47) the plate bag: cordura over ceramic. Damage (front / back) tears the cover
+          // in a spider web of cracks from the strikes, with chalky ceramic showing in the breaks
+          float grain = sN(bp * 900.0);
+          diffuseColor.rgb *= 0.94 + 0.1 * grain * fine;
+          bumpH += grain * 0.00008 * mid;
+          bumpK = 1.0;
+          float dmg = bp.z > 0.0 ? uPlate.x : uPlate.y;
+          if (dmg > 0.01) {
+            vec2 q = vec2(bp.x, bp.y) * 26.0;
+            // cells round strike points; the edges are the cracks
+            vec2 iq = floor(q), fq = fract(q);
+            float d1 = 8.0, d2 = 8.0;
+            for (int j = -1; j <= 1; j++) for (int i = -1; i <= 1; i++) {
+              vec2 g = vec2(float(i), float(j));
+              vec2 o = vec2(sH(vec3(iq + g, 3.1)), sH(vec3(iq + g, 7.7)));
+              float d = length(g + o - fq);
+              if (d < d1) { d2 = d1; d1 = d; } else if (d < d2) d2 = d;
+            }
+            float edge = 1.0 - smoothstep(0.0, 0.08, d2 - d1);
+            // the damage spreads out from a couple of impact points as it grows
+            float hitA = length(vec2(bp.x - 0.05, bp.y - 1.27)) , hitB = length(vec2(bp.x + 0.07, bp.y - 1.21));
+            float reach = mix(0.03, 0.22, dmg);
+            float zone = smoothstep(reach, reach * 0.4, min(hitA, hitB));
+            float crack = edge * zone;
+            float spall = smoothstep(0.75, 0.9, sN(vec3(bp.xy * 60.0, 1.0))) * zone * dmg;
+            diffuseColor.rgb = mix(diffuseColor.rgb, vec3(0.08, 0.075, 0.07), crack * 0.85);
+            diffuseColor.rgb = mix(diffuseColor.rgb, vec3(0.72, 0.7, 0.66), spall * 0.9 + crack * 0.25 * dmg);
+            bumpH -= (crack * 0.0015 + spall * 0.001) * mid;
+            roughAdd += spall * 0.1;
+          }
         } else if (kind > 6.5 && kind < 7.5) {
           // nylon webbing: MOLLE rows, bar-tacks, cordura grain
           float row = fract(bp.y / 0.0381);
@@ -228,7 +261,7 @@ function makeMaterial(team: 0 | 1) {
           if (kind > 7.5 && kind < 8.5) totalEmissiveRadiance += diffuseColor.rgb * vec3(0.05, 0.016, 0.01) * uLight;
         }`);
   };
-  m.customProgramCacheKey = () => 'soldier2';
+  m.customProgramCacheKey = () => 'soldier3';
   SoldierStyle.live.add(m);
   return m;
 }
@@ -314,6 +347,11 @@ export class Soldier {
     this.mesh.geometry = g;
   }
 
+  /** (Update 47) how chewed up the front / back plate bags look (0 new .. 1 broken) */
+  setPlateDamage(front: number, back: number) {
+    const u = this.material.userData.uPlate.value as THREE.Vector2;
+    u.set(front, back);
+  }
   setTeam(t: 0 | 1) {
     if (t === this.team) return;
     this.team = t;
