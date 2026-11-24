@@ -69,6 +69,59 @@ export class Destruction {
   }
   private carRanges: Map<string, { mesh: THREE.Mesh; start: number; count: number }[]>;
 
+  // ------------------------------------------------------------------ breachable walls (Update 47)
+  private walls: { w: GeoBuilder['breachables'][number]; ranges: { mesh: THREE.Mesh; start: number; count: number }[]; dead: boolean }[] | null = null;
+  private wallList() {
+    if (!this.walls) {
+      this.walls = [];
+      for (const b of GeoBuilder.registry) for (const w of b.breachables) this.walls.push({ w, ranges: b.ranges.get(w.tag) ?? [], dead: false });
+    }
+    return this.walls;
+  }
+  /**
+   * A charge against a wooden wall (breaching charge, thermite, C4): every wall section within
+   * `r` of p is blown out — its boards burst into the room in a cloud of dust and splinters and the
+   * gap is open (to walk and shoot through).
+   */
+  breachAt(p: THREE.Vector3, r: number, by: Combatant | null) {
+    let n = 0;
+    for (const e of this.wallList()) {
+      if (e.dead) continue;
+      const w = e.w;
+      const d = p.clone().sub(w.c);
+      const off = Math.abs(d.dot(w.n));
+      const sx = Math.max(0, Math.abs(d.dot(w.along)) - w.w / 2);
+      const sy = Math.max(0, Math.abs(d.y) - w.h / 2);
+      if (off > w.t / 2 + r || Math.hypot(sx, sy) > r) continue;
+      e.dead = true;
+      n++;
+      collapse(e.ranges);
+      for (const c of w.colliders) this.physics.remove(c as RAPIER.Collider);
+      // boards out, away from the side the charge was on
+      const side = Math.sign(d.dot(w.n)) || 1;
+      const away = w.n.clone().multiplyScalar(-side);
+      const boards = Math.min(14, 4 + Math.round(w.w * w.h * 1.4));
+      for (let i = 0; i < boards; i++) {
+        const at = w.c.clone().addScaledVector(w.along, (Math.random() - 0.5) * w.w).add(new THREE.Vector3(0, (Math.random() - 0.5) * w.h, 0));
+        const v = away.clone().multiplyScalar(3 + Math.random() * 6).add(new THREE.Vector3((Math.random() - 0.5) * 3, 1 + Math.random() * 3, (Math.random() - 0.5) * 3));
+        const q = new THREE.Quaternion().setFromEuler(new THREE.Euler(Math.random() * 3, Math.atan2(w.along.x, w.along.z), Math.random() * 3));
+        this.fx.debris(this.plankProto, at, q, v, new THREE.Vector3((Math.random() - 0.5) * 14, (Math.random() - 0.5) * 8, (Math.random() - 0.5) * 14), 'plank');
+      }
+      for (let i = 0; i < 6; i++) {
+        const at = w.c.clone().addScaledVector(w.along, (Math.random() - 0.5) * w.w).add(new THREE.Vector3(0, (Math.random() - 0.4) * w.h, 0));
+        this.fx.smoke.spawn(at, away.clone().multiplyScalar(1.2 + Math.random()).add(new THREE.Vector3(0, 0.3, 0)), [0.55, 0.5, 0.44], 0.5, 0.9 + Math.random() * 0.6, 3.5, { drag: 1.2, grav: -0.05, grow: 1.4 });
+      }
+      for (let i = 0; i < 30; i++) {
+        const v = away.clone().multiplyScalar(4 + Math.random() * 8).add(new THREE.Vector3((Math.random() - 0.5) * 6, Math.random() * 4, (Math.random() - 0.5) * 6));
+        this.fx.sparks.spawn(w.c.clone(), v, [0.9, 0.7, 0.45], 1, 0.02, 0.6 + Math.random() * 0.4, { drag: 1.5, grav: 9.8 });
+      }
+      this.hooks.sound('imp_wood', w.c, { gain: 1, rate: 0.55, ref: 8 });
+      this.hooks.sound('woodBreak', w.c, { gain: 1, rate: 0.8, ref: 8 });
+    }
+    void by;
+    return n;
+  }
+
   // ------------------------------------------------------------------ barrels
   private buildBarrels(list: GeoBuilder['destructibles']) {
     const byMat = new Map<string, typeof list>();

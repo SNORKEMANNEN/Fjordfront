@@ -3109,8 +3109,10 @@ export class Game {
         }
         this.onKill(att, v, def.name, false, false);
       },
-      blast: (p, n, scale, surface) => {
+      blast: (p, n, scale, surface, def) => {
         this.gear?.blast(p, scale * 8);
+        // (Update 47) C4 against a wooden wall blows it out
+        if (def && ((def.id as string) === 'c4' || (def.id as string) === 'charge')) this.destruction?.breachAt(p, 1.7, null);
         const wet = !!this.explosives.lastGrenade?.wet || (p.y < 0.3 && this.terrain.heightAt(p.x, p.z) < p.y - 0.3 && !inTunnel(p.x, p.y, p.z));
         // underwater: a dull thump and a white plume instead of a fireball
         this.fx.explosion(p, n, wet ? scale * 0.3 : scale, surface);
