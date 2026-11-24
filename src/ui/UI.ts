@@ -80,14 +80,17 @@ export interface CompassMark { bearing: number; kind: 'flag' | 'ping' | 'wp' | '
 /** scoreboard row (match snapshot + what the scoreboard shows) */
 export interface ScoreRow extends CombatantState { role?: string; assists?: number; captures?: number; bot?: boolean }
 
-export type TacticalId = 'flash' | 'smoke' | 'stun' | 'stim' | 'snapshot' | 'decoy';
-export type LethalId = 'frag' | 'tknife' | 'sticky' | 'claymore' | 'c4' | 'molotov';
+export type TacticalId = 'flash' | 'smoke' | 'stun' | 'stim' | 'snapshot' | 'decoy' | 'sensor' | 'glow' | 'gas' | 'wedge' | 'breach';
+export type LethalId = 'frag' | 'tknife' | 'sticky' | 'claymore' | 'c4' | 'molotov' | 'thermite' | 'cluster';
 export const LETHALS: { id: LethalId; name: string; count: number; desc: string }[] = [
   { id: 'frag', name: 'FRAG GRENADE', count: 2, desc: 'Cookable (hold G). 3.5 s fuse.' },
   { id: 'sticky', name: 'STICKY GRENADE', count: 2, desc: 'Sticks to walls, floors and people. Arms on throw, 2.3 s fuse — no cooking.' },
   { id: 'claymore', name: 'CLAYMORE', count: 1, desc: 'Hold G to ready it, release to set it down. Tripwire lasers fire it at anyone crossing in front.' },
   { id: 'c4', name: 'C4', count: 2, desc: 'Throw it (sticks to surfaces), detonate whenever you like: double-tap F, or G with none left.' },
   { id: 'tknife', name: 'THROWING KNIFE', count: 2, desc: 'One-hit kill. Fast, flat throw — walk over it to pick it back up.' },
+  { id: 'thermite', name: 'THERMITE', count: 2, desc: 'Sticks to anything (people too) and burns white-hot for 5 s. Cuts door wedges and breachable walls.' },
+  { id: 'molotov', name: 'FIRE BOTTLE', count: 2, desc: 'Bursts into a 3.4 m pool of burning fuel for 7 s. Smoke puts it out.' },
+  { id: 'cluster', name: 'CLUSTER GRENADE', count: 1, desc: 'Pops and scatters six bomblets that go off one after another. Clears an area.' },
 ];
 export const TACTICALS: { id: TacticalId; name: string; count: number; desc: string }[] = [
   { id: 'flash', name: 'FLASHBANG', count: 2, desc: 'Blinds and deafens anyone facing the blast. Clear a room before you push it.' },
@@ -96,6 +99,11 @@ export const TACTICALS: { id: TacticalId; name: string; count: number; desc: str
   { id: 'stim', name: 'STIM', count: 1, desc: 'Auto-injector: heals you fast and boosts movement speed for 10 seconds.' },
   { id: 'snapshot', name: 'SNAPSHOT GRENADE', count: 1, desc: 'A scan pulse that outlines every enemy within 22 m through walls for a few seconds.' },
   { id: 'decoy', name: 'DECOY GRENADE', count: 2, desc: 'Plays fake gunfire for 12 s and puts fake contacts on the enemy minimap.' },
+  { id: 'sensor', name: 'MOTION SENSOR', count: 2, desc: 'A dart that sticks in walls and pings anything moving within 16 m for 30 s.' },
+  { id: 'glow', name: 'GLOW STICKS', count: 3, desc: 'Snap and throw: a coloured light for 90 s. Mark a room, light a stairwell.' },
+  { id: 'gas', name: 'GAS GRENADE', count: 1, desc: 'A CS cloud (6 m, 14 s): coughing, streaming eyes, shaking aim, light damage.' },
+  { id: 'wedge', name: 'DOOR WEDGE', count: 2, desc: 'Jam the closed door you are facing. Pushes only rattle it; a blast or a hard kick breaks it.' },
+  { id: 'breach', name: 'BREACHING CHARGE', count: 2, desc: 'Slap it on a door or a weak wall: it blows the way in and stuns whoever is behind it.' },
 ];
 /** calibre stamped on the workbench callouts */
 export const CALIBRE: Record<string, string> = {
@@ -157,6 +165,17 @@ export class UI {
   primary: WeaponId = ((localStorage.getItem('fjordfront.primary') || '').replace(/^mpx$/, 'mp7') as WeaponId) || 'k416';
   secondary: WeaponId = (localStorage.getItem('fjordfront.secondary') as WeaponId) || 'p80';
   tactical: TacticalId = (localStorage.getItem('fjordfront.tactical') as TacticalId) || 'flash';
+  /** (Update 47) field upgrade and role (kept across loadouts) */
+  field: string = localStorage.getItem('fjordfront.field') || 'trophy';
+  role: string = localStorage.getItem('fjordfront.role') || 'rifleman';
+  setField(id: string) {
+    this.field = id;
+    try { localStorage.setItem('fjordfront.field', id); } catch { /* private mode */ }
+  }
+  setRole(id: string) {
+    this.role = id;
+    try { localStorage.setItem('fjordfront.role', id); } catch { /* private mode */ }
+  }
   lethal: LethalId = (() => {
     try {
       const v = localStorage.getItem('fjordfront.lethal') as LethalId;
@@ -1375,9 +1394,9 @@ export class UI {
 
   // ---------------------------------------------------------------- equipment row
   /** lethal / tactical: a ring that empties as they are used; field upgrade: a charge ring */
-  updateNades(frags: number, cooking: number, tac: TacticalId = this.tactical, tacN = 0, lethal: LethalId = this.lethal, field = 0, c4Out = 0) {
+  updateNades(frags: number, cooking: number, tac: TacticalId = this.tactical, tacN = 0, lethal: LethalId = this.lethal, field = 0, c4Out = 0, fieldId = this.field) {
     const el = this.els.nades;
-    const key = `${frags}|${cooking > 0 ? Math.ceil(cooking * 10) : 0}|${tac}|${tacN}|${lethal}|${Math.floor(field * 40)}|${c4Out}`;
+    const key = `${frags}|${cooking > 0 ? Math.ceil(cooking * 10) : 0}|${tac}|${tacN}|${lethal}|${Math.floor(field * 40)}|${c4Out}|${fieldId}`;
     if (el.dataset.k === key) return;
     if (el.dataset.k && el.dataset.k.split('|').slice(0, 5).join() !== key.split('|').slice(0, 5).join()) this.ctx.eqT = 0;
     if (field >= 1 && !(el.dataset.k ?? '').includes('|40|')) this.ctx.eqT = 0;
@@ -1387,7 +1406,7 @@ export class UI {
     const lmax = LETHALS.find((l) => l.id === lethal)?.count ?? 2, tmax = TACTICALS.find((t) => t.id === tac)?.count ?? 1;
     const slot = (name: string, n: number, max: number, k: string) => `<div class="eqs ${n ? '' : 'empty'}">${ring(n / max)}${icon(name)}<b>${n}</b><em>${k}</em></div>`;
     const ready = field >= 1;
-    const fu = `<div class="eqs fu ${ready ? 'ready' : ''}">${ring(field)}${icon('trophy')}<b>${ready ? '✓' : Math.floor(field * 100)}</b><em>H</em></div>`;
+    const fu = `<div class="eqs fu ${ready ? 'ready' : ''}">${ring(field)}${icon(fieldId)}<b>${ready ? '✓' : Math.floor(field * 100)}</b><em>H</em></div>`;
     const det = c4Out > 0 ? `<div class="det">${frags > 0 ? '[F][F]' : '[G]'} DETONATE · ${c4Out}</div>` : '';
     el.innerHTML = slot(lethal, frags, lmax, 'G') + slot(tac, tacN, tmax, 'T') + fu + det + (cooking > 0 ? `<div class="cook"><i style="width:${(cooking / 3.5) * 100}%"></i><b>${cooking.toFixed(1)}</b></div>` : '');
   }
@@ -1487,6 +1506,20 @@ export class UI {
     }
     el.textContent = text;
     el.classList.toggle('on', !!text);
+  }
+
+  /** (Update 47) CS gas: the edges smear yellow-green, everything blurs and swims */
+  private gasEl: HTMLElement | null = null;
+  gasFx(k: number) {
+    if (k < 0.01) {
+      if (this.gasEl) this.gasEl.style.opacity = '0';
+      return;
+    }
+    if (!this.gasEl) {
+      this.gasEl = h('div', 'gasfx');
+      this.hud.appendChild(this.gasEl);
+    }
+    this.gasEl.style.opacity = Math.min(1, k).toFixed(2);
   }
 
   /** (Update 47) a hold-progress ring under the crosshair (revive, plant, beacon...): null hides it */

@@ -15,16 +15,21 @@ export const MELEE = { id: 'melee', name: 'Melee', cls: 'Melee' } as unknown as 
 export const HELI = { id: 'heli', name: 'Attack Helicopter', cls: 'Explosive' } as unknown as WeaponDef;
 export const STUN = { id: 'stun', name: 'Stun Grenade', cls: 'Explosive' } as unknown as WeaponDef;
 export const STICKY = { id: 'sticky', name: 'Sticky Grenade', cls: 'Explosive' } as unknown as WeaponDef;
+export const CLUSTER = { id: 'cluster', name: 'Cluster Grenade', cls: 'Explosive' } as unknown as WeaponDef;
+export const BREACH = { id: 'breach', name: 'Breaching Charge', cls: 'Explosive' } as unknown as WeaponDef;
 export const C4 = { id: 'c4', name: 'C4', cls: 'Explosive' } as unknown as WeaponDef;
 export const CLAYMORE = { id: 'claymore', name: 'Claymore', cls: 'Explosive' } as unknown as WeaponDef;
 export const BARREL = { id: 'barrel', name: 'Explosive Barrel', cls: 'Explosive' } as unknown as WeaponDef;
 export const VEHICLE = { id: 'vehicle', name: 'Vehicle Explosion', cls: 'Explosive' } as unknown as WeaponDef;
 
-export type GrenadeKind = 'frag' | 'flash' | 'stun' | 'smoke' | 'sticky' | 'snapshot' | 'decoy' | 'c4' | 'molotov';
+export type GrenadeKind = 'frag' | 'flash' | 'stun' | 'smoke' | 'sticky' | 'snapshot' | 'decoy' | 'c4' | 'molotov'
+  /** Update 47 */
+  | 'thermite' | 'cluster' | 'bomblet' | 'gas' | 'glow' | 'sensor' | 'breach';
 /** fuse per kind (s): flash/stun pop fast, smoke after a short roll, C4 waits for its detonator */
-export const FUSE: Record<GrenadeKind, number> = { frag: 3.5, flash: 1.6, stun: 1.6, smoke: 1.3, sticky: 2.3, snapshot: 1.15, decoy: 1.1, c4: 1e9, molotov: 2.6 };
+export const FUSE: Record<GrenadeKind, number> = { frag: 3.5, flash: 1.6, stun: 1.6, smoke: 1.3, sticky: 2.3, snapshot: 1.15, decoy: 1.1, c4: 1e9, molotov: 2.6,
+  thermite: 1.0, cluster: 2.1, bomblet: 0.8, gas: 1.25, glow: 90, sensor: 30, breach: 3.0 };
 /** kinds that stick to what they hit */
-const STICKS: Partial<Record<GrenadeKind, 'all' | 'world'>> = { sticky: 'all', c4: 'world' };
+const STICKS: Partial<Record<GrenadeKind, 'all' | 'world'>> = { sticky: 'all', c4: 'world', thermite: 'all', sensor: 'world', breach: 'world' };
 
 /** A decoy lying on the ground playing fake gunfire. */
 export interface Decoy { p: THREE.Vector3; owner: Combatant; mesh: THREE.Object3D; t: number; life: number; next: number; burst: number; gun: number }
@@ -119,6 +124,12 @@ export interface ExplosionHooks {
   fire?(p: THREE.Vector3, owner: Combatant, g: Grenade): void;
   /** active-protection systems: return true to shoot this grenade down */
   intercept?(g: Grenade): boolean;
+  /** (Update 47) thermite ignites (takes over the mesh), a gas canister pops (takes the mesh),
+   *  a breaching charge fires, the cluster's bomblets scatter */
+  thermite?(g: Grenade): void;
+  gas?(g: Grenade): void;
+  breach?(g: Grenade): void;
+  cluster?(g: Grenade, n: number): void;
   /** (Update 47) lethal blast damage: true = the victim goes down instead of dying */
   down?(victim: Combatant, owner: Combatant, def: WeaponDef, dmg: number): boolean;
   /** (Update 47) the blast landed on an armour plate */
@@ -142,6 +153,17 @@ export class Explosives {
   private protos: Record<GrenadeKind, THREE.Group> = {
     frag: Viewmodel.makeGrenade('frag'), flash: Viewmodel.makeGrenade('flash'), stun: Viewmodel.makeGrenade('stun'), smoke: Viewmodel.makeGrenade('smoke'),
     sticky: EQUIP_BUILDERS.sticky(), snapshot: EQUIP_BUILDERS.snapshot(), decoy: EQUIP_BUILDERS.decoy(), c4: EQUIP_BUILDERS.c4(), molotov: EQUIP_BUILDERS.molotov(),
+    thermite: EQUIP_BUILDERS.thermite(), cluster: EQUIP_BUILDERS.cluster(), gas: EQUIP_BUILDERS.gas(), glow: EQUIP_BUILDERS.glow(), sensor: EQUIP_BUILDERS.sensor(), breach: EQUIP_BUILDERS.breach(),
+    bomblet: (() => {
+      const g = new THREE.Group();
+      const b = new THREE.Mesh(new THREE.SphereGeometry(0.018, 10, 8), new THREE.MeshStandardMaterial({ color: 0x3e4a2c, roughness: 0.6, metalness: 0.15 }));
+      b.scale.y = 1.25;
+      g.add(b);
+      const tip = new THREE.Mesh(new THREE.CylinderGeometry(0.004, 0.004, 0.008, 6), new THREE.MeshStandardMaterial({ color: 0xd8b020 }));
+      tip.position.y = 0.024;
+      g.add(tip);
+      return g;
+    })(),
   };
 
   constructor(private scene: THREE.Scene, private physics: Physics, private fx: Effects, private hooks: ExplosionHooks, private players: () => Combatant[]) {
@@ -243,6 +265,15 @@ export class Explosives {
           this.hooks.decoyStart?.(d);
           continue;
         }
+        // (Update 47) thermite and gas keep their mesh: the game's field kit owns it from here
+        if (g.kind === 'thermite') {
+          this.hooks.thermite?.(g);
+          continue;
+        }
+        if (g.kind === 'gas') {
+          this.hooks.gas?.(g);
+          continue;
+        }
         if (g.kind === 'smoke') {
           // the canister stays where it lies and pours smoke for ~20 s
           const c: SmokeCloud = { p: g.pos.clone(), t: 0, life: 20, r: 0, mesh: g.mesh };
@@ -255,6 +286,25 @@ export class Explosives {
         this.lastGrenade = g;
         if (g.kind === 'frag') this.explode(g.pos, g.owner, FRAG, g.wet ? 5.5 : 8.5, g.wet ? 110 : 160);
         else if (g.kind === 'sticky') this.explode(g.pos, g.owner, STICKY, 7.5, 170, g.stuck?.to ?? null);
+        else if (g.kind === 'cluster') {
+          // a small pop that throws six bomblets out in a ring; each goes off a beat later
+          this.explode(g.pos, g.owner, CLUSTER, g.wet ? 3 : 4.2, g.wet ? 50 : 75);
+          if (!g.wet) {
+            for (let k = 0; k < 6; k++) {
+              const a = (k / 6) * Math.PI * 2 + Math.random() * 0.6;
+              const sp = 3.2 + Math.random() * 2.6;
+              const v = new THREE.Vector3(Math.cos(a) * sp, 3.2 + Math.random() * 2.4, Math.sin(a) * sp);
+              this.throw(g.owner, g.pos.clone().setY(g.pos.y + 0.15), v, 0.55 + k * 0.14 + Math.random() * 0.15, 'bomblet');
+            }
+            this.hooks.cluster?.(g, 6);
+          }
+        }
+        else if (g.kind === 'bomblet') this.explode(g.pos, g.owner, CLUSTER, g.wet ? 2.5 : 4.4, g.wet ? 40 : 92);
+        else if (g.kind === 'breach') {
+          this.hooks.breach?.(g);
+          this.explode(g.pos, g.owner, BREACH, 3.2, 110);
+        }
+        else if (g.kind === 'glow' || g.kind === 'sensor') { /* burnt out */ }
         else if (g.kind === 'snapshot') this.hooks.snapshot?.(g.pos.clone(), g.owner);
         else if (g.kind === 'molotov') {
           if (!g.wet) this.hooks.fire?.(g.pos.clone(), g.owner, g);

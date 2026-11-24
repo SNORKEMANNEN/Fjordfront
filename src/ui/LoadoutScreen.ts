@@ -4,6 +4,8 @@ import { Build, applyBuild } from '../weapons/Attachments';
 import { icon } from './Icons';
 import type { UI, LethalId, TacticalId } from './UI';
 import { LETHALS, TACTICALS, CALIBRE } from './UI';
+import { FIELDS } from '../game/Gear';
+import { ROLES } from '../game/FieldOps';
 
 /**
  * Loadout screen (Update 36), rebuilt from scratch around three plain levels:
@@ -18,7 +20,7 @@ import { LETHALS, TACTICALS, CALIBRE } from './UI';
  * breadcrumb says where you are. Nothing hides behind modes, double-clicks or prompts.
  */
 
-type Level = { k: 'home' } | { k: 'weapon'; slot: 'p' | 's' } | { k: 'equip'; slot: 't' | 'l' };
+type Level = { k: 'home' } | { k: 'weapon'; slot: 'p' | 's' } | { k: 'equip'; slot: 't' | 'l' | 'f' | 'r' };
 
 const CLS_ORDER: WeaponDef['cls'][] = ['Assault Rifle', 'SMG', 'LMG', 'Shotgun', 'Marksman', 'Sniper', 'Pistol'];
 const CLS_LABEL: Record<string, string> = { 'Assault Rifle': 'Assault rifles', SMG: 'SMGs', LMG: 'LMGs', Shotgun: 'Shotguns', Marksman: 'Marksman', Sniper: 'Snipers', Pistol: 'Handguns' };
@@ -122,7 +124,7 @@ export function openLoadout(ui: UI, back: 'menu' | 'pause', note: string) {
     const parts: string[] = ['Loadouts', esc(p.name)];
     const l = top();
     if (l.k === 'weapon') parts.push(l.slot === 'p' ? 'Primary' : 'Secondary');
-    if (l.k === 'equip') parts.push(l.slot === 't' ? 'Tactical' : 'Lethal');
+    if (l.k === 'equip') parts.push(l.slot === 't' ? 'Tactical' : l.slot === 'l' ? 'Lethal' : l.slot === 'f' ? 'Field upgrade' : 'Role');
     return parts.map((t, i) => `<span class="${i === parts.length - 1 ? 'on' : ''}">${t}</span>`).join('<i>›</i>');
   };
   const header = () => `<header class="lo-head">
@@ -149,13 +151,22 @@ export function openLoadout(ui: UI, back: 'menu' | 'pause', note: string) {
       </div>`;
     const erow = (slot: 't' | 'l', kind: string, it: { id: string; name: string; count: number; desc: string }) => `<button class="lo-row item" data-eq="${slot}">
         <span class="lo-ic">${icon(it.id)}</span><div class="lo-rowmain"><small>${kind}</small><b>${it.name.toLowerCase()}</b><span>×${it.count} per life</span></div><span class="lo-chev">${icon('chevron')}</span></button>`;
+    // (Update 47) field upgrade and role pickers
+    function frow() {
+      const f = FIELDS.find((x) => x.id === ui.field) ?? FIELDS[0];
+      return `<button class="lo-row item" data-eq="f"><span class="lo-ic">${icon(f.id)}</span><div class="lo-rowmain"><small>Field upgrade</small><b>${f.name.toLowerCase()}</b><span>Key H · ${f.charge} s charge</span></div><span class="lo-chev">${icon('chevron')}</span></button>`;
+    }
+    function rrow() {
+      const r = ROLES.find((x) => x.id === ui.role) ?? ROLES[0];
+      return `<button class="lo-row item" data-eq="r"><span class="lo-ic">${icon('role_' + r.id)}</span><div class="lo-rowmain"><small>Role</small><b>${r.name.toLowerCase()}</b><span>${r.perks[0]}</span></div><span class="lo-chev">${icon('chevron')}</span></button>`;
+    }
     return `<div class="lo-body home">
       <aside class="lo-side"><div class="lo-h">Loadouts</div>${list}<p class="lo-tip">Your selected loadout is used on your next spawn.</p></aside>
       ${stage('Primary', P.name, `${CLS_ONE[P.cls]} · ${CALIBRE[P.id] ?? ''}`)}
       <section class="lo-panel"><div class="lo-h">${esc(p.name)}</div>
         ${wrow('p', P)}${wrow('s', S)}
         <div class="lo-pair">${erow('t', 'Tactical', tac)}${erow('l', 'Lethal', leth)}</div>
-        <div class="lo-row fixed"><span class="lo-ic">${icon('trophy')}</span><div class="lo-rowmain"><small>Field upgrade</small><b>Trophy system</b><span>Press H · standard issue</span></div></div>
+        <div class="lo-pair">${frow()}${rrow()}</div>
       </section>
     </div>`;
   };
@@ -189,7 +200,17 @@ export function openLoadout(ui: UI, back: 'menu' | 'pause', note: string) {
     </div>`;
   };
 
-  const equip = (slot: 't' | 'l') => {
+  const equip = (slot: 't' | 'l' | 'f' | 'r') => {
+    if (slot === 'f') {
+      return `<div class="lo-body equip">
+      <div class="lo-grid">${FIELDS.map((it) => `<button class="lo-ecard ${it.id === ui.field ? 'on' : ''}" data-item="${it.id}">${it.id === ui.field ? `<i class="lo-eq">${icon('check')}Equipped</i>` : ''}<span class="lo-ebig">${icon(it.id, 'big')}</span><b>${it.name.toLowerCase()}</b><small>${it.charge} s charge · key H</small><p>${it.desc}</p></button>`).join('')}</div>
+    </div>`;
+    }
+    if (slot === 'r') {
+      return `<div class="lo-body equip">
+      <div class="lo-grid">${ROLES.map((it) => `<button class="lo-ecard ${it.id === ui.role ? 'on' : ''}" data-item="${it.id}">${it.id === ui.role ? `<i class="lo-eq">${icon('check')}Equipped</i>` : ''}<span class="lo-ebig">${icon('role_' + it.id, 'big')}</span><b>${it.name.toLowerCase()}</b><small>${it.perks.join(' · ')}</small><p>${it.desc}</p></button>`).join('')}</div>
+    </div>`;
+    }
     const items = slot === 't' ? TACTICALS : LETHALS;
     const cur = slot === 't' ? ui.tactical : ui.lethal;
     return `<div class="lo-body equip">
@@ -260,7 +281,7 @@ export function openLoadout(ui: UI, back: 'menu' | 'pause', note: string) {
       catSel = null;
       go({ k: 'weapon', slot: b.dataset.go as 'p' | 's' });
     }));
-    q('[data-eq]').forEach((b) => b.addEventListener('click', () => go({ k: 'equip', slot: b.dataset.eq as 't' | 'l' })));
+    q('[data-eq]').forEach((b) => b.addEventListener('click', () => go({ k: 'equip', slot: b.dataset.eq as 't' | 'l' | 'f' | 'r' })));
     // weapon picker
     q('[data-cat]').forEach((b) => b.addEventListener('click', () => {
       catSel = b.dataset.cat as WeaponDef['cls'];
@@ -291,7 +312,9 @@ export function openLoadout(ui: UI, back: 'menu' | 'pause', note: string) {
     q('[data-item]').forEach((b) => b.addEventListener('click', () => {
       if (l.k !== 'equip') return;
       if (l.slot === 't') ui.tactical = b.dataset.item as TacticalId;
-      else ui.lethal = b.dataset.item as LethalId;
+      else if (l.slot === 'l') ui.lethal = b.dataset.item as LethalId;
+      else if (l.slot === 'f') ui.setField(b.dataset.item!);
+      else ui.setRole(b.dataset.item!);
       ui.commitLoadout();
       ui.sfx('uiConfirm', 0.55);
       up();

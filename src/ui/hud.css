@@ -450,3 +450,5 @@
 .aring .bg { stroke: rgba(255, 255, 255, .14); }
 .aring .fg { stroke: var(--aurora); stroke-linecap: round; fill: none; }
 .aring span { font: 700 11px var(--f-cond); letter-spacing: .24em; color: var(--hud); text-shadow: 0 1px 2px rgba(0, 0, 0, .8); }
+.gasfx { position: absolute; inset: 0; pointer-events: none; opacity: 0; transition: opacity .25s; background: radial-gradient(ellipse at 50% 50%, rgba(190, 200, 90, .05) 25%, rgba(170, 180, 60, .32) 65%, rgba(120, 130, 30, .6)); backdrop-filter: blur(2.5px) saturate(.8); -webkit-backdrop-filter: blur(2.5px) saturate(.8); animation: gasSwim 3.2s ease-in-out infinite; }
+@keyframes gasSwim { 50% { transform: scale(1.04) rotate(.4deg); filter: hue-rotate(8deg); } }

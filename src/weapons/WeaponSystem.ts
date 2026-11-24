@@ -167,6 +167,20 @@ export class WeaponSystem {
     this.equip(0, true);
   }
 
+  /** (Update 47) a gun picked up off the ground replaces slot i (keeps the ammo it had) */
+  replaceSlot(i: number, id: WeaponId, mag: number, reserve: number) {
+    if (!this.slots[i]) return;
+    const def = WEAPONS[id];
+    const model = WEAPON_BUILDERS[id](this.mats);
+    attachVisuals(model, id, def, undefined, this.mats);
+    this.slots[i].model.root.removeFromParent();
+    this.slots[i] = { def, model, mag: Math.min(mag, def.mag), reserve, mode: def.modes[0], chambered: true };
+    this.buildKey = '';
+    this.reloading = false;
+    this.switching = false;
+    this.equip(i);
+  }
+
   refill() {
     for (const s of this.slots) {
       s.mag = s.def.mag;

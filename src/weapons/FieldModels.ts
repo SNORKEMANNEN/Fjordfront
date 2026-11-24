@@ -559,6 +559,6 @@ export function makeHook() {
 }
 
 export const FIELD_BUILDERS = {
-  plate: makePlate, ammoCrate: makeAmmoCrate, medkit: makeMedkit, beacon: makeBeacon, thermite: makeThermite, gasGren: makeGasGrenade,
-  cluster: makeCluster, glowstick: makeGlowstick, sensor: makeSensor, wedge: makeWedge, breach: makeBreach, grapple: makeGrapple,
+  plate: makePlate, ammoCrate: makeAmmoCrate, medkit: makeMedkit, beacon: makeBeacon, thermite: makeThermite, gas: makeGasGrenade,
+  cluster: makeCluster, glow: makeGlowstick, sensor: makeSensor, wedge: makeWedge, breach: makeBreach, grapple: makeGrapple,
 };

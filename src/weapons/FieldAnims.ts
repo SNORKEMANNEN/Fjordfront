@@ -193,3 +193,34 @@ export function dragBody(t: number, pos: THREE.Vector3, rot: THREE.Vector3, c: E
   c.noWrapL();
   once(c, 'g', t, 0.3, () => c.ev('grab'));
 }
+
+// ============================================================================ door wedge
+/** down to the floor in front, the wedge shoved under the door's edge with the heel of the hand */
+export function wedgePlace(t: number, pos: THREE.Vector3, rot: THREE.Vector3, c: EqCtx) {
+  const item = c.item();
+  const g = kf(t, [[0, 0], [0.15, 1], [0.8, 1], [1, 0]]);
+  pos.y -= 0.03 * g;
+  rot.z -= 0.08 * g;
+  // crouching down to the floor
+  const dip = kf(t, [[0, 0], [0.3, 1], [0.7, 1], [1, 0]]);
+  pos.y += 0.025 * dip;
+  rot.x += 0.05 * dip;
+  const fl = c.freeL;
+  fl.b = kf(t, [[0, 0], [0.1, 1], [0.84, 1], [1, 0]]);
+  kv(t, [[0, [-0.17, -0.32, -0.3]], [0.18, [-0.24, -0.45, -0.18]], [0.38, [-0.08, -0.2, -0.5]], [0.5, [-0.06, -0.21, -0.56]], [0.56, [-0.05, -0.22, -0.6]], [0.66, [-0.06, -0.2, -0.55]], [1, [-0.17, -0.32, -0.3]]], fl.p);
+  fl.q.copy(handTrack(t,
+    [[0, [0.3, -0.2, -1]], [0.18, [0.1, -1, 0]], [0.38, [0.1, -0.4, -1]], [0.56, [0.1, -0.2, -1]], [1, [0.3, -0.2, -1]]],
+    [[0, [1, 0.05, 0.25]], [0.18, [1, 0, 0]], [0.38, [0.2, -1, 0]], [0.56, [0.1, -0.6, -0.8]], [1, [1, 0.05, 0.25]]]));
+  fl.pose = t > 0.55 && t < 0.7 ? POSES.open : POSES.hold;
+  c.noWrapL();
+  const ps = { p: c.palmAt('L', fl.p, fl.q, 0.012), q: fl.q.clone().multiply(euler(0, Math.PI / 2, 0)) };
+  item.position.copy(ps.p);
+  item.quaternion.copy(ps.q);
+  item.userData.posed = true;
+  item.visible = t > 0.18 && t < 0.56;
+  once(c, 'a', t, 0.05, () => c.ev('cloth'));
+  once(c, 'w', t, 0.55, () => {
+    c.ev('wedgeIn');
+    c.jolt(0.3, 0.1, 0.1);
+  });
+}
