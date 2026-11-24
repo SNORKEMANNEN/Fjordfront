@@ -25,7 +25,7 @@ type G = any;
 
 export const DOWN = {
   /** extra life while down (shots finish you) */
-  hp: 60,
+  hp: 50,
   /** seconds to bleed out (dragging slows it, a revive in progress stops it) */
   bleed: 28,
   revive: 3.4,
@@ -60,6 +60,8 @@ interface Casualty {
 
 export class FieldOps {
   cas: Casualty[] = [];
+  /** match counters (tests, balance) */
+  stats = { downs: 0, revives: 0, bleeds: 0, plateBreaks: 0 };
   private lastUp = new Map<Combatant, number>();
   private assignT = 0;
   /** player: the casualty you are working on / dragging */
@@ -93,6 +95,7 @@ export class FieldOps {
     if (last !== undefined && this.g.time - last < DOWN.again) return false;
     c.downed = true;
     c.health = DOWN.hp;
+    this.stats.downs++;
     const cs: Casualty = { c, by, weapon, bleed: DOWN.bleed, prog: 0, reviver: null, idle: 0, draggedBy: null, t: 0 };
     this.cas.push(cs);
     if (c instanceof Bot) c.goDown();
@@ -128,6 +131,7 @@ export class FieldOps {
 
   private bleedOut(cs: Casualty) {
     const c = cs.c;
+    this.stats.bleeds++;
     this.forget(c);
     c.health = 0;
     c.alive = false;
@@ -143,6 +147,7 @@ export class FieldOps {
   private revived(cs: Casualty, by: Combatant | null) {
     const c = cs.c;
     const medic = by === this.g.avatar ? this.role === 'medic' : by instanceof Bot && by.personality === 'medic';
+    this.stats.revives++;
     this.forget(c);
     c.health = medic ? DOWN.upHpMedic : DOWN.upHp;
     this.lastUp.set(c, this.g.time);
@@ -510,12 +515,14 @@ export class FieldOps {
       c.spare = 0;
       return;
     }
-    c.plates = [PLATE_HP, PLATE_HP];
-    c.spare = role === 'rifleman' ? 5 : role === 'bot' ? 2 : 3;
+    // soldiers carry a little less ceramic than you (keeps 12-a-side fights moving)
+    c.plates = role === 'bot' ? [PLATE_HP * 0.7, PLATE_HP * 0.7] : [PLATE_HP, PLATE_HP];
+    c.spare = role === 'rifleman' ? 5 : role === 'bot' ? 1 : 3;
   }
   /** a torso hit landed on a plate (or broke it): grit, sparks, the crack */
   plateHit(c: Combatant, point: THREE.Vector3, dir: THREE.Vector3, broke: boolean, byMe = false) {
     const g = this.g;
+    if (broke) this.stats.plateBreaks++;
     if (c === g.avatar) {
       // your own plate: the crack in your chest, the HUD segment flashes
       g.audio.play(broke ? 'plateBreak' : 'plateHit', { gain: broke ? 0.9 : 0.5, bus: 'ui', reverb: 0.02, vary: 0.06 });

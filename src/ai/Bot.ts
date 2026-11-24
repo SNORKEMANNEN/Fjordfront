@@ -152,6 +152,8 @@ export class Bot implements Combatant {
   private pending: { lethal: boolean; tk: 'flash' | 'stun' | 'smoke'; at: THREE.Vector3; cook: number; cooked: number; item: string } | null = null;
   /** sticky grenades instead of frags (set by the game) */
   sticky = false;
+  /** (Update 47) the lethal this soldier carries (frag unless the game says otherwise) */
+  lethalKind: 'frag' | 'sticky' | 'thermite' | 'cluster' | 'molotov' = 'frag';
   private reloadDur = 1;
   weapon: WeaponModel;
   def: WeaponDef;
@@ -487,7 +489,7 @@ export class Bot implements Combatant {
         const i = this.plates.findIndex((h) => h <= 0);
         if (i >= 0 && this.spare > 0) {
           this.spare--;
-          this.plates[i] = PLATE_HP;
+          this.plates[i] = PLATE_HP * 0.7;
           this.w.replated?.(this);
         }
       }
@@ -842,8 +844,11 @@ export class Bot implements Combatant {
     if (t && this.lastSeenT < 3) {
       sc.engage = (visible ? 0.82 : this.lastSeenT > 1.2 ? 0.45 : 0.6) + 0.12 * hp - this.suppression * 0.3 - (reloading ? 0.25 : 0);
       const pressed = (1 - hp) * 0.7 + this.suppression * 0.6 + (reloading && visible ? 0.4 : 0) + (this.lastDamageT < 1.5 ? 0.2 : 0);
-      sc.cover = this.w.cover ? Math.min(0.97, 0.25 + pressed) : 0;
-      if (hp < 0.32 && this.nearbyEnemies() >= 2) sc.retreat = 0.9;
+      // (Update 47) temperament: rushers stay on the attack, the cautious take cover sooner
+      const tmp = this.personality === 'rusher' ? -0.18 : this.personality === 'cautious' ? 0.16 : this.personality === 'medic' ? 0.06 : 0;
+      sc.engage += this.personality === 'rusher' ? 0.12 : this.personality === 'cautious' ? -0.06 : 0;
+      sc.cover = this.w.cover ? Math.min(0.97, 0.25 + pressed + tmp) : 0;
+      if (hp < (this.personality === 'rusher' ? 0.2 : 0.32) && this.nearbyEnemies() >= 2) sc.retreat = 0.9;
       const flankers = this.w.flanking?.(this, t) ?? 0;
       if (!visible && flankers < 2 && tDist > 14 && tDist < 80 && this.def.cls !== 'Sniper') sc.flank = 0.62 + this.w.difficulty * 0.1 - flankers * 0.15 + (this.id % 3 === 0 ? 0.08 : 0);
     } else if (this.lastSeenT < 12) sc.search = 0.58 - this.lastSeenT * 0.02;
@@ -1118,7 +1123,7 @@ export class Bot implements Combatant {
       case 'engage': {
         const tp = this.target ? this.target.position() : this.lastSeen;
         const dist = tp.distanceTo(this.body.pos);
-        const ideal = this.def.cls === 'Shotgun' ? 8 : this.def.cls === 'SMG' ? 16 : this.def.cls === 'Sniper' ? 60 : this.def.cls === 'Marksman' ? 42 : 28;
+        const ideal = (this.def.cls === 'Shotgun' ? 8 : this.def.cls === 'SMG' ? 16 : this.def.cls === 'Sniper' ? 60 : this.def.cls === 'Marksman' ? 42 : 28) * (this.personality === 'rusher' ? 0.6 : this.personality === 'cautious' ? 1.3 : 1);
         this.strafeT -= dt;
         if (this.strafeT <= 0) {
           this.strafeT = this.rng.range(0.6, 1.6);
@@ -1603,7 +1608,7 @@ export class Bot implements Combatant {
     a.ready = this.state === 'engage' || this.state === 'search' || (this.target !== null && this.lastSeenT < 3);
     a.calm = this.state === 'roam' && !this.target;
     a.downed = this.downed ? (this.dragTo ? 2 : 1) : 0;
-    if (this.plates.length) this.soldier.setPlateDamage(1 - this.plates[0] / PLATE_HP, 1 - (this.plates[1] ?? PLATE_HP) / PLATE_HP);
+    if (this.plates.length) this.soldier.setPlateDamage(1 - this.plates[0] / (PLATE_HP * 0.7), 1 - (this.plates[1] ?? PLATE_HP * 0.7) / (PLATE_HP * 0.7));
     else this.soldier.setPlateDamage(0, 0);
     if (this.downed) {
       a.action = 'none';

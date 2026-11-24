@@ -31,7 +31,7 @@ const { chromium } = require('playwright');
       log.push(`t=${s + 20} score ${g.match.scores} flags ${g.dom.flags.map((f) => f.letter + f.owner).join(' ')} alive ${g.bots.filter((b) => b.alive).length} kills ${g.match.players.reduce((a, p) => a + p.kills, 0)} state ${g.state}`);
       if (g.state !== 'playing') break;
     }
-    log.push(`sim ms/frame ${((performance.now() - t0) / (secs * 60)).toFixed(2)} respawns ${spawns} near-enemy(<18m) ${spawnClose}`);
+    log.push(`sim ms/frame ${((performance.now() - t0) / (secs * 60)).toFixed(2)} respawns ${spawns} near-enemy(<18m) ${spawnClose} field ${JSON.stringify(game.field ? game.field.stats : {})}`);
     return log.join('\n') + '\n--- radio/music ---\n' + said.join('\n');
   }, +(process.argv[2] || 300));
   console.log(r);

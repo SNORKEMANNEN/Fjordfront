@@ -87,6 +87,7 @@ import { Scavenge } from './Scavenge';
 import { Gear, FIELDS, FieldId } from './Gear';
 import { SquadSpawn } from './SquadSpawn';
 import { Traverse } from './Traverse';
+import { Commander } from '../ai/Commander';
 
 type GameState = 'loading' | 'menu' | 'playing' | 'paused' | 'ended';
 const TACTICAL_COUNT: Record<string, number> = { flash: 2, stun: 2, smoke: 1, stim: 1, snapshot: 1, decoy: 2, sensor: 2, glow: 3, gas: 1, wedge: 2, breach: 2 };
@@ -215,6 +216,10 @@ export class Game {
   squadSpawn!: SquadSpawn;
   /** Update 47: ledge hang, rappel, grappling hook, blind fire */
   traverse!: Traverse;
+  /** Update 47: one adaptive commander per side */
+  commanders: [Commander, Commander] | null = null;
+  /** bots' field upgrades: next time each may deploy one */
+  private botFieldT = new Map<number, number>();
   ballistics!: Ballistics;
   scope = new Scope(512);
   private scopeModel: unknown = null;
@@ -877,6 +882,7 @@ export class Game {
     this.gear = new Gear(this);
     this.squadSpawn = new SquadSpawn(this);
     this.traverse = new Traverse(this);
+    this.commanders = [new Commander(this, 0), new Commander(this, 1)];
     this.combat.downHook = (v, sh, def, part, dmg) => this.field.tryDown(v, sh, part, def.cls, dmg, def.name);
     this.combat.plateHook = (v, pt, dir, broke, sh) => this.field.plateHit(v, pt, dir, broke, sh === this.avatar);
     this.dom = new Domination(this.scene, this.nav, this.terrain);
@@ -1265,12 +1271,18 @@ export class Game {
             const v = lobVelocity(from, at.clone().add(new THREE.Vector3((Math.random() - 0.5) * 4, 0, (Math.random() - 0.5) * 4)));
             // some soldiers carry sticky grenades instead of frags; a cooked frag has less fuse left
             const sticky = b.sticky;
+            // (Update 47) the rest of the lethal kit: thermite, cluster, fire bottles
+            const lk = this.sab ? 'frag' : b.lethalKind;
+            if (!this.sab && (lk === 'thermite' || lk === 'cluster' || lk === 'molotov')) {
+              this.explosives.throw(b, from, v, lk === 'cluster' ? Math.max(0.5, FUSE.cluster - cooked) : FUSE[lk], lk, cooked);
+              return;
+            }
             this.explosives.throw(b, from, sticky ? v.multiplyScalar(1.05) : v, sticky ? FUSE.sticky : Math.max(0.5, 2.9 + Math.random() * 0.6 - cooked), sticky ? 'sticky' : 'frag', cooked);
           },
           throwTactical: (b, at, kind) => {
             const from = b.eye(new THREE.Vector3());
             // a few carry decoys (thrown off to one side of the fight) or snapshot grenades
-            const k: GrenadeKind = b.id % 6 === 4 ? 'decoy' : b.id % 6 === 5 ? 'snapshot' : kind;
+            const k: GrenadeKind = b.id % 6 === 4 ? 'decoy' : b.id % 6 === 5 ? 'snapshot' : !this.sab && b.id % 7 === 3 && kind !== 'smoke' ? 'gas' : !this.sab && b.id % 7 === 6 && kind !== 'smoke' ? 'sensor' : kind;
             let to = at.clone();
             if (k === 'decoy') {
               const side = new THREE.Vector3(at.z - from.z, 0, from.x - at.x).normalize().multiplyScalar((Math.random() < 0.5 ? -1 : 1) * 10);
@@ -1306,6 +1318,10 @@ export class Game {
         bot.root.traverse((o) => o.layers.set(1));
         this.scene.add(bot.root);
         bot.sticky = bot.id % 4 === 1;
+        // (Update 47) temperament and kit: marksmen hang back, some rush, one in four is a medic
+        const cls = WEAPONS[wid].cls;
+        bot.personality = cls === 'Sniper' || cls === 'Marksman' ? 'marksman' : bot.id % 4 === 2 ? 'medic' : (cls === 'Shotgun' || cls === 'SMG') && bot.id % 2 === 0 ? 'rusher' : bot.id % 5 === 3 ? 'cautious' : 'steady';
+        bot.lethalKind = (['frag', 'frag', 'sticky', 'thermite', 'cluster', 'molotov'] as const)[bot.id % 6];
         this.bots.push(bot);
       });
     }
@@ -1335,6 +1351,7 @@ export class Game {
       enemies: this.match.players.filter((p) => p.team !== team && p.alive),
       hotspots,
       aggro,
+      cmd: this.sab ? undefined : this.commanders?.[team].cmd,
       flags: this.dom.flags.map((f) => ({
         pos: f.pos,
         owner: f.owner,
@@ -1688,6 +1705,8 @@ export class Game {
     this.gear.clear();
     this.squadSpawn.clear();
     this.traverse.clear();
+    this.commanders?.forEach((c) => c.reset());
+    this.botFieldT.clear();
     for (const b of this.bots) {
       const s = this.match.pickSpawn(b.team);
       b.spawn(s.pos, s.yaw);
@@ -2002,6 +2021,11 @@ export class Game {
       this.scav.update(dt);
       this.gear.update(dt);
       this.squadSpawn.update(dt);
+      if (!this.sab && !this.netg?.isClient && this.match.phase === 'live') {
+        this.commanders?.[0].update(dt);
+        this.commanders?.[1].update(dt);
+        this.botFieldUpgrades(dt);
+      }
     }
     // ---------------- bots ----------------
     if (this.voting) this.updateVote(dt);
@@ -2503,6 +2527,49 @@ export class Game {
     const right = new THREE.Vector3(1, 0, 0).applyQuaternion(this.camera.quaternion);
     const v = this.player.vel.clone().addScaledVector(right, -0.25 + Math.random() * 0.2).add(new THREE.Vector3(0, -0.9, 0));
     this.fx.debris(proto, p, q, v, new THREE.Vector3(Math.random() * 3 - 1.5, Math.random() - 0.5, 1 + Math.random() * 2), 'mag');
+  }
+
+  /**
+   * (Update 47) bots' field upgrades: medics put a medkit down where teammates are hurt, support
+   * soldiers drop ammo crates by the squad, one per side keeps a spawn beacon near a held flag,
+   * marksmen pulse the radar before moving up. Down on a knee for a moment to place it.
+   */
+  private placing = new Map<Bot, number>();
+  private botFieldUpgrades(dt: number) {
+    void dt;
+    // kneeling to place: the action runs over 1.2 s
+    for (const [b, t0] of this.placing) {
+      const k = (this.time - t0) / 1.2;
+      if (k >= 1 || !b.alive) {
+        b.busyAct = null;
+        b.busy = false;
+        this.placing.delete(b);
+      } else b.busyT = k;
+    }
+    for (const b of this.bots) {
+      if (!b.alive || b.downed || b.netPuppet || b.task || b.inCombat) continue;
+      const next = this.botFieldT.get(b.id) ?? this.time + 20 + Math.random() * 40;
+      if (!this.botFieldT.has(b.id)) this.botFieldT.set(b.id, next);
+      if (this.time < next) continue;
+      const mates = this.bots.filter((m) => m.alive && m !== b && m.team === b.team && m.position().distanceTo(b.position()) < 12);
+      const fwd = new THREE.Vector3(-Math.sin(b.yaw), 0, -Math.cos(b.yaw));
+      const at = b.position().clone().addScaledVector(fwd, 1.1);
+      const gy = this.physics.raycast(at.clone().setY(at.y + 1), new THREE.Vector3(0, -1, 0), 2.5);
+      if (gy) at.y = gy.point.y;
+      let kind: 'medkit' | 'ammo' | 'beacon' | 'radar' | null = null;
+      if (b.personality === 'medic' && mates.filter((m) => m.health < 70).length >= 1) kind = 'medkit';
+      else if (b.personality === 'steady' && mates.length >= 2 && b.id % 3 === 0) kind = 'ammo';
+      else if (b.personality === 'marksman') kind = 'radar';
+      else if (b.personality === 'cautious' && !this.gear.beaconsFor(b.team).length && this.dom.flags.some((f) => f.owner === b.team && f.pos.distanceTo(b.position()) < 30)) kind = 'beacon';
+      this.botFieldT.set(b.id, this.time + (kind ? 75 : 15) + Math.random() * 20);
+      if (!kind) continue;
+      if (kind === 'radar') this.gear.radarPulse(b, b.position().clone());
+      else this.gear.deploy(kind, b, at, b.yaw + Math.PI);
+      b.busyAct = 'place';
+      b.busyT = 0;
+      b.busy = true;
+      this.placing.set(b, this.time);
+    }
   }
 
   private startKillcam() {
@@ -5569,6 +5636,7 @@ export class Game {
 
   private onKill(killer: Combatant, victim: Combatant, weapon: string, headshot: boolean, wallbang: boolean) {
     this.field?.forget(victim);
+    this.commanders?.[victim.team].noteDeath(victim.position());
     // online: a soldier owned by another machine only dies when its owner says so
     if (NETF.active && victim instanceof Bot && victim.netPuppet && !NETF.allowPuppetDeath) return;
     this.awardAssists(killer, victim);
