@@ -883,7 +883,12 @@ export class AudioEngine {
     const sc = screams.filter((b): b is AudioBuffer => !!b);
     if (sc.length) provided.scream = sc;
     // designed one-shots (ElevenLabs sound generation, tools/music_build.py)
-    await Promise.all(([['nvgOn', 'nvg_on'], ['nvgOff', 'nvg_off'], ['glassCrack', 'glass_crack'], ['glassShatter', 'glass_shatter'], ['doorBreach', 'door_breach0'], ['doorBreach', 'door_breach1'], ['doorBreach', 'door_breach2']] as const).map(async ([key, f]) => {
+    await Promise.all(([['nvgOn', 'nvg_on'], ['nvgOff', 'nvg_off'], ['glassCrack', 'glass_crack'], ['glassShatter', 'glass_shatter'], ['doorBreach', 'door_breach0'], ['doorBreach', 'door_breach1'], ['doorBreach', 'door_breach2'],
+      // Update 47 (tools/audio47_build.py)
+      ['plateHit', 'plate_hit'], ['plateBreak', 'plate_break'], ['plateSlide', 'plate_slide'], ['velcro', 'velcro'], ['bodyfall', 'bodyfall'], ['cough', 'cough'],
+      ['grappleFire', 'grapple_fire'], ['grappleReel', 'grapple_reel'], ['woodBreak', 'wood_break'], ['thermiteBurn', 'thermite'], ['gasHiss', 'gas_hiss'], ['glowCrack', 'glow_crack'],
+      ['sensorPing', 'sensor_ping'], ['doorRattle', 'door_rattle'], ['breachBeep', 'breach_beep'], ['crateOpen', 'crate_open'], ['beaconOn', 'beacon_on'], ['radarSweep', 'radar_sweep'],
+      ['rappelZip', 'rappel_zip'], ['ledgeGrab', 'ledge_grab']] as const).map(async ([key, f]) => {
       try {
         const r = await fetch(`${import.meta.env.BASE_URL}assets/sounds/designed/${f}.ogg`);
         if (r.ok) (rec[key] ??= []).push(await this.ctx.decodeAudioData(await r.arrayBuffer()));

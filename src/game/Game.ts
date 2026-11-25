@@ -645,6 +645,14 @@ export class Game {
     // doors are hung after the nav graph is built so routes run through doorways
     this.doors = new Doors(this.world.buildings.doors, this.physics, this.scene, this.world.buildings.materials);
     this.doors.onOpen = (d, kicked, by) => this.onDoorOpen(d, kicked, by);
+    // (Update 47) a wedged door: it rattles in its frame; enough force breaks the wedge
+    this.doors.onJam = (d, by, broke) => {
+      if (broke) {
+        this.audio.play('imp_metal', { pos: d.centre, gain: 0.9, ref: 5, rate: 1.2 });
+        this.audio.play('imp_wood', { pos: d.centre, gain: 0.8, ref: 5, rate: 0.8 });
+      } else this.audio.play(this.audio.has('doorRattle') ? 'doorRattle' : 'imp_wood', { pos: d.centre, gain: 0.8, ref: 5, vary: 0.1 });
+      if (by.id === 0 && !broke) this.ui.notify('DOOR JAMMED', 'KICK IT (SPRINT INTO IT) OR BREACH IT');
+    };
     this.doors.onSlam = (d, speed) => {
       const tip = new THREE.Vector3(d.spec.width, 1.1, 0).applyMatrix4(d.pivot.matrixWorld);
       this.audio.play('imp_plank', { pos: tip, gain: Math.min(1.2, 0.5 + speed * 0.06), ref: 5, reverb: 0.4, vary: 0.08, rate: 0.8 });
@@ -3260,6 +3268,8 @@ export class Game {
       stick: (g, victim) => {
         const what = g.stuck?.what ?? 'world';
         this.audio.play('stick', { pos: g.pos, gain: 0.9, ref: 3, reverb: 0.15, vary: 0.08 });
+        // (Update 47) a breaching charge arms with three beeps
+        if (g.kind === 'breach' && this.audio.has('breachBeep')) this.audio.play('breachBeep', { pos: g.pos, gain: 0.9, ref: 4, at: 0.2 });
         // on metal (a car, the helicopter, a metal door) it clanks as well
         if (what === 'car' || what === 'heli' || g.surface === 'metal') this.audio.play('bounce_metal', { pos: g.pos, gain: 0.6, ref: 3, reverb: 0.1, rate: 0.9 });
         if (g.kind === 'sticky') this.audio.play('beep', { pos: g.pos, gain: 0.5, ref: 3, rate: 1.1, reverb: 0 });
@@ -5167,6 +5177,7 @@ export class Game {
     }
     if (name === 'laserOn') this.audio.play('click', { gain: 0.5, reverb: 0, rate: 1.6 });
     if (name === 'release') {
+      if (this.throwKind === 'glow' && this.audio.has('glowCrack')) this.audio.play('glowCrack', { gain: 0.6, reverb: 0 });
       this.throwPlayerGrenade();
       if (this.throwKind !== 'tknife') this.playerVoice(this.throwKind, 0.9);
       this.arc?.hide();

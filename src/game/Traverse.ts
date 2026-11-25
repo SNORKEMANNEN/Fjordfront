@@ -32,6 +32,7 @@ export class Traverse {
   private scanT = 0;
   private lastClimb: string | null = null;
   private slideK = 0;
+  private zipT = 0;
 
   constructor(private g: G) {
     this.ropeMat = new THREE.MeshStandardMaterial({ color: 0x3a3a30, roughness: 0.95, metalness: 0 });
@@ -56,7 +57,7 @@ export class Traverse {
     const g = this.g;
     const at = p ?? g.player.pos;
     if (ev === 'grab' || ev === 'pullDone') {
-      g.audio.play('legs', { gain: 0.6, rate: 0.8, reverb: 0.05 });
+      g.audio.play(g.audio.has('ledgeGrab') ? 'ledgeGrab' : 'legs', { gain: 0.7, reverb: 0.05 });
       g.audio.play('imp_punch', { gain: 0.2, bus: 'ui', reverb: 0, rate: 0.7 });
       g.rig?.addTrauma?.(0.12);
     }
@@ -242,7 +243,7 @@ export class Traverse {
             g.audio.play('imp_metal', { pos: s.to, gain: 0.8, ref: 4, rate: 1.3 });
             for (let i = 0; i < 8; i++) g.fx.sparks.spawn(s.to.clone(), s.n.clone().multiplyScalar(2).add(new THREE.Vector3((Math.random() - 0.5) * 3, Math.random() * 2, (Math.random() - 0.5) * 3)), [4, 3, 1.5], 1, 0.015, 0.3, { drag: 1, grav: 9.8 });
             pl.startPull(s.to, s.n, s.top);
-            g.audio.play('zipline', { gain: 0.6, rate: 1.4, reverb: 0 });
+            g.audio.play(g.audio.has('grappleReel') ? 'grappleReel' : 'zipline', { gain: 0.7, rate: 1.1, reverb: 0 });
             s.back = -1; // pulling
           } else {
             s.back = 0.001; // reel back in
@@ -271,6 +272,14 @@ export class Traverse {
       }
     }
     const c = pl.climb as { kind: string; anchor?: THREE.Vector3 } | null;
+    // the rope singing through the descender while you go down
+    if (c?.kind === 'rappel' && this.slideK > 0) {
+      this.zipT -= dt;
+      if (this.zipT <= 0) {
+        this.zipT = 0.9;
+        g.audio.play(g.audio.has('rappelZip') ? 'rappelZip' : 'zipline', { gain: 0.45, reverb: 0.05, vary: 0.08 });
+      }
+    }
     if (c?.kind === 'rappel' && c.anchor) {
       a = c.anchor;
       b = harness;

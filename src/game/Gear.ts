@@ -187,7 +187,7 @@ export class Gear {
           if (look > 0.9 && g.physics.lineOfSight(g.camera.position, f.p)) g.flashFx = Math.max(g.flashFx ?? 0, (look - 0.9) * 2.5 * fade);
         }
       }
-      g.audio.emitter(f.key, f.kind === 'thermite' ? 'heatHiss' : 'carFire', (f.kind === 'thermite' ? 1 : 0.8) * fade, f.p, { ref: 5, bus: 'sfx' });
+      g.audio.emitter(f.key, f.kind === 'thermite' ? (g.audio.has('thermiteBurn') ? 'thermiteBurn' : 'heatHiss') : 'carFire', (f.kind === 'thermite' ? 1 : 0.8) * fade, f.p, { ref: 5, bus: 'sfx' });
       g.burnAt(f.p, f.r, f.kind === 'thermite' ? 70 : 38, f.owner, dt, (c: Combatant) => c.team !== f.owner.team || c === f.owner, f.kind === 'thermite' ? 2 : 1.6, f.kind === 'thermite' ? 'Thermite' : 'Fire Bottle');
       // deployables in the fire burn out
       if (f.kind === 'thermite') {
@@ -226,7 +226,7 @@ export class Gear {
         }
         if (Math.random() < 0.6) g.fx.smoke.spawn(c.p.clone().setY(c.p.y + 0.1), new THREE.Vector3((Math.random() - 0.5) * 2.5, 0.6, (Math.random() - 0.5) * 2.5), [0.75, 0.78, 0.4], 0.5, 0.25, 1.6, { drag: 1.5, grav: 0, grow: 2.2 });
       }
-      g.audio.emitter(c.key, 'smokeHiss', 0.4 * Math.min(1, c.r / 3), c.p, { ref: 4, bus: 'sfx' });
+      g.audio.emitter(c.key, g.audio.has('gasHiss') ? 'gasHiss' : 'smokeHiss', 0.5 * Math.min(1, c.r / 3), c.p, { ref: 4, bus: 'sfx' });
       for (const v of g.match.players as Combatant[]) {
         if (!v.alive) continue;
         const d = Math.hypot(v.position().x - c.p.x, v.position().z - c.p.z);
@@ -309,7 +309,7 @@ export class Gear {
       if (c === g.avatar) g.ui.notify('MOTION SENSOR', 'YOU WERE DETECTED');
       for (const m of g.bots as Bot[]) if (m.alive && m.team === gr.owner.team && m.position().distanceTo(gr.pos) < 60) m.hear(c.position());
     }
-    if (gr.pos.distanceTo(g.camera.position) < 25) g.audio.play('click', { pos: gr.pos, gain: n ? 0.6 : 0.25, rate: n ? 2.2 : 1.6, ref: 3, reverb: 0 });
+    if (gr.pos.distanceTo(g.camera.position) < 25) g.audio.play(g.audio.has('sensorPing') ? 'sensorPing' : 'click', { pos: gr.pos, gain: n ? 0.7 : 0.25, rate: n ? 1.15 : 0.9, ref: 3, reverb: 0 });
   }
   private blip(p: THREE.Vector3) {
     const s = new THREE.Sprite(this.blipMat.clone());
@@ -399,7 +399,7 @@ export class Gear {
       });
       this.beacons.push(b);
       (mesh.userData.setColor as (c: THREE.Color, k: number) => void)(new THREE.Color(TEAM_GLOW[team === g.avatar.team ? 0 : 1]), 0.2);
-      g.audio.play('trophyOut', { pos, gain: 0.6, ref: 4 });
+      g.audio.play(g.audio.has('beaconOn') ? 'beaconOn' : 'trophyOut', { pos, gain: 0.7, ref: 4 });
       if (owner === g.avatar) g.ui.notify('SPAWN BEACON', 'YOUR TEAM CAN DEPLOY HERE');
       return;
     }
@@ -409,7 +409,7 @@ export class Gear {
       const old = this.stations.find((x) => x.owner === owner)!;
       this.removeStation(old);
     }
-    g.audio.play('imp_metal_light', { pos, gain: 0.7, rate: 0.6, ref: 4 });
+    g.audio.play(g.audio.has('crateOpen') ? 'crateOpen' : 'imp_metal_light', { pos, gain: 0.8, rate: kind === 'medkit' ? 1.1 : 1, ref: 4 });
     if (owner === g.avatar) g.ui.notify(kind === 'ammo' ? 'AMMO CRATE' : 'MEDKIT STATION', 'DEPLOYED');
   }
   private removeStation(s: Station) {
@@ -445,7 +445,7 @@ export class Gear {
 
   radarPulse(owner: Combatant, p: THREE.Vector3, R = 55) {
     const g = this.g;
-    g.audio.play('snapPulse', { pos: p, gain: 0.9, ref: 10, reverb: 0.4, rate: 0.7 });
+    g.audio.play(g.audio.has('radarSweep') ? 'radarSweep' : 'snapPulse', { pos: p, gain: 1, ref: 12, reverb: 0.4 });
     if (!this.pulseMat) {
       this.pulseMat = new THREE.ShaderMaterial({
         uniforms: { uT: { value: 0 }, uCol: { value: new THREE.Color(0.3, 1.3, 1.0) } },

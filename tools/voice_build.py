@@ -58,6 +58,13 @@ BOT_LINES = {
     # Sabotasje (Update 42)
     'planting': ['Planting the charge, cover me!'],
     'defusing': ["Defusing! Cover me!"],
+    # Update 47: casualties, revives, plates
+    'medic': ['Medic! I need a medic!', "I'm down, somebody help me!"],
+    'down': ["I'm down! I'm hit bad!"],
+    'thanks': ["Thanks, I'm back in it!", "Good to go!"],
+    'onMyWay': ["Hang on, I'm coming to you!", "Stay down, I've got you!"],
+    'dragging': ['Got you, moving you to cover!'],
+    'plating': ['Swapping plates!'],
     'charge': ["I've got the charge."],
     'rotA': ['Rotating to Alpha!'],
     'rotB': ['Rotating to Bravo!'],
@@ -66,6 +73,7 @@ BOT_LINES = {
 }
 
 PLAYER_LINES = {
+    'reviving': ['Stay with me!', "I've got you, hold on!"],
     'reload': ['Reloading!', 'Swapping mags!'],
     'frag': ['Frag out!', 'Frag, frag!'],
     'flash': ['Flashbang!'],
