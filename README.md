@@ -35,7 +35,7 @@ URL options: `?quality=low|medium|high|ultra`, `?weather=clear|overcast|rain|sno
 | Lethal | G. Hold to ready, release to throw (frag cooks while held). Sticky grenade: hold to aim, release to throw. Claymore: hold to ready it, release to set it down. C4: tap to throw. Throwing knife: instant throw, walk over it to pick it up again (choose in the loadout) |
 | Detonate C4 | Double-tap F, or G when you have no C4 left in hand |
 | Tactical | T. Hold to ready (one-handed, you can keep firing), release to throw. Flashbang, stun, smoke, stim, snapshot or decoy (choose in the loadout) |
-| Field upgrade | H. Trophy System, once its charge ring is full |
+| Field upgrade | H, once its charge ring is full: trophy system, ammo crate, medkit station, spawn beacon or radar pulse (choose in the loadout) |
 | Dolphin dive | Z while sprinting |
 | Loadout in a match | Esc → LOADOUT (applies on next spawn, or right away if you just spawned) |
 | Melee / combat knife | Tap V: quick melee with the gun. **Hold V**: draw the combat knife (left mouse = slash, right mouse = stab, V also attacks). 1 / 2 / mouse wheel puts the guns back |
@@ -46,6 +46,14 @@ URL options: `?quality=low|medium|high|ultra`, `?weather=clear|overcast|rain|sno
 | Use / spot | F. Clips onto a zipline in reach, opens or closes the door you are looking at (prompt under the crosshair), otherwise spots enemies. Space lets go of a zipline |
 | Night vision | N. The left hand flips the goggles down (or back up) |
 | Weapon light | L, on guns that carry one (see Update 46) |
+| Armour plate | O or mouse 4: slide a spare plate in (hold for all) |
+| Revive / drag | Hold F over a downed teammate to revive, tap F to drag them. Downed yourself: hold F to give up |
+| Rappel | F at a drop of 4 m or more. S down (Shift fast), W up, A / D along, Space kick off, C let go |
+| Grappling hook | P |
+| Ledge hang | Jump at a ledge too high to climb. A / D shimmy, W pull up, C drop |
+| Blind fire | Hold Alt (lean to fire round a corner) |
+| Spawn point | Q / E on the death screen |
+| Rally point | Y (squad orders) → RALLY POINT |
 | Vault through a window | Space, facing the window close by (inside or outside): the whole window breaks |
 | Performance overlay | F3 |
 | Door peek | Aim down sights in front of a closed door: you ease it open a crack and lean round the edge |
@@ -290,6 +298,142 @@ URL options: `?quality=low|medium|high|ultra`, `?weather=clear|overcast|rain|sno
 - **MP7:** sprint and jump clutter reduced.
 - **Rifle:** support hand moved so it no longer shows through the optic window.
 - **Pistol:** hold reworked.
+
+## Update 47: the field — downed and revive, plates, squad spawns, climbing, new kit, smarter bots
+
+Fights no longer end at the first lethal hit. Soldiers go down and get dragged to cover and revived, armour plates crack and get swapped, and you can come back on your squad. You can climb, rappel and grapple onto rooftops and blow your way through wooden walls. Bots use all of it under an adaptive commander, and every match opens with a flyover of the map.
+
+### Downed and revive
+- **Going down:** a lethal hit that isn't a headshot, a sniper round, a blade or a point-blank blast puts you on the ground instead of killing you.
+  - **The pose:** on your back, propped on an elbow, crawling away from the shooter and calling for a medic.
+  - **Bleeding out:** 28 s. While someone is reviving you the clock stops; while you are dragged it runs at half speed.
+  - **Being finished:** shooting a downed soldier finishes them (50 health left). A second fall within 15 s of a revive is fatal.
+- **When you are down:**
+  - you have the pistol only and a slow crawl;
+  - the screen closes in red with a heartbeat;
+  - a bleed-out ring, the name and distance of whoever is coming, and **hold F** to give up.
+- **Reviving:** a teammate kneels, packs the wound, jabs a stim and does compressions.
+  - **Time:** 3.4 s, or 1.7 s for a medic.
+  - **Health afterwards:** 35, or 75 if a medic revived them.
+  - **Your controls:** **hold F** over a downed teammate to revive, **tap F** to grab them by the vest strap and drag them while you walk backwards.
+- **Bots revive each other and you.** Under fire they first drag the casualty a few metres into cover, then revive.
+- **The kill feed** shows ▼ DOWNED and ✚ REVIVED. A down is worth 50 points, a revive 100.
+
+### Armour plates
+- **The carrier:** two ceramic plates. Torso hits land on the plates first; a .338 breaks one outright, rifle rounds take a few hits.
+- **Feedback:** a breaking plate bursts in ceramic grit with a crack you hear, and shows a blue plate hit marker. Under your health bar a segment per plate shows its state.
+- **Re-plating:** **O** (or mouse 4) slides a spare in, with a first-person animation. Hold it to refill every plate.
+- **Bots re-plate in cover.** Their damaged plate bags show cracks and spalled ceramic.
+
+### Roles (loadout)
+| Role | Perks |
+| --- | --- |
+| Rifleman | 5 spare plates (others 3), re-plates 30 % faster, one extra lethal |
+| Medic | revives in half the time, revived teammates get 75 HP, squadmates near you heal |
+| Support | squadmates within 12 m slowly refill ammo, field upgrade charges 35 % faster |
+| Recon | radar pulse reaches 40 % further |
+
+### Squad spawning
+- **The death screen** now has a spawn picker (**Q / E** or click):
+  - your base;
+  - each squadmate, not while they are fighting or down; you land just behind them;
+  - your squad's **rally point**: squad orders wheel (**Y**) → RALLY POINT. A radio pack and a pennant, 2 minutes, overrun if enemies stand on it;
+  - your team's **spawn beacons**.
+- **Bots** come back on rally points and beacons too.
+
+### Scavenging
+- **Dropped guns:** the fallen drop their gun. It tumbles, bounces, settles on its side and glints for 45 s.
+- **Taking ammo:** walk over a gun that takes the same ammunition as one of yours and you take its magazines.
+- **Swapping:** **hold F** to swap guns. Yours is dropped in its place, and every gun keeps its own ammo.
+
+### Climbing and moving
+- **Ledge hang:** jump at a ledge too high to mantle and you catch it. A / D shimmy along it, W / Space pull up, S / C drop.
+- **Rappel:** standing at a 4 m+ drop facing out, **F** puts an anchor in and takes you over the edge on a rope.
+  - **Controls:** S goes down (Shift fast), W up, A / D along the wall, Space kicks off and swings you a few metres down, C lets go.
+  - The rope is drawn from the anchor to your harness.
+- **Grappling hook (P):** a three-pronged hook flies up to 32 m and bites, and the line reels you in.
+  - **With a ledge above the bite:** you arrive hanging from it.
+  - **On a bare wall:** you hang on the line instead.
+  - It takes 8 s to rewind.
+- **Blind fire (hold Alt):** the gun goes up over the cover, or round the corner you lean at, and fires with a wide spread from where the gun is.
+
+### New lethals, tacticals and field upgrades
+- **Lethals:**
+  - **thermite** sticks to anything, people included, and burns white-hot for 5 s, cutting door wedges and wooden walls;
+  - **fire bottle** leaves a 3.4 m pool of burning fuel;
+  - **cluster grenade** pops and scatters six bomblets that go off one after another.
+- **Tacticals:**
+  - **motion sensor dart** pings anything moving within 16 m for 30 s;
+  - **glow sticks** are real lights for 90 s;
+  - **CS gas** is a yellow-green cloud: coughing, a blurred swimming screen, shaking aim, light damage, and bots break off;
+  - **door wedge** jams the closed door you face: pushing it only rattles it, and a hard kick or a blast breaks it;
+  - **breaching charge** arms with three beeps, blows a door in (wedge or not) or blows out a wooden wall, and stuns whoever is behind it.
+- **Field upgrades (H)**, each with its own charge time:
+  - **trophy system**;
+  - **ammo crate**: ammo, a lethal, a tactical and a plate;
+  - **medkit station**: heals teammates within 4.5 m;
+  - **spawn beacon**;
+  - **radar pulse**: a 55 m sweep that shows enemies through walls for 4 s.
+
+### Breachable buildings
+Every wooden wall section of the buildings, up to 4.2 m wide, can be blown out by a breaching charge, thermite or C4. Its boards burst into the room in dust and splinters, and the gap is open to walk and shoot through.
+
+### Bots
+- **Personalities:**
+  - marksmen hang back;
+  - rushers stay on the attack and close in;
+  - the cautious take cover sooner;
+  - one in four is a medic.
+- **The new kit:** bots throw thermite, clusters, fire bottles, gas and sensor darts. They also put down medkits, ammo crates and spawn beacons, and pulse the radar.
+- **An adaptive commander for each side** reads the battle every ~18 s and picks a posture:
+  - assault one flag;
+  - hold;
+  - counter-attack a flag being pushed;
+  - go round a killzone where too many have died.
+
+  The posture reshapes missions and paths. Your side's orders and the enemy's big moves come over the radio. If you are on a 4+ streak, a two-soldier hunter team comes after you.
+
+### Map intro
+Before you deploy there is a cinematic flyover:
+1. A high orbit over the battlefield with the map's name, coordinates and mode.
+2. A low dolly onto the middle objective.
+3. A crane down onto your shoulders that eases into first person.
+
+It is letterboxed, about 10 s long, and Space or a click skips it. The soldiers are already moving out under it.
+
+### Sound and voices
+- **20 new effects** from ElevenLabs sound generation (`tools/audio47_build.py`):
+  - plates and velcro, body falls, coughing;
+  - the grapple and winch, the rappel rope;
+  - wood breaking, the thermite roar, the gas hiss;
+  - sensor pings, door rattles, breach beeps;
+  - crates, beacons, the radar sweep.
+- **New voice lines** in the existing voices (`tools/voice_build.py`): "Medic!", "I'm down!", "Hang on, I'm coming to you!", "Moving you to cover!", "Swapping plates!", "Back in it!", and your own "Stay with me!".
+
+### Under the hood
+- New modules:
+  - `src/game/FieldOps.ts`, `Scavenge.ts`, `Gear.ts`, `SquadSpawn.ts`, `Traverse.ts`, `MapIntro.ts`;
+  - `src/ai/Commander.ts`;
+  - `src/weapons/FieldModels.ts` (procedural models for every new item) and `FieldAnims.ts` (first-person animations).
+- The soldier animator has a downed / dragged family and kneeling revive, drag and plate actions.
+- Temporary lights (fires, thermite, glow sticks) go through the light pool, so the shaders never recompile.
+- Downed and the other field systems are offline only; online and Sabotasje play as before.
+
+### Tested
+- Typecheck and production build.
+- Headless runs that do each feature and check the result:
+  - down, revive, drag and bleed-out (player and bots);
+  - plate swap and plate damage on soldiers;
+  - scavenging and swapping a gun;
+  - each new grenade and field upgrade;
+  - the spawn picker and respawning on a squadmate;
+  - rappel down a roof edge;
+  - grapple → hang → pull up;
+  - blind fire;
+  - a breached church wall;
+  - the intro flyover.
+- Every new sound and voice line loads.
+- `tools/match12.cjs`: a 300 s 12 v 12 match with no errors at 2.8–3.3 ms per simulated frame. Downs, revives and plate breaks are counted in its output.
 
 ## Update 46: soldiers, gun finishes and gun handling rebuilt
 

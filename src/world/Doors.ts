@@ -29,6 +29,11 @@ export interface Door {
   byBot?: boolean;
   /** eased open by hand (E / door peek): slow, quiet spring */
   soft?: boolean;
+  /** (Update 47) a door wedge holds it shut: pushes rattle it; enough force breaks the wedge */
+  jammed?: boolean;
+  jamPush?: number;
+  jamRattle?: number;
+  wedge?: THREE.Object3D | null;
 }
 
 export interface Mover {
@@ -47,6 +52,8 @@ export class Doors {
   onOpen: (d: Door, kicked: boolean, by: Mover) => void = () => {};
   /** a kicked door hits the wall */
   onSlam: (d: Door, speed: number) => void = () => {};
+  /** (Update 47) someone pushed a wedged door (rattle), or broke the wedge */
+  onJam: (d: Door, by: Mover, broke: boolean) => void = () => {};
   private tmp = new THREE.Vector3();
   /** every door's knob in one instanced draw (was one draw per door) */
   private knobs: THREE.InstancedMesh;
@@ -168,6 +175,18 @@ export class Doors {
           if (Math.abs(side) > reach || Math.abs(along) > d.spec.width / 2 + 0.25 + (reach - 1) * 0.3 || Math.abs(m.pos.y + 0.9 - d.centre.y) > 1.6) continue;
           const into = -Math.sign(side) * m.vel.dot(d.normal);
           if (into < (m.reach ? 0.2 : 0.4) && Math.abs(side) > 0.55) continue;
+          if (d.jammed) {
+            // wedged shut: it rattles in the frame; keep at it (or kick it) and the wedge gives
+            d.jamPush = (d.jamPush ?? 0) + dt * (m.sprint && into > 3 ? 3 : 1);
+            d.jamRattle = (d.jamRattle ?? 0) - dt;
+            if ((d.jamRattle ?? 0) <= 0) {
+              d.jamRattle = 0.35;
+              this.onJam(d, m, false);
+            }
+            if ((d.jamPush ?? 0) < (m.id === 0 ? 1.6 : 3.2)) continue;
+            this.unjam(d);
+            this.onJam(d, m, true);
+          }
           // swing away from the pusher (a cracked door keeps going the way it already opened)
           d.target = Math.abs(d.target) > 0.05 ? Math.sign(d.target) * OPEN : side > 0 ? OPEN : -OPEN;
           d.soft = false;
@@ -217,8 +236,39 @@ export class Doors {
     return u > -0.3 && u < d.spec.width + 0.3 && Math.abs(v) < 0.42 && p.y > d.spec.hinge.y - 1 && p.y < d.spec.hinge.y + d.spec.height;
   }
 
+  /** (Update 47) wedge a closed door shut */
+  jam(d: Door, wedge: THREE.Object3D) {
+    d.jammed = true;
+    d.jamPush = 0;
+    d.wedge = wedge;
+  }
+  unjam(d: Door) {
+    d.jammed = false;
+    d.jamPush = 0;
+    if (d.wedge) d.wedge.removeFromParent();
+    d.wedge = null;
+  }
+  /** (Update 47) blown in: a breaching charge or a blast throws it open hard, wedge or not */
+  blast(d: Door, from: THREE.Vector3) {
+    this.unjam(d);
+    const side = this.tmp.subVectors(from, d.centre).setY(0).dot(d.normal);
+    d.target = side > 0 ? -OPEN : OPEN;
+    d.kicked = true;
+    d.byBot = false;
+    d.soft = false;
+    d.vel = d.target * 14;
+    if (d.collider) {
+      this.physics.remove(d.collider);
+      d.collider = null;
+    }
+  }
+
   /** Open a closed door away from `from`, or close an open one (the E key). */
   toggle(d: Door, from: THREE.Vector3) {
+    if (d.jammed && Math.abs(d.target) < 0.5) {
+      this.onJam(d, { pos: from, vel: new THREE.Vector3(), sprint: false, id: 0 }, false);
+      return;
+    }
     if (Math.abs(d.target) > 0.5) {
       d.target = 0;
       d.vel = -Math.sign(d.angle) * 0.6;

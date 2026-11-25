@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import { NavGraph, NavNode } from './NavGraph';
 import { LANDMARKS } from '../world/MapLayout';
 import { Combatant } from '../game/Combatant';
+import type { Command } from './Commander';
 
 /**
  * Team-level brain that hands bots *missions* instead of single points, so a squad spreads over
@@ -23,7 +24,7 @@ type Kind = 'clear' | 'flank' | 'push' | 'patrol' | 'capture' | 'defend';
 export interface FlagInfo { pos: THREE.Vector3; owner: -1 | 0 | 1; radius: number; letter: string; contested: boolean; enemiesNear: number }
 interface Mission { kind: Kind; wps: THREE.Vector3[]; target: THREE.Vector3; seed: number; team: number; laps?: number }
 
-interface Ctx { mates: { id: number; pos: THREE.Vector3 }[]; enemies: Combatant[]; hotspots: THREE.Vector3[]; aggro: number; flags?: FlagInfo[] }
+interface Ctx { mates: { id: number; pos: THREE.Vector3 }[]; enemies: Combatant[]; hotspots: THREE.Vector3[]; aggro: number; flags?: FlagInfo[]; cmd?: Command }
 
 interface Room { centre: THREE.Vector3; nodes: NavNode[] }
 
@@ -31,6 +32,8 @@ export class BotDirector {
   private missions = new Map<number, Mission>();
   private rooms: Room[] = [];
   private counter = 0;
+  /** (Update 47) the commander's killzones per side: paths steer round them */
+  private avoidBy: [THREE.Vector3[], THREE.Vector3[]] = [[], []];
 
   constructor(private nav: NavGraph, private rng: () => number) {
     // group indoor nodes (doorway links, interior points) into buildings / rooms
@@ -59,7 +62,7 @@ export class BotDirector {
   /** Path options so each bot (and each of its missions) gets its own stable lane. */
   pathOpts(botId: number, team: number, all: { id: number; team: number; goal: THREE.Vector3 }[]) {
     const m = this.missions.get(botId);
-    const avoid = all.filter((o) => o.team === team && o.id !== botId).map((o) => o.goal);
+    const avoid = all.filter((o) => o.team === team && o.id !== botId).map((o) => o.goal).concat(this.avoidBy[team as 0 | 1] ?? []);
     return { noise: 0.9, seed: botId * 31 + (m?.seed ?? 0), avoid };
   }
 
@@ -98,6 +101,7 @@ export class BotDirector {
   }
 
   private plan(bot: { id: number; team: 0 | 1; pos: THREE.Vector3 }, ctx: Ctx): Mission {
+    if (ctx.cmd) this.avoidBy[bot.team] = ctx.cmd.avoid;
     const claims = this.claims(bot.team, bot.id);
     const crowd = (p: THREE.Vector3) => {
       let c = 0;
@@ -113,7 +117,8 @@ export class BotDirector {
     // 12v12 matches from locking into one 2-1 split for the whole game)
     const fl = ctx.flags ?? [];
     const behind = fl.filter((f) => f.owner === 1 - bot.team).length - fl.filter((f) => f.owner === bot.team).length;
-    if (fl.length && this.rng() < (behind > 0 ? 0.9 : behind < 0 ? 0.66 : 0.75)) {
+    const pushOrder = ctx.cmd && (ctx.cmd.posture === 'assault' || ctx.cmd.posture === 'counter' || ctx.cmd.posture === 'hold') ? 0.15 : 0;
+    if (fl.length && this.rng() < (behind > 0 ? 0.9 : behind < 0 ? 0.66 : 0.75) + pushOrder) {
       const m = this.flagMission(bot, ctx, claims, seed, snap);
       if (m) return m;
     }
@@ -167,6 +172,10 @@ export class BotDirector {
         if (f.letter === 'B') s -= 0.25;
         if (f.owner === -1) s -= 0.35; // nobody holds it: free points for whoever turns up
         if (!mine && f.owner !== -1) s -= 0.15; // taking theirs swings the score twice
+        // (Update 47) the commander's focus
+        const c = ctx.cmd;
+        if (c?.focus && flat(f.pos, c.focus) < 3) s -= c.posture === 'assault' || c.posture === 'counter' ? 1.2 : 0.6;
+        if (c?.posture === 'hold' && mine) s -= 0.7;
         return { f, s, mine };
       })
       .sort((a, b) => a.s - b.s);
@@ -187,7 +196,7 @@ export class BotDirector {
     const wps: THREE.Vector3[] = [];
     // long approaches sometimes swing round the side
     const len = flat(f.pos, bot.pos);
-    if (!pick.mine && len > 70 && this.rng() < 0.4) {
+    if (!pick.mine && len > (ctx.cmd?.posture === 'flank' ? 45 : 70) && this.rng() < (ctx.cmd?.posture === 'flank' || ctx.cmd?.posture === 'assault' ? 0.75 : 0.4)) {
       const dir = new THREE.Vector3(f.pos.x - bot.pos.x, 0, f.pos.z - bot.pos.z).normalize();
       const side = new THREE.Vector3(-dir.z, 0, dir.x).multiplyScalar((this.rng() < 0.5 ? -1 : 1) * (20 + this.rng() * 20));
       wps.push(snap(bot.pos.clone().addScaledVector(dir, len * 0.55).add(side)));

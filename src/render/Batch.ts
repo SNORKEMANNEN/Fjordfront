@@ -162,7 +162,8 @@ export function bakeFlat(root: THREE.Object3D, key = 'prop', geoKey?: string) {
     g.morphAttributes = {};
     g.clearGroups();
     g.applyMatrix4(new THREE.Matrix4().multiplyMatrices(inv, m.matrixWorld));
-    const c = mat.color.clone();
+    // textured materials name the colour they read as from afar (the tint alone ignores the map)
+    const c = mat.userData.flatColor !== undefined ? new THREE.Color(mat.userData.flatColor) : mat.color.clone();
     if (mat.emissive && mat.emissiveIntensity > 0) c.add(mat.emissive.clone().multiplyScalar(mat.emissiveIntensity * 0.5));
     const cnt = g.attributes.position.count;
     const col = new Float32Array(cnt * 3);

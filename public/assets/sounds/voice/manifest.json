@@ -76,6 +76,27 @@
   ],
   "onB": [
    "bot0a_onB0.ogg"
+  ],
+  "medic": [
+   "bot0a_medic0.ogg",
+   "bot0a_medic1.ogg"
+  ],
+  "down": [
+   "bot0a_down0.ogg"
+  ],
+  "thanks": [
+   "bot0a_thanks0.ogg",
+   "bot0a_thanks1.ogg"
+  ],
+  "onMyWay": [
+   "bot0a_onMyWay0.ogg",
+   "bot0a_onMyWay1.ogg"
+  ],
+  "dragging": [
+   "bot0a_dragging0.ogg"
+  ],
+  "plating": [
+   "bot0a_plating0.ogg"
   ]
  },
  "bot0b": {
@@ -155,6 +176,27 @@
   ],
   "onB": [
    "bot0b_onB0.ogg"
+  ],
+  "medic": [
+   "bot0b_medic0.ogg",
+   "bot0b_medic1.ogg"
+  ],
+  "down": [
+   "bot0b_down0.ogg"
+  ],
+  "thanks": [
+   "bot0b_thanks0.ogg",
+   "bot0b_thanks1.ogg"
+  ],
+  "onMyWay": [
+   "bot0b_onMyWay0.ogg",
+   "bot0b_onMyWay1.ogg"
+  ],
+  "dragging": [
+   "bot0b_dragging0.ogg"
+  ],
+  "plating": [
+   "bot0b_plating0.ogg"
   ]
  },
  "bot1a": {
@@ -234,6 +276,27 @@
   ],
   "onB": [
    "bot1a_onB0.ogg"
+  ],
+  "medic": [
+   "bot1a_medic0.ogg",
+   "bot1a_medic1.ogg"
+  ],
+  "down": [
+   "bot1a_down0.ogg"
+  ],
+  "thanks": [
+   "bot1a_thanks0.ogg",
+   "bot1a_thanks1.ogg"
+  ],
+  "onMyWay": [
+   "bot1a_onMyWay0.ogg",
+   "bot1a_onMyWay1.ogg"
+  ],
+  "dragging": [
+   "bot1a_dragging0.ogg"
+  ],
+  "plating": [
+   "bot1a_plating0.ogg"
   ]
  },
  "bot1b": {
@@ -313,6 +376,27 @@
   ],
   "onB": [
    "bot1b_onB0.ogg"
+  ],
+  "medic": [
+   "bot1b_medic0.ogg",
+   "bot1b_medic1.ogg"
+  ],
+  "down": [
+   "bot1b_down0.ogg"
+  ],
+  "thanks": [
+   "bot1b_thanks0.ogg",
+   "bot1b_thanks1.ogg"
+  ],
+  "onMyWay": [
+   "bot1b_onMyWay0.ogg",
+   "bot1b_onMyWay1.ogg"
+  ],
+  "dragging": [
+   "bot1b_dragging0.ogg"
+  ],
+  "plating": [
+   "bot1b_plating0.ogg"
   ]
  },
  "ann": {
@@ -561,6 +645,10 @@
   ],
   "defusing": [
    "player_defusing0.ogg"
+  ],
+  "reviving": [
+   "player_reviving0.ogg",
+   "player_reviving1.ogg"
   ]
  },
  "pilot": {

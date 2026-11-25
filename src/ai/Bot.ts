@@ -17,7 +17,9 @@ import { AimController, CoverMap, detectRate, Exposure, Order, SKILL } from './B
 
 /** replicated / recorded pose: see Bot.replayState */
 export const POSE_N = 20;
-const ACTIONS: ActionKind[] = ['none', 'reload', 'throw', 'melee', 'knife', 'switch', 'bolt', 'plant', 'throwL', 'stim', 'detonate', 'place', 'sabPlant', 'sabDefuse'];
+/** armour plate hit points (Update 47) */
+export const PLATE_HP = 50;
+const ACTIONS: ActionKind[] = ['none', 'reload', 'throw', 'melee', 'knife', 'switch', 'bolt', 'plant', 'throwL', 'stim', 'detonate', 'place', 'sabPlant', 'sabDefuse', 'revive', 'drag', 'plate'];
 export function actionCode(a: ActionKind) {
   return Math.max(0, ACTIONS.indexOf(a));
 }
@@ -76,6 +78,14 @@ export interface BotWorld {
   smokeBlocks?(a: THREE.Vector3, b: THREE.Vector3): boolean;
   /** radio chatter: "Reloading!", "Frag out!" ... */
   voice?(bot: Bot, line: string): void;
+  /** (Update 47) kneeling over a downed teammate: advance the revive, 0..1 (1 = back up) */
+  reviveTick?(bot: Bot, who: Combatant, dt: number): number;
+  /** hauling a downed teammate: where their body goes this frame */
+  drag?(bot: Bot, who: Combatant, to: THREE.Vector3, yaw: number): void;
+  /** let go of a dragged body */
+  dragEnd?(bot: Bot, who: Combatant): void;
+  /** a plate went into the carrier */
+  replated?(bot: Bot): void;
   difficulty: number; // 0..1
 }
 
@@ -142,6 +152,8 @@ export class Bot implements Combatant {
   private pending: { lethal: boolean; tk: 'flash' | 'stun' | 'smoke'; at: THREE.Vector3; cook: number; cooked: number; item: string } | null = null;
   /** sticky grenades instead of frags (set by the game) */
   sticky = false;
+  /** (Update 47) the lethal this soldier carries (frag unless the game says otherwise) */
+  lethalKind: 'frag' | 'sticky' | 'thermite' | 'cluster' | 'molotov' = 'frag';
   private reloadDur = 1;
   weapon: WeaponModel;
   def: WeaponDef;
@@ -260,10 +272,10 @@ export class Bot implements Combatant {
     if (this.gunMesh) this.gunMesh.castShadow = d < 22;
   }
   eye(out = new THREE.Vector3()) {
-    return out.copy(this.body.pos).setY(this.body.pos.y + (this.crouch ? 1.05 : 1.58));
+    return out.copy(this.body.pos).setY(this.body.pos.y + (this.downed ? 0.5 : this.crouch ? 1.05 : 1.58));
   }
   chest(out = new THREE.Vector3()) {
-    return out.copy(this.body.pos).setY(this.body.pos.y + (this.crouch ? 0.85 : 1.25));
+    return out.copy(this.body.pos).setY(this.body.pos.y + (this.downed ? 0.3 : this.crouch ? 0.85 : 1.25));
   }
   lookDir(out = new THREE.Vector3()) {
     const cp = Math.cos(this.aimPitch);
@@ -314,6 +326,182 @@ export class Bot implements Combatant {
   }
   /** planting / defusing (Sabotasje): stay put, crouched; still looks and shoots */
   busy = false;
+
+  // ---------------------------------------------------------------- Update 47: the field
+  /** incapacitated: on the ground waiting for a medic (or bleeding out) */
+  downed = false;
+  /** being dragged: where the body goes this frame, and which way it lies */
+  dragTo: THREE.Vector3 | null = null;
+  dragYaw = 0;
+  /** a revive (optionally dragging the casualty into cover first), given by the game */
+  task: { kind: 'revive' | 'drag'; who: Combatant; dest: THREE.Vector3 | null; t: number; grabbed: boolean; started: boolean; drag: number } | null = null;
+  private taskAct: ActionKind | null = null;
+  private taskActT = 0;
+  /** armour plates in the carrier (hp each, 0 = broken) and spares in the pouches */
+  plates: number[] = [];
+  spare = 0;
+  private plateT = -1;
+  /** (Update 47) fighting right now: hit recently or an enemy in sight (no spawning on them) */
+  get inCombat() {
+    return this.lastDamageT < 4 || (!!this.target && this.lastSeenT < 1.5);
+  }
+  /** temperament: how this soldier fights (set by the game from its role / seed) */
+  personality: 'steady' | 'rusher' | 'cautious' | 'medic' | 'marksman' = 'steady';
+  private crawlT = 0;
+  private crawlDir = new THREE.Vector3();
+  private medicCallT = 1.5;
+  private downAt = 0;
+  /** went down: drop flat, crawl away from the shooter for a few seconds */
+  goDown() {
+    this.downed = true;
+    this.task = null;
+    this.taskAct = null;
+    this.reloadT = 0;
+    this.throwT = -1;
+    this.pending = null;
+    this.plateT = -1;
+    this.downAt = 0;
+    this.body.setStance('prone', true);
+    this.stanceCur = 'prone';
+    this.crouch = true;
+    this.crawlT = 2.5 + this.rng.range(0, 2.5);
+    const from = this.lastAttacker ? this.lastAttacker.position() : null;
+    if (from) this.crawlDir.copy(this.body.pos).sub(from).setY(0).normalize();
+    else this.crawlDir.set(Math.sin(this.yaw), 0, Math.cos(this.yaw));
+    this.medicCallT = 0.8 + this.rng.range(0, 1);
+    this.w.voice?.(this, 'down');
+  }
+  /** revived: back on the feet */
+  getUp() {
+    this.downed = false;
+    this.dragTo = null;
+    if (this.body.setStance('crouch')) this.stanceCur = 'crouch';
+    this.lastDamageT = 0;
+    this.suppression = 0.4;
+    this.w.voice?.(this, 'thanks');
+  }
+  private updateDowned(dt: number) {
+    this.lastDamageT += dt;
+    this.downAt += dt;
+    this.suppression = Math.max(0, this.suppression - dt * 0.3);
+    if (this.dragTo) {
+      // hauled by the vest: the body slides along behind the dragger
+      const p = this.sMove.copy(this.body.pos).lerp(this.dragTo, 1 - Math.exp(-dt * 12));
+      this.vel.copy(p).sub(this.body.pos).divideScalar(Math.max(dt, 1e-3));
+      this.body.teleport(p);
+      this.yaw = dampAngle(this.yaw, this.dragYaw, 9, dt);
+    } else {
+      this.crawlT -= dt;
+      const want = this.crawlT > 0 ? 0.42 : 0;
+      this.vel.x = damp(this.vel.x, this.crawlDir.x * want, 5, dt);
+      this.vel.z = damp(this.vel.z, this.crawlDir.z * want, 5, dt);
+      if (!this.body.grounded) this.vel.y -= 21 * dt;
+      else this.vel.y = Math.max(this.vel.y, -1.5);
+      const moved = this.body.move(this.sMove.copy(this.vel).multiplyScalar(dt), true);
+      this.moveSpeed = damp(this.moveSpeed, Math.hypot(moved.x, moved.z) / Math.max(dt, 1e-4), 10, dt);
+      // blocked: stop crawling
+      if (this.crawlT > 0 && this.moveSpeed < 0.05 && this.downAt > 0.6) this.crawlT = 0;
+      // head-first: the feet trail behind
+      if (this.crawlT > 0) this.yaw = dampAngle(this.yaw, Math.atan2(this.crawlDir.x, this.crawlDir.z), 4, dt);
+    }
+    // fell out of the world (the sea edge): gone
+    if (this.body.pos.y < -3 && !inTunnel(this.body.pos.x, this.body.pos.y, this.body.pos.z)) this.health = 0;
+    this.medicCallT -= dt;
+    if (this.medicCallT <= 0) {
+      this.medicCallT = 5 + this.rng.range(0, 4);
+      this.w.voice?.(this, 'medic');
+    }
+    this.aimYaw = this.yaw;
+    this.aimPitch = 0;
+    this.root.position.copy(this.body.pos);
+    this.root.rotation.y = this.yaw + Math.PI;
+    this.poseSoldier(dt);
+    this.updateHitbox();
+  }
+  /** a revive / drag in progress: fills the movement this frame (null = no task, or it ended) */
+  private runTask(dt: number, wish: THREE.Vector3): { speed: number; stance: 'stand' | 'crouch'; face: THREE.Vector3 | null; act: ActionKind | null; actT: number } | null {
+    const k = this.task!;
+    const who = k.who;
+    const end = () => {
+      if (k.grabbed && k.kind === 'drag') this.w.dragEnd?.(this, who);
+      this.task = null;
+      return null;
+    };
+    if (!who.alive || !who.downed || this.downed) return end();
+    k.t += dt;
+    if (k.t > 45) return end();
+    const wp = who.position();
+    // an enemy right on top of us before we have started: fight first
+    if (!k.started && this.target && this.lastSeenT < 0.3 && this.target.position().distanceTo(this.body.pos) < 9) return end();
+    wish.set(0, 0, 0);
+    const dist = Math.hypot(wp.x - this.body.pos.x, wp.z - this.body.pos.z);
+    // out of reach (a floor above / below): give up
+    if (Math.abs(wp.y - this.body.pos.y) > 3.5 && dist < 6) return end();
+    if (k.kind === 'drag') {
+      if (!k.grabbed) {
+        if (dist < 4) wish.set(wp.x - this.body.pos.x, 0, wp.z - this.body.pos.z).normalize();
+        else this.moveTo(wp, wish, 1.05);
+        if (dist < 1.2) {
+          k.grabbed = true;
+          this.w.voice?.(this, 'dragging');
+        }
+        return { speed: dist > 5 ? 6.0 : 3.2, stance: 'stand', face: null, act: null, actT: 0 };
+      }
+      k.started = true;
+      k.drag += dt;
+      const dest = k.dest ?? wp;
+      const to = this.sT1.copy(dest).sub(this.body.pos).setY(0);
+      const left = to.length();
+      if (left < 0.7 || k.drag > 8 || !k.dest) {
+        this.w.dragEnd?.(this, who);
+        k.kind = 'revive';
+        return { speed: 0, stance: 'crouch', face: wp, act: 'revive', actT: 0 };
+      }
+      wish.copy(to.normalize());
+      // the body is hauled along a metre in front of us, head towards us
+      const fromMe = this.sT2.copy(wp).sub(this.body.pos).setY(0);
+      if (fromMe.lengthSq() < 1e-4) fromMe.set(-wish.x, 0, -wish.z);
+      fromMe.normalize();
+      const at = this.sAim.copy(this.body.pos).addScaledVector(fromMe, 0.95);
+      at.y = this.body.pos.y;
+      this.w.drag?.(this, who, at, Math.atan2(-fromMe.x, -fromMe.z));
+      return { speed: 1.7, stance: 'stand', face: wp, act: 'drag', actT: 0 };
+    }
+    if (dist > 1.2 && !(k.started && dist < 1.8)) {
+      // the last few metres straight in (a nav path can end past them)
+      if (dist < 4 && this.w.physics.lineOfSight(this.sT1.copy(this.body.pos).setY(this.body.pos.y + 0.5), this.sT2.copy(wp).setY(wp.y + 0.4))) wish.set(wp.x - this.body.pos.x, 0, wp.z - this.body.pos.z).normalize();
+      else this.moveTo(wp, wish, 0.95);
+      return { speed: dist > 6 ? 6.0 : dist > 2.5 ? 2.8 : 1.4, stance: 'stand', face: dist < 3 ? wp : null, act: null, actT: 0 };
+    }
+    k.started = true;
+    const prog = this.w.reviveTick?.(this, who, dt) ?? 1;
+    if (prog >= 1) {
+      this.task = null;
+      return { speed: 0, stance: 'crouch', face: wp, act: null, actT: 0 };
+    }
+    return { speed: 0, stance: 'crouch', face: wp, act: 'revive', actT: prog };
+  }
+  /** a broken plate and a spare: swap it in when there is a moment */
+  private maybeReplate(dt: number, visible: boolean) {
+    if (this.plateT >= 0) {
+      this.plateT += dt / 1.55;
+      if (this.plateT >= 0.72 && this.plateT - dt / 1.55 < 0.72) {
+        const i = this.plates.findIndex((h) => h <= 0);
+        if (i >= 0 && this.spare > 0) {
+          this.spare--;
+          this.plates[i] = PLATE_HP * 0.7;
+          this.w.replated?.(this);
+        }
+      }
+      if (this.plateT >= 1) this.plateT = -1;
+      return;
+    }
+    if (this.spare <= 0 || this.reloadT > 0 || this.throwT >= 0 || this.task) return;
+    if (!this.plates.some((h) => h <= 0)) return;
+    if ((visible && this.lastDamageT < 2.5) || this.lastDamageT < 1.2) return;
+    this.plateT = 0;
+    if (this.rng.chance(0.5)) this.w.voice?.(this, 'plating');
+  }
   /** body armour (Sabotasje) */
   armor = 0;
   helmet = false;
@@ -351,10 +539,18 @@ export class Bot implements Combatant {
     this.repathT = 0;
     this.lastDamageT = 99;
     this.weapon.root.visible = true;
+    this.downed = false;
+    this.dragTo = null;
+    this.task = null;
+    this.taskAct = null;
+    this.plateT = -1;
   }
 
   kill(dir: THREE.Vector3) {
     this.alive = false;
+    this.downed = false;
+    this.dragTo = null;
+    this.task = null;
     this.state = 'dead';
     this.deathT = 0;
     this.body.setEnabled(false);
@@ -592,7 +788,8 @@ export class Bot implements Combatant {
             this.lastSeen.copy(c.position());
             this.lastSeenT = 0;
           }
-          const score = dist * (c === this.target ? 0.6 : 1) * (c === this.lastAttacker ? 0.5 : 1);
+          // (Update 47) a downed enemy is no threat: finish them only when nobody else is in sight
+          const score = dist * (c === this.target ? 0.6 : 1) * (c === this.lastAttacker ? 0.5 : 1) * (c.downed ? (this.personality === 'rusher' ? 3 : 8) : 1);
           if (score < bs) {
             bs = score;
             best = c;
@@ -647,8 +844,11 @@ export class Bot implements Combatant {
     if (t && this.lastSeenT < 3) {
       sc.engage = (visible ? 0.82 : this.lastSeenT > 1.2 ? 0.45 : 0.6) + 0.12 * hp - this.suppression * 0.3 - (reloading ? 0.25 : 0);
       const pressed = (1 - hp) * 0.7 + this.suppression * 0.6 + (reloading && visible ? 0.4 : 0) + (this.lastDamageT < 1.5 ? 0.2 : 0);
-      sc.cover = this.w.cover ? Math.min(0.97, 0.25 + pressed) : 0;
-      if (hp < 0.32 && this.nearbyEnemies() >= 2) sc.retreat = 0.9;
+      // (Update 47) temperament: rushers stay on the attack, the cautious take cover sooner
+      const tmp = this.personality === 'rusher' ? -0.18 : this.personality === 'cautious' ? 0.16 : this.personality === 'medic' ? 0.06 : 0;
+      sc.engage += this.personality === 'rusher' ? 0.12 : this.personality === 'cautious' ? -0.06 : 0;
+      sc.cover = this.w.cover ? Math.min(0.97, 0.25 + pressed + tmp) : 0;
+      if (hp < (this.personality === 'rusher' ? 0.2 : 0.32) && this.nearbyEnemies() >= 2) sc.retreat = 0.9;
       const flankers = this.w.flanking?.(this, t) ?? 0;
       if (!visible && flankers < 2 && tDist > 14 && tDist < 80 && this.def.cls !== 'Sniper') sc.flank = 0.62 + this.w.difficulty * 0.1 - flankers * 0.15 + (this.id % 3 === 0 ? 0.08 : 0);
     } else if (this.lastSeenT < 12) sc.search = 0.58 - this.lastSeenT * 0.02;
@@ -855,6 +1055,10 @@ export class Bot implements Combatant {
       this.updateDeath(dt);
       return;
     }
+    if (this.downed) {
+      this.updateDowned(dt);
+      return;
+    }
     if (this.heldT > 0) {
       this.heldT -= dt;
       this.body.pos.lerp(this.heldPos, 1 - Math.exp(-dt * 18));
@@ -919,7 +1123,7 @@ export class Bot implements Combatant {
       case 'engage': {
         const tp = this.target ? this.target.position() : this.lastSeen;
         const dist = tp.distanceTo(this.body.pos);
-        const ideal = this.def.cls === 'Shotgun' ? 8 : this.def.cls === 'SMG' ? 16 : this.def.cls === 'Sniper' ? 60 : this.def.cls === 'Marksman' ? 42 : 28;
+        const ideal = (this.def.cls === 'Shotgun' ? 8 : this.def.cls === 'SMG' ? 16 : this.def.cls === 'Sniper' ? 60 : this.def.cls === 'Marksman' ? 42 : 28) * (this.personality === 'rusher' ? 0.6 : this.personality === 'cautious' ? 1.3 : 1);
         this.strafeT -= dt;
         if (this.strafeT <= 0) {
           this.strafeT = this.rng.range(0.6, 1.6);
@@ -1099,9 +1303,24 @@ export class Bot implements Combatant {
         speed = 6.0;
       }
     }
+    // ---------------- field tasks (Update 47) ----------------
+    const tk = this.task ? this.runTask(dt, wish) : null;
+    this.taskAct = tk?.act ?? null;
+    this.taskActT = tk?.actT ?? 0;
+    if (tk) {
+      speed = tk.speed;
+      wantStance = tk.stance;
+      wantLean = 0;
+      suppressFire = false;
+    }
+    this.maybeReplate(dt, visible);
+    if (this.plateT >= 0) {
+      speed = Math.min(speed, 1.4);
+      if (wantStance === 'stand' && this.coverNode) wantStance = 'crouch';
+    }
     // ---------------- equipment ----------------
     this.nadeCd -= dt;
-    if (this.target && this.frags + this.tacticals > 0 && this.nadeCd <= 0 && this.lastSeenT > 0.7 && this.lastSeenT < 5 && (it === 'engage' || it === 'search')) {
+    if (!tk && this.target && this.frags + this.tacticals > 0 && this.nadeCd <= 0 && this.lastSeenT > 0.7 && this.lastSeenT < 5 && (it === 'engage' || it === 'search')) {
       const dd = this.lastSeen.distanceTo(this.body.pos);
       // clearing a room: flash / stun first, then the frag
       const indoor = this.w.nav.nearest(this.lastSeen, 4, false)?.indoor ?? false;
@@ -1145,7 +1364,8 @@ export class Bot implements Combatant {
     // heavy suppression keeps heads down
     if (this.suppression > 0.7 && wantStance === 'stand' && it !== 'evade' && speed < 4) wantStance = 'crouch';
     // local avoidance (computed for everyone by the game) and the unstuck side-step
-    if (speed > 0.5) wish.addScaledVector(this.avoid, 0.9);
+    if (tk?.act === 'revive') { /* kneeling over them: nobody shoves us off */ }
+    else if (speed > 0.5) wish.addScaledVector(this.avoid, tk ? 0.3 : 0.9);
     else if (this.avoid.lengthSq() > 0.3) {
       wish.copy(this.avoid);
       speed = 1.5;
@@ -1209,6 +1429,12 @@ export class Bot implements Combatant {
       const to = this.sT1.copy(this.heardAt).sub(this.body.pos);
       wantYaw = Math.atan2(-to.x, -to.z);
     }
+    if (tk?.face) {
+      const to = this.sT1.copy(tk.face).sub(this.body.pos);
+      wantYaw = Math.atan2(-to.x, -to.z);
+      wantPitch = -0.5;
+      aiming = false;
+    }
     let aimErr = 1;
     if (aiming) {
       const cur = this.aimCur;
@@ -1235,7 +1461,7 @@ export class Bot implements Combatant {
     if (this.reloadT > 0) {
       this.reloadT -= dt;
       if (this.reloadT <= 0) this.mag = this.def.mag;
-    } else if ((visible || suppressFire) && this.reactT <= 0 && (this.target || suppressFire)) {
+    } else if ((visible || suppressFire) && this.reactT <= 0 && (this.target || suppressFire) && !tk?.act && this.plateT < 0) {
       const dist = (this.target ? this.target.position() : this.lastSeen).distanceTo(this.body.pos);
       const effRange = this.def.cls === 'Shotgun' ? 26 : this.def.cls === 'SMG' ? 70 : 160;
       // fire when the sights are on: tolerance ~ the target's angular size, a bit looser for
@@ -1381,7 +1607,20 @@ export class Bot implements Combatant {
     a.lean = this.lean;
     a.ready = this.state === 'engage' || this.state === 'search' || (this.target !== null && this.lastSeenT < 3);
     a.calm = this.state === 'roam' && !this.target;
-    if (this.busyAct) {
+    a.downed = this.downed ? (this.dragTo ? 2 : 1) : 0;
+    if (this.plates.length) this.soldier.setPlateDamage(1 - this.plates[0] / (PLATE_HP * 0.7), 1 - (this.plates[1] ?? PLATE_HP * 0.7) / (PLATE_HP * 0.7));
+    else this.soldier.setPlateDamage(0, 0);
+    if (this.downed) {
+      a.action = 'none';
+      a.actionT = 0;
+      a.ready = false;
+    } else if (this.taskAct) {
+      a.action = this.taskAct;
+      a.actionT = this.taskActT;
+    } else if (this.plateT >= 0) {
+      a.action = 'plate';
+      a.actionT = this.plateT;
+    } else if (this.busyAct) {
       // planting / defusing (set by the Sabotasje mode each frame): kneel over the charge
       a.action = this.busyAct;
       a.actionT = this.busyT;

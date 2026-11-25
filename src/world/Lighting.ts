@@ -30,6 +30,17 @@ export class LightPool {
     this.anchors.push(a);
     return a;
   }
+  /** (Update 47) a temporary light (fire, thermite, glow stick) goes away */
+  remove(a: Anchor) {
+    const i = this.anchors.indexOf(a);
+    if (i >= 0) this.anchors.splice(i, 1);
+    for (let k = 0; k < this.assigned.length; k++) if (this.assigned[k] === a) this.assigned[k] = null;
+    this.timer = 0;
+  }
+  /** re-pick the nearest lights now (a new temporary light came on) */
+  refresh() {
+    this.timer = 0;
+  }
   /** a shot-out light goes dark now (not at the next 0.35 s reassignment) */
   kill(a: Anchor) {
     a.broken = true;

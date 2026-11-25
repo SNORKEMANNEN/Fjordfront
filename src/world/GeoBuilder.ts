@@ -30,6 +30,12 @@ export class GeoBuilder {
   private tagged: { tag: string; mat: string; idx: number }[] = [];
   ranges = new Map<string, { mesh: THREE.Mesh; start: number; count: number }[]>();
   destructibles: { kind: 'barrel' | 'fence'; m: THREE.Matrix4; data: Record<string, unknown> }[] = [];
+  /**
+   * (Update 47) wooden wall sections that a charge can blow out: each is tagged (its merged
+   * vertex range can be collapsed) and keeps its collider, its centre / normal / size in the world
+   */
+  breachables: { tag: string; c: THREE.Vector3; n: THREE.Vector3; along: THREE.Vector3; w: number; h: number; t: number; colliders: unknown[] }[] = [];
+  private static wallN = 0;
   destructible(kind: 'barrel' | 'fence', local: THREE.Matrix4, data: Record<string, unknown>) {
     this.destructibles.push({ kind, m: this.m.clone().multiply(local), data });
   }
@@ -143,10 +149,20 @@ export class GeoBuilder {
       }
     }
     const cuts = [...xs].sort((a, b) => a - b);
+    const breach = surface === 'wood' && t < 0.4 && !this.tag;
     const seg = (a: number, b: number, ya: number, yb: number) => {
       if (b - a < 0.01 || yb - ya < 0.01) return;
-      this.box(mat, a, ya, z - t / 2, b, yb, z + t / 2, surface, extra);
+      const id = breach && b - a <= 4.2 && yb - ya > 0.5 ? `wall${GeoBuilder.wallN++}` : null;
+      if (id) this.tag = id;
+      const col = this.box(mat, a, ya, z - t / 2, b, yb, z + t / 2, surface, extra);
       if (inner) this.box(inner, a, ya, z - t / 2 - 0.005, b, yb, z - t / 2 + 0.001);
+      if (id) {
+        this.tag = null;
+        const c = new THREE.Vector3((a + b) / 2, (ya + yb) / 2, z).applyMatrix4(this.m);
+        const n = new THREE.Vector3(0, 0, 1).transformDirection(this.m);
+        const along = new THREE.Vector3(1, 0, 0).transformDirection(this.m);
+        this.breachables.push({ tag: id, c, n, along, w: b - a, h: yb - ya, t, colliders: col ? [col] : [] });
+      }
     };
     // merge adjacent strips with identical solid spans to keep collider count low
     let runStart = cuts[0];

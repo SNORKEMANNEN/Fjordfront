@@ -72,20 +72,25 @@ export interface HUDState {
   overheated?: boolean;
   braced?: boolean;
   obstructed?: boolean;
+  /** Update 47: armour plates (each 0..1) and spares carried */
+  plates?: { plates: number[]; spare: number };
 }
 /** something on the compass ribbon: bearing in degrees (0 = north) */
 export interface CompassMark { bearing: number; kind: 'flag' | 'ping' | 'wp' | 'foe'; label?: string; rel?: 'f' | 'e' | 'n' }
 /** scoreboard row (match snapshot + what the scoreboard shows) */
 export interface ScoreRow extends CombatantState { role?: string; assists?: number; captures?: number; bot?: boolean }
 
-export type TacticalId = 'flash' | 'smoke' | 'stun' | 'stim' | 'snapshot' | 'decoy';
-export type LethalId = 'frag' | 'tknife' | 'sticky' | 'claymore' | 'c4' | 'molotov';
+export type TacticalId = 'flash' | 'smoke' | 'stun' | 'stim' | 'snapshot' | 'decoy' | 'sensor' | 'glow' | 'gas' | 'wedge' | 'breach';
+export type LethalId = 'frag' | 'tknife' | 'sticky' | 'claymore' | 'c4' | 'molotov' | 'thermite' | 'cluster';
 export const LETHALS: { id: LethalId; name: string; count: number; desc: string }[] = [
   { id: 'frag', name: 'FRAG GRENADE', count: 2, desc: 'Cookable (hold G). 3.5 s fuse.' },
   { id: 'sticky', name: 'STICKY GRENADE', count: 2, desc: 'Sticks to walls, floors and people. Arms on throw, 2.3 s fuse — no cooking.' },
   { id: 'claymore', name: 'CLAYMORE', count: 1, desc: 'Hold G to ready it, release to set it down. Tripwire lasers fire it at anyone crossing in front.' },
   { id: 'c4', name: 'C4', count: 2, desc: 'Throw it (sticks to surfaces), detonate whenever you like: double-tap F, or G with none left.' },
   { id: 'tknife', name: 'THROWING KNIFE', count: 2, desc: 'One-hit kill. Fast, flat throw — walk over it to pick it back up.' },
+  { id: 'thermite', name: 'THERMITE', count: 2, desc: 'Sticks to anything (people too) and burns white-hot for 5 s. Cuts door wedges and breachable walls.' },
+  { id: 'molotov', name: 'FIRE BOTTLE', count: 2, desc: 'Bursts into a 3.4 m pool of burning fuel for 7 s. Smoke puts it out.' },
+  { id: 'cluster', name: 'CLUSTER GRENADE', count: 1, desc: 'Pops and scatters six bomblets that go off one after another. Clears an area.' },
 ];
 export const TACTICALS: { id: TacticalId; name: string; count: number; desc: string }[] = [
   { id: 'flash', name: 'FLASHBANG', count: 2, desc: 'Blinds and deafens anyone facing the blast. Clear a room before you push it.' },
@@ -94,6 +99,11 @@ export const TACTICALS: { id: TacticalId; name: string; count: number; desc: str
   { id: 'stim', name: 'STIM', count: 1, desc: 'Auto-injector: heals you fast and boosts movement speed for 10 seconds.' },
   { id: 'snapshot', name: 'SNAPSHOT GRENADE', count: 1, desc: 'A scan pulse that outlines every enemy within 22 m through walls for a few seconds.' },
   { id: 'decoy', name: 'DECOY GRENADE', count: 2, desc: 'Plays fake gunfire for 12 s and puts fake contacts on the enemy minimap.' },
+  { id: 'sensor', name: 'MOTION SENSOR', count: 2, desc: 'A dart that sticks in walls and pings anything moving within 16 m for 30 s.' },
+  { id: 'glow', name: 'GLOW STICKS', count: 3, desc: 'Snap and throw: a coloured light for 90 s. Mark a room, light a stairwell.' },
+  { id: 'gas', name: 'GAS GRENADE', count: 1, desc: 'A CS cloud (6 m, 14 s): coughing, streaming eyes, shaking aim, light damage.' },
+  { id: 'wedge', name: 'DOOR WEDGE', count: 2, desc: 'Jam the closed door you are facing. Pushes only rattle it; a blast or a hard kick breaks it.' },
+  { id: 'breach', name: 'BREACHING CHARGE', count: 2, desc: 'Slap it on a door or a weak wall: it blows the way in and stuns whoever is behind it.' },
 ];
 /** calibre stamped on the workbench callouts */
 export const CALIBRE: Record<string, string> = {
@@ -155,6 +165,17 @@ export class UI {
   primary: WeaponId = ((localStorage.getItem('fjordfront.primary') || '').replace(/^mpx$/, 'mp7') as WeaponId) || 'k416';
   secondary: WeaponId = (localStorage.getItem('fjordfront.secondary') as WeaponId) || 'p80';
   tactical: TacticalId = (localStorage.getItem('fjordfront.tactical') as TacticalId) || 'flash';
+  /** (Update 47) field upgrade and role (kept across loadouts) */
+  field: string = localStorage.getItem('fjordfront.field') || 'trophy';
+  role: string = localStorage.getItem('fjordfront.role') || 'rifleman';
+  setField(id: string) {
+    this.field = id;
+    try { localStorage.setItem('fjordfront.field', id); } catch { /* private mode */ }
+  }
+  setRole(id: string) {
+    this.role = id;
+    try { localStorage.setItem('fjordfront.role', id); } catch { /* private mode */ }
+  }
   lethal: LethalId = (() => {
     try {
       const v = localStorage.getItem('fjordfront.lethal') as LethalId;
@@ -1010,13 +1031,14 @@ export class UI {
       <div class="flagmarks"></div>
       <div class="streaks ctx"></div>
       <div class="nades ctx"></div>
-      <div class="health ctx gone"><span class="hl">HP</span><div class="hb"><i class="hf"></i></div><span class="hv">100</span></div>
+      <div class="health ctx gone"><span class="hl">HP</span><div class="hb"><i class="hf"></i></div><span class="hv">100</span><div class="plates"><i class="pl"><b></b></i><i class="pl"><b></b></i><span class="psp"><em>O</em>×3</span></div></div>
+      <div class="downedui hidden"><div class="dvig"></div><div class="dcard"><svg class="dring" viewBox="0 0 120 120"><circle class="bg" cx="60" cy="60" r="52"/><circle class="fg" cx="60" cy="60" r="52"/><circle class="rv" cx="60" cy="60" r="44"/></svg><div class="dsec">28</div><div class="dtitle">NEDE · DOWNED</div><div class="dsub"></div><div class="dgive"><span>HOLD <kbd>F</kbd> GIVE UP</span><b><i></i></b></div></div></div>
       <div class="ammo ctx"><div class="wn"></div><div class="fm"></div><div class="nums"><b class="mag">30</b><span class="res">/ 120</span></div><div class="pips"></div><div class="heat"><span>BARREL</span><b><i class="hfill"></i></b></div></div>
       <div class="brace"><i></i><span>BRACED</span></div>
       <div class="fps hidden"></div>
       <div class="scope hidden"><div class="ring"></div></div>`;
     const q = (s: string) => e.querySelector(s) as HTMLElement;
-    for (const k of ['s0', 's1', 'p0', 'p1', 'clock', 'strip', 'marks', 'brg', 'loc', 'crosshair', 'hitmarker', 'hf', 'hv', 'mag', 'res', 'wn', 'fm', 'pips', 'prompt', 'fps', 'scope', 'health', 'ammo', 'streaks', 'nades', 'heat', 'hfill', 'brace']) this.els[k] = q('.' + k);
+    for (const k of ['s0', 's1', 'p0', 'p1', 'clock', 'strip', 'marks', 'brg', 'loc', 'crosshair', 'hitmarker', 'hf', 'hv', 'mag', 'res', 'wn', 'fm', 'pips', 'prompt', 'fps', 'scope', 'health', 'ammo', 'streaks', 'nades', 'heat', 'hfill', 'brace', 'plates', 'psp', 'downedui']) this.els[k] = q('.' + k);
     this.feedEl = q('.feed');
     this.notifyEl = q('.notify');
     this.dmgEl = q('.dmg');
@@ -1093,7 +1115,21 @@ export class UI {
     if (s.health < c.lastHp - 0.5) c.hurtT = 0;
     c.lastHp = s.health;
     c.hurtT += dt;
-    setCls(e.health, `health ctx ${s.health >= 99.5 && c.hurtT > 3 ? 'gone' : ''}`);
+    // (Update 47) armour plates: a segment per plate under the bar, spares by the key
+    const pl = s.plates;
+    const platesFull = !pl || !pl.plates.length || pl.plates.every((k) => k >= 0.999);
+    if (pl && pl.plates.length) {
+      const segs = e.plates.querySelectorAll('.pl') as NodeListOf<HTMLElement>;
+      pl.plates.forEach((k, i) => {
+        if (!segs[i]) return;
+        setStyle(segs[i].firstElementChild as HTMLElement, 'width', `${(k * 100).toFixed(0)}%`);
+        segs[i].classList.toggle('broken', k <= 0);
+      });
+      setHTML(e.psp, `<em>O</em>×${pl.spare}`);
+      e.plates.classList.toggle('canfix', pl.spare > 0 && !platesFull);
+    }
+    e.plates.classList.toggle('hidden', !pl || !pl.plates.length);
+    setCls(e.health, `health ctx ${s.health >= 99.5 && c.hurtT > 3 && platesFull ? 'gone' : ''}`);
     setStyle(e.hf, 'width', `${s.health.toFixed(0)}%`);
     e.hf.classList.toggle('low', s.health < 35);
     setText(e.hv, String(Math.ceil(s.health)));
@@ -1179,7 +1215,7 @@ export class UI {
 
   /** Hitmarker shapes: ticks (normal), short thin ticks (limb / armour), gold ticks + diamond (head),
    *  red X with an expanding ring (kill), grey (through cover). Scales with damage. */
-  hitmarker(kill: boolean, head: boolean, damage = 30, kind: '' | 'limb' | 'through' | 'low' = '') {
+  hitmarker(kill: boolean, head: boolean, damage = 30, kind: '' | 'limb' | 'through' | 'low' | 'plate' | 'plateBreak' = '') {
     const tpl = this.els.hitmarker;
     const el = tpl.cloneNode(true) as HTMLElement;
     el.className = `hitmarker live ${kill ? 'kill' : ''} ${head ? 'head' : ''} ${kind}`;
@@ -1358,9 +1394,9 @@ export class UI {
 
   // ---------------------------------------------------------------- equipment row
   /** lethal / tactical: a ring that empties as they are used; field upgrade: a charge ring */
-  updateNades(frags: number, cooking: number, tac: TacticalId = this.tactical, tacN = 0, lethal: LethalId = this.lethal, field = 0, c4Out = 0) {
+  updateNades(frags: number, cooking: number, tac: TacticalId = this.tactical, tacN = 0, lethal: LethalId = this.lethal, field = 0, c4Out = 0, fieldId = this.field) {
     const el = this.els.nades;
-    const key = `${frags}|${cooking > 0 ? Math.ceil(cooking * 10) : 0}|${tac}|${tacN}|${lethal}|${Math.floor(field * 40)}|${c4Out}`;
+    const key = `${frags}|${cooking > 0 ? Math.ceil(cooking * 10) : 0}|${tac}|${tacN}|${lethal}|${Math.floor(field * 40)}|${c4Out}|${fieldId}`;
     if (el.dataset.k === key) return;
     if (el.dataset.k && el.dataset.k.split('|').slice(0, 5).join() !== key.split('|').slice(0, 5).join()) this.ctx.eqT = 0;
     if (field >= 1 && !(el.dataset.k ?? '').includes('|40|')) this.ctx.eqT = 0;
@@ -1370,7 +1406,7 @@ export class UI {
     const lmax = LETHALS.find((l) => l.id === lethal)?.count ?? 2, tmax = TACTICALS.find((t) => t.id === tac)?.count ?? 1;
     const slot = (name: string, n: number, max: number, k: string) => `<div class="eqs ${n ? '' : 'empty'}">${ring(n / max)}${icon(name)}<b>${n}</b><em>${k}</em></div>`;
     const ready = field >= 1;
-    const fu = `<div class="eqs fu ${ready ? 'ready' : ''}">${ring(field)}${icon('trophy')}<b>${ready ? '✓' : Math.floor(field * 100)}</b><em>H</em></div>`;
+    const fu = `<div class="eqs fu ${ready ? 'ready' : ''}">${ring(field)}${icon(fieldId)}<b>${ready ? '✓' : Math.floor(field * 100)}</b><em>H</em></div>`;
     const det = c4Out > 0 ? `<div class="det">${frags > 0 ? '[F][F]' : '[G]'} DETONATE · ${c4Out}</div>` : '';
     el.innerHTML = slot(lethal, frags, lmax, 'G') + slot(tac, tacN, tmax, 'T') + fu + det + (cooking > 0 ? `<div class="cook"><i style="width:${(cooking / 3.5) * 100}%"></i><b>${cooking.toFixed(1)}</b></div>` : '');
   }
@@ -1472,6 +1508,62 @@ export class UI {
     el.classList.toggle('on', !!text);
   }
 
+  /** (Update 47) the spawn picker on the death screen (null hides it) */
+  private spawnEl: HTMLElement | null = null;
+  private spawnKey = '';
+  spawnPicker(opts: { kind: string; label: string; sub: string; ok: boolean }[] | null, sel: number, onPick?: (i: number) => void) {
+    if (!opts) {
+      this.spawnEl?.classList.add('hidden');
+      this.spawnKey = '';
+      return;
+    }
+    if (!this.spawnEl) {
+      this.spawnEl = h('div', 'spawnpick hidden');
+      this.root.appendChild(this.spawnEl);
+    }
+    const key = opts.map((o) => `${o.label}${o.sub}${o.ok}`).join('|') + '#' + sel;
+    this.spawnEl.classList.remove('hidden');
+    if (key === this.spawnKey) return;
+    this.spawnKey = key;
+    const ic: Record<string, string> = { base: 'anchor', squad: 'squad', rally: 'objective', beacon: 'beacon' };
+    this.spawnEl.innerHTML = `<div class="sph"><span>DEPLOY · SPAWN POINT</span><em><kbd>Q</kbd><kbd>E</kbd></em></div><div class="spl">${opts.map((o, i) => `<button class="spo ${o.kind} ${i === sel ? 'on' : ''} ${o.ok ? '' : 'off'}" data-i="${i}"><span class="spi">${icon(ic[o.kind] ?? 'anchor')}</span><b>${esc(o.label)}</b><small>${esc(o.sub)}</small></button>`).join('')}</div>`;
+    this.spawnEl.querySelectorAll('.spo').forEach((b) => b.addEventListener('click', () => onPick?.(+(b as HTMLElement).dataset.i!)));
+  }
+
+  /** (Update 47) CS gas: the edges smear yellow-green, everything blurs and swims */
+  private gasEl: HTMLElement | null = null;
+  gasFx(k: number) {
+    if (k < 0.01) {
+      if (this.gasEl) this.gasEl.style.opacity = '0';
+      return;
+    }
+    if (!this.gasEl) {
+      this.gasEl = h('div', 'gasfx');
+      this.hud.appendChild(this.gasEl);
+    }
+    this.gasEl.style.opacity = Math.min(1, k).toFixed(2);
+  }
+
+  /** (Update 47) a hold-progress ring under the crosshair (revive, plant, beacon...): null hides it */
+  private ringEl: HTMLElement | null = null;
+  actionRing(k: number | null, label = '', cls = '') {
+    if (k === null) {
+      this.ringEl?.classList.remove('on');
+      return;
+    }
+    if (!this.ringEl) {
+      this.ringEl = h('div', 'aring', `<svg viewBox="0 0 64 64"><circle class="bg" cx="32" cy="32" r="27"/><circle class="fg" cx="32" cy="32" r="27"/></svg><span></span>`);
+      this.hud.appendChild(this.ringEl);
+    }
+    const el = this.ringEl;
+    el.className = `aring on ${cls}`;
+    const C = 2 * Math.PI * 27;
+    const fg = el.querySelector('.fg') as SVGCircleElement;
+    fg.style.strokeDasharray = `${C}`;
+    fg.style.strokeDashoffset = `${(C * (1 - Math.max(0, Math.min(1, k)))).toFixed(1)}`;
+    setText(el.querySelector('span') as HTMLElement, label);
+  }
+
   /** Grenade danger icons around the crosshair, pointing at nearby live grenades. */
   grenadeWarn(angles: number[]) {
     let el = this.hud.querySelector('.nadewarn') as HTMLElement | null;
@@ -1531,6 +1623,47 @@ export class UI {
     setTimeout(() => n.remove(), 2400);
   }
 
+  // ---------------------------------------------------------------- downed (Update 47)
+  /** show / hide the downed overlay */
+  downed(v: boolean) {
+    const el = this.els.downedui;
+    if (!el) return;
+    el.classList.toggle('hidden', !v);
+    this.hud.classList.toggle('isdown', v);
+    if (v) {
+      el.classList.remove('rise');
+      void el.offsetWidth;
+      el.classList.add('rise');
+    }
+  }
+  /** bleed-out ring, revive ring, who is coming, give-up bar */
+  downedState(st: { bleed: number; secs: number; prog: number; helper: string; dist: number; giveUp: number; dragged: boolean }) {
+    const el = this.els.downedui;
+    if (!el) return;
+    const C = 2 * Math.PI * 52, C2 = 2 * Math.PI * 44;
+    const fg = el.querySelector('.fg') as SVGCircleElement, rv = el.querySelector('.rv') as SVGCircleElement;
+    fg.style.strokeDasharray = `${C}`;
+    fg.style.strokeDashoffset = `${(C * (1 - st.bleed)).toFixed(1)}`;
+    rv.style.strokeDasharray = `${C2}`;
+    rv.style.strokeDashoffset = `${(C2 * (1 - st.prog)).toFixed(1)}`;
+    el.classList.toggle('critical', st.bleed < 0.3);
+    el.classList.toggle('reviving', st.prog > 0.01);
+    setText(el.querySelector('.dsec') as HTMLElement, st.prog > 0.01 ? `${Math.round(st.prog * 100)}%` : String(st.secs));
+    const sub = st.prog > 0.01 ? `<b class="ok">${esc(st.helper)}</b> IS REVIVING YOU` : st.dragged ? `<b class="ok">${esc(st.helper || 'A TEAMMATE')}</b> IS DRAGGING YOU TO COVER` : st.helper ? `<b class="ok">${esc(st.helper)}</b> IS COMING · ${Math.round(st.dist)} M` : 'CALLING FOR A MEDIC…';
+    setHTML(el.querySelector('.dsub') as HTMLElement, sub);
+    setStyle(el.querySelector('.dgive i') as HTMLElement, 'width', `${(st.giveUp * 100).toFixed(0)}%`);
+  }
+  /** a plate cracked / broke / went in: the plate strip reacts */
+  plateFlash(broke: boolean, added = false) {
+    const el = this.els.plates;
+    if (!el) return;
+    const cls = added ? 'added' : broke ? 'brk' : 'hit';
+    el.classList.remove('added', 'brk', 'hit');
+    void el.offsetWidth;
+    el.classList.add(cls);
+    this.els.health?.classList.remove('gone');
+  }
+
   // ---------------------------------------------------------------- kill feed
   /** what goes between the names: the weapon's silhouette, or a glyph for knives / explosions / fire */
   private feedWeapon(w: string) {
@@ -1555,7 +1688,11 @@ export class UI {
     }
     this.lastFeedKey = key;
     this.feedEl.innerHTML = feed
-      .map((f) => `<div class="k ${f.killer === this.meName || f.victim === this.meName ? 'mine' : ''}" data-t="${f.t}"><span class="${f.killerTeam === 0 ? 'blue' : 'red'}">${esc(f.killer)}</span>${this.feedWeapon(f.weapon)}${f.headshot ? icon('headshot', 'hs') : ''}${f.wallbang ? icon('wallbang') : ''}<span class="${f.victimTeam === 0 ? 'blue' : 'red'}">${esc(f.victim)}</span></div>`)
+      .map((f) => f.kind === 'revive'
+        ? `<div class="k revive ${f.killer === this.meName || f.victim === this.meName ? 'mine' : ''}" data-t="${f.t}"><span class="${f.killerTeam === 0 ? 'blue' : 'red'}">${esc(f.killer)}</span><i class="fk">✚ REVIVED</i><span class="${f.victimTeam === 0 ? 'blue' : 'red'}">${esc(f.victim)}</span></div>`
+        : f.kind === 'down'
+          ? `<div class="k down ${f.killer === this.meName || f.victim === this.meName ? 'mine' : ''}" data-t="${f.t}"><span class="${f.killerTeam === 0 ? 'blue' : 'red'}">${esc(f.killer)}</span>${this.feedWeapon(f.weapon)}<i class="fk">▼ DOWNED</i><span class="${f.victimTeam === 0 ? 'blue' : 'red'}">${esc(f.victim)}</span></div>`
+          : `<div class="k ${f.killer === this.meName || f.victim === this.meName ? 'mine' : ''}" data-t="${f.t}"><span class="${f.killerTeam === 0 ? 'blue' : 'red'}">${esc(f.killer)}</span>${this.feedWeapon(f.weapon)}${f.headshot ? icon('headshot', 'hs') : ''}${f.wallbang ? icon('wallbang') : ''}<span class="${f.victimTeam === 0 ? 'blue' : 'red'}">${esc(f.victim)}</span></div>`)
       .join('');
   }
 

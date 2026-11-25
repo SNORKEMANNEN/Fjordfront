@@ -16,7 +16,9 @@ import { REST } from './SoldierRig';
  * swings a downward limb backwards; about +Z tilts +Y towards the soldier's right.
  */
 
-export type ActionKind = 'none' | 'reload' | 'throw' | 'melee' | 'knife' | 'switch' | 'bolt' | 'plant' | 'throwL' | 'stim' | 'detonate' | 'place' | 'sabPlant' | 'sabDefuse';
+export type ActionKind = 'none' | 'reload' | 'throw' | 'melee' | 'knife' | 'switch' | 'bolt' | 'plant' | 'throwL' | 'stim' | 'detonate' | 'place' | 'sabPlant' | 'sabDefuse'
+  /** Update 47: kneeling over a downed teammate, dragging one by the vest, a plate into the carrier */
+  | 'revive' | 'drag' | 'plate';
 /**
  * What is in the hand (Update 31): shown on bots and online players so an incoming grenade reads
  * before it leaves the hand. +32 = a cooking frag (fuse burning).
@@ -58,12 +60,14 @@ export interface AnimState {
   calm: boolean;
   /** held equipment code (HELD_ITEMS index, +32 cooking) */
   item: number;
+  /** Update 47: 0 up, 1 downed (on the back, propped on the elbows), 2 being dragged */
+  downed: number;
 }
 
 export function newAnimState(): AnimState {
   return {
     vel: new THREE.Vector3(), yaw: 0, aimYaw: 0, aimPitch: 0, stance: 0, sprint: false, tactical: false, slide: false, dive: false,
-    ladder: false, mantle: -1, air: false, lean: 0, ready: false, action: 'none', actionT: 0, reloadStyle: 'mag', pistol: false, calm: false, item: 0,
+    ladder: false, mantle: -1, air: false, lean: 0, ready: false, action: 'none', actionT: 0, reloadStyle: 'mag', pistol: false, calm: false, item: 0, downed: 0,
   };
 }
 
@@ -114,7 +118,10 @@ export class SoldierAnimator {
   phase = 0;
   /** running clock (tremble / flinch oscillations) */
   time = 0;
-  private sw = { upright: 1, prone: 0, slide: 0, dive: 0, ladder: 0 };
+  private sw = { upright: 1, prone: 0, slide: 0, dive: 0, ladder: 0, downed: 0 };
+  /** kneel depth for the hands-on-the-ground actions (revive) */
+  private kneelS = 0;
+  private dragS = 0;
   private crouch = 0;
   private lean = 0;
   private speedS = 0;
@@ -170,12 +177,15 @@ export class SoldierAnimator {
     this.tacS = damp(this.tacS, s.tactical ? 1 : 0, 6, dt);
     this.readyS = damp(this.readyS, s.ready ? 1 : 0, 8, dt);
     this.airS = damp(this.airS, s.air && !s.ladder ? 1 : 0, 10, dt);
-    const want = { upright: 1, prone: 0, slide: 0, dive: 0, ladder: 0 };
-    if (s.ladder) (want.upright = 0), (want.ladder = 1);
+    const want = { upright: 1, prone: 0, slide: 0, dive: 0, ladder: 0, downed: 0 };
+    this.kneelS = damp(this.kneelS, s.action === 'revive' ? 1 : 0, 6, dt);
+    this.dragS = damp(this.dragS, s.action === 'drag' ? 1 : 0, 6, dt);
+    if (s.downed > 0) (want.upright = 0), (want.downed = 1);
+    else if (s.ladder) (want.upright = 0), (want.ladder = 1);
     else if (s.dive) (want.upright = 0), (want.dive = 1);
     else if (s.slide) (want.upright = 0), (want.slide = 1);
     else if (s.stance === 2) (want.upright = 0), (want.prone = 1);
-    for (const k of Object.keys(want) as (keyof typeof want)[]) this.sw[k] = damp(this.sw[k], want[k], k === 'slide' || k === 'dive' ? 14 : 7, dt);
+    for (const k of Object.keys(want) as (keyof typeof want)[]) this.sw[k] = damp(this.sw[k], want[k], k === 'slide' || k === 'dive' ? 14 : k === 'downed' ? 4.5 : 7, dt);
     // turn in place: a short shuffle when the body rotates while standing still
     const dYaw = wrap(s.yaw - this.lastYaw);
     this.lastYaw = s.yaw;
@@ -239,7 +249,7 @@ export class SoldierAnimator {
       for (let i = 0; i < out.q.length; i++) out.q[i].slerp(p.q[i], k);
       out.hip.lerp(p.hip, k);
     };
-    const tot = w.upright + w.prone + w.slide + w.dive + w.ladder || 1;
+    const tot = w.upright + w.prone + w.slide + w.dive + w.ladder + w.downed || 1;
     // sequential slerp with renormalised weights
     let acc = w.upright / tot;
     const mix = (wk: number, fill: (p: Pose) => void) => {
@@ -252,11 +262,12 @@ export class SoldierAnimator {
     mix(w.slide, (p) => this.slidePose(s, p));
     mix(w.dive, (p) => this.divePose(s, p));
     mix(w.ladder, (p) => this.ladderPose(s, p, dt));
+    mix(w.downed, (p) => this.downedPose(s, p));
     // ---- write
     const b = this.bones;
     b.Hips.position.copy(out.hip);
     for (let i = 0; i < BODY.length; i++) b[BODY[i]].quaternion.copy(out.q[i]);
-    return { run, sprint: this.sprintS, tac: this.tacS, crouch: this.crouch, prone: w.prone, slide: w.slide, dive: w.dive, ladder: w.ladder, ready: this.readyS, kick: this.kick, fidget: f.kind ? { kind: f.kind, t: f.t / f.dur } : null, ladderPh: this.ladderPh, lean: this.lean };
+    return { run, sprint: this.sprintS, tac: this.tacS, crouch: this.crouch, prone: w.prone, slide: w.slide, dive: w.dive, ladder: w.ladder, downed: w.downed, kneel: this.kneelS, drag: this.dragS, ready: this.readyS, kick: this.kick, fidget: f.kind ? { kind: f.kind, t: f.t / f.dur } : null, ladderPh: this.ladderPh, lean: this.lean };
   }
 
   /** standing / crouching locomotion with leg IK */
@@ -281,9 +292,11 @@ export class SoldierAnimator {
     const ph = this.phase * Math.PI * 2;
     const bob = (run > 0.5 ? -Math.abs(Math.cos(ph)) * 0.05 + 0.025 : Math.abs(Math.cos(ph)) * 0.025 - 0.02) * moving;
     const sway = Math.sin(ph) * 0.018 * moving * (1 - run * 0.5);
-    const hipY = REST.Hips.y * this.scaleY - 0.38 * c - 0.03 * run * moving + bob - this.airS * 0.06;
-    p.reset(_v.set(sway, hipY, -0.06 * c));
-    const fwdLean = (0.06 * run + 0.22 * this.sprintS + 0.28 * c) * (back ? -0.3 : 1) * moving + 0.18 * c * (1 - moving);
+    // (Update 47) kneeling low over a casualty, or bent forward hauling one by the vest
+    const kn = this.kneelS, dg = this.dragS;
+    const hipY = REST.Hips.y * this.scaleY - 0.38 * c - 0.03 * run * moving + bob - this.airS * 0.06 - 0.14 * kn - 0.12 * dg;
+    p.reset(_v.set(sway, hipY, -0.06 * c - 0.05 * kn));
+    const fwdLean = (0.06 * run + 0.22 * this.sprintS + 0.28 * c) * (back ? -0.3 : 1) * moving + 0.18 * c * (1 - moving) + 0.55 * kn + 0.42 * dg;
     qe(fwdLean * 0.4 + 0.12 * c, hy, Math.sin(ph) * 0.03 * moving, p.q[BI.Hips]);
     // spine: undo the hip yaw (aim stays), lean forward with speed, counter-twist of the stride
     const twist = Math.sin(ph) * 0.07 * moving * (1 + run);
@@ -408,6 +421,38 @@ export class SoldierAnimator {
     void s;
   }
 
+  /**
+   * Downed (Update 47): on the back, the torso propped up on the elbows, one knee drawn up,
+   * breathing hard; crawling, the heels dig in and push the body along head-first. Dragged: flatter,
+   * the head lolling back and the heels trailing.
+   */
+  private downedPose(s: AnimState, p: Pose) {
+    const t = this.time;
+    const dragged = s.downed > 1.5;
+    const crawl = dragged ? 0 : sm(this.speedS / 0.3);
+    const ph = this.phase * Math.PI * 2;
+    const breathe = Math.sin(t * 3.1) * 0.035 + Math.sin(t * 1.3) * 0.015;
+    const writhe = Math.sin(t * 0.7) * 0.06 + Math.sin(t * 1.9) * 0.025;
+    p.reset(_v.set(0, 0.13, 0));
+    const prop = dragged ? 0.2 : 0.3 + breathe - crawl * 0.08;
+    qe(-Math.PI / 2 + prop, 0, writhe * (dragged ? 0.4 : 1), p.q[BI.Hips]);
+    qe(dragged ? 0.05 : 0.22 + breathe, writhe * 0.6, 0, p.q[BI.Spine]);
+    qe(dragged ? 0.04 : 0.14 + breathe * 0.6, -writhe * 0.4, 0, p.q[BI.Spine1]);
+    qe(dragged ? 0.02 : 0.1, 0, 0, p.q[BI.Spine2]);
+    // the head looks down the body (at the wound, the way out); dragged it lolls back
+    qe(dragged ? -0.45 + Math.sin(t * 2.2) * 0.08 : 0.42 + Math.sin(t * 0.9) * 0.1, dragged ? Math.sin(t * 1.4) * 0.25 : Math.sin(t * 0.55) * 0.5, 0, p.q[BI.Neck]);
+    qe(dragged ? -0.2 : 0.25, 0, 0, p.q[BI.Head]);
+    for (const side of [1, -1]) {
+      const L = side > 0 ? 'Left' : 'Right';
+      // heel push: the knee draws up, the heel digs in and the leg straightens, alternating
+      const k = crawl * Math.max(0, Math.sin(ph + (side > 0 ? 0 : Math.PI)));
+      const bent = !dragged && side > 0 ? 0.75 + Math.sin(t * 0.8) * 0.08 : 0.1;
+      qe(-prop - bent - k * 0.9, 0, (0.12 + 0.05 * k) * side, p.q[BI[`${L}UpLeg` as BodyBone]]);
+      qe(bent * 1.6 + k * 1.5 + (dragged ? 0.05 : 0.08), 0, 0, p.q[BI[`${L}Leg` as BodyBone]]);
+      qe(dragged ? 0.6 : -0.15 - k * 0.2, 0, 0, p.q[BI[`${L}Foot` as BodyBone]]);
+    }
+  }
+
   private divePose(s: AnimState, p: Pose) {
     p.reset(_v.set(0, 0.7, 0));
     qe(Math.PI / 2 - 0.25, 0, 0, p.q[BI.Hips]);
@@ -505,6 +550,64 @@ export class SoldierAnimator {
     // ---- actions
     out.magOut = false;
     out.flinch = 0;
+    // (Update 47) downed: the gun hangs on its sling; the right hand presses on the wound, the
+    // left elbow props the body up. Dragged: both arms trail loose above the head
+    if (k.downed > 0.02) {
+      const d = k.downed;
+      out.slung = Math.max(out.slung, d);
+      out.leftFree = Math.max(out.leftFree, d);
+      out.rightFree = Math.max(out.rightFree, d);
+      if (s.downed > 1.5) {
+        out.leftTarget.set(0.3, 0.04, -0.62 + Math.sin(this.time * 1.7) * 0.03);
+        out.rightTarget.set(-0.3, 0.04, -0.6 + Math.sin(this.time * 1.3) * 0.03);
+      } else {
+        const tr = Math.sin(this.time * 23) * 0.004 + Math.sin(this.time * 2.7) * 0.012;
+        out.leftTarget.set(0.24, 0.05, -0.3);
+        out.rightTarget.set(-0.03 + tr, 0.27 + Math.sin(this.time * 3.1) * 0.012, -0.1);
+        // reaching out with the free hand now and then (calling for help)
+        const reach = Math.max(0, Math.sin(this.time * 0.45)) ** 6;
+        out.rightTarget.lerp(vTmp.set(-0.25, 0.55, 0.3), reach * 0.8);
+      }
+      return;
+    }
+    if (act === 'revive') {
+      // kneeling: the gun slung, both hands on the casualty's chest — packing the wound, then the
+      // stim jab and a few compressions
+      const free = sm(t / 0.08) * (1 - sm((t - 0.94) / 0.06));
+      out.slung = Math.max(out.slung, free);
+      out.leftFree = Math.max(out.leftFree, free);
+      out.rightFree = Math.max(out.rightFree, free);
+      const pump = t > 0.55 ? Math.max(0, Math.sin(this.time * 11)) * 0.05 : Math.sin(this.time * 6) * 0.015;
+      out.leftTarget.set(0.06, 0.32 - pump, 0.5);
+      out.rightTarget.set(-0.08, 0.34 - pump, 0.46);
+      if (t > 0.4 && t < 0.55) out.rightTarget.set(-0.12, 0.52 - seg(t, 0.47, 0.52) * 0.2, 0.42);
+      out.spineTwist = Math.sin(this.time * 1.2) * 0.05;
+      return;
+    }
+    if (act === 'drag') {
+      // walking backwards, bent over: the left fist hooked in the casualty's drag strap, the gun
+      // held low in the right hand
+      out.leftFree = Math.max(out.leftFree, 1);
+      out.leftTarget.set(0.08, 0.52 + Math.sin(this.phase * Math.PI * 4) * 0.02, 0.55);
+      out.gunPos.y -= 0.12;
+      out.gunRot.x -= 0.6;
+      out.gunRot.y += 0.3;
+      out.spineTwist = 0.15;
+      return;
+    }
+    if (act === 'plate') {
+      // a plate out of the back pouch, round to the front, slid down into the carrier and slapped home
+      const free = sm(t / 0.1) * (1 - sm((t - 0.86) / 0.14));
+      out.leftFree = Math.max(out.leftFree, free);
+      const P: [number, [number, number, number]][] = [[0, [0.2, 1.0, 0.15]], [0.15, [0.3, 1.05, -0.18]], [0.28, [0.28, 1.2, -0.1]], [0.45, [0.1, 1.38, 0.3]], [0.62, [0.04, 1.24, 0.24]], [0.7, [0.05, 1.26, 0.26]], [0.76, [0.04, 1.22, 0.22]], [1, [0.2, 1.0, 0.15]]];
+      keyV(t, P, out.leftTarget);
+      out.gunPos.y -= 0.06 * free;
+      out.gunRot.x -= 0.4 * free;
+      out.gunRot.z += 0.25 * free;
+      out.spineTwist = (0.2 * seg(t, 0.1, 0.3) - 0.2 * seg(t, 0.4, 0.6)) * free;
+      if (t > 0.6 && t < 0.66) out.flinch = 0.2;
+      return;
+    }
     // C4 out: the clacker stays up in the left fist (counterplay: you can see it coming)
     if (act === 'none' && (s.item & 31) === 12) {
       out.leftFree = Math.max(out.leftFree, 1);

@@ -92,6 +92,24 @@ export class PlayerController {
   onWaterTime = 0;
   frozen = false;
   dead = false;
+  /** (Update 47) downed: flat on the ground, a slow crawl, no stance change, no jumping */
+  downed = false;
+  /** (Update 47) movement cap while busy (dragging a casualty, reviving: 0 = rooted) */
+  busyCap = -1;
+  /**
+   * (Update 47) climbing states, physics bypassed:
+   *  hang     hands on a ledge too high to mantle (grabbed in the air): A / D shimmy along it,
+   *           W / Space pull up and over, S / C let go
+   *  rappel   on a rope down a wall from an edge: S down (Shift: fast), W up, A / D along the wall,
+   *           Space kicks off the wall and drops a few metres, C lets go
+   *  pull     reeled in by the grappling hook towards its anchor, then onto the ledge / hanging
+   */
+  climb: null
+    | { kind: 'hang'; top: THREE.Vector3; n: THREE.Vector3; along: THREE.Vector3; t: number; shimmy: number }
+    | { kind: 'rappel'; anchor: THREE.Vector3; n: THREE.Vector3; pos: THREE.Vector3; out: number; outV: number; t: number; kick: number; ground: number }
+    | { kind: 'pull'; to: THREE.Vector3; n: THREE.Vector3; top: number; from: THREE.Vector3; t: number; dur: number } = null;
+  /** climbing events for the game (sounds, the rope, the viewmodel) */
+  onClimb: (ev: 'grab' | 'shimmy' | 'pullUp' | 'drop' | 'rappelStart' | 'rappelKick' | 'rappelLand' | 'pullDone', p?: THREE.Vector3) => void = () => {};
   /** Smoothed values for camera/viewmodel */
   speed01 = 0;
   lookDX = 0;
@@ -132,6 +150,12 @@ export class PlayerController {
     this.pitch = 0;
     this.mantle = null;
     this.ladder = null;
+    if (this.climb) {
+      this.climb = null;
+      this.body.setEnabled(true);
+    }
+    this.downed = false;
+    this.busyCap = -1;
     this.sliding = false;
     this.sprinting = this.tactical = false;
     this.wantStance = 'stand';
@@ -181,6 +205,10 @@ export class PlayerController {
       this.updateMantle(dt);
       return;
     }
+    if (this.climb) {
+      this.updateClimb(dt);
+      return;
+    }
     if (this.updateLadder(dt)) return;
 
     const body = this.body;
@@ -199,8 +227,16 @@ export class PlayerController {
     if (inp.wasPressed('jump')) this.jumpBuffered = T.jumpBuffer;
     else this.jumpBuffered = Math.max(0, this.jumpBuffered - dt);
 
+    // ---- downed (Update 47): pinned flat, crawling ----
+    if (this.downed) {
+      this.wantStance = 'prone';
+      this.sprinting = this.tactical = false;
+      if (this.sliding) this.endSlide(false);
+      this.jumpBuffered = 0;
+      if (body.stance !== 'prone') body.setStance('prone', true);
+    }
     // ---- stance input ----
-    if (inp.wasPressed('crouch')) {
+    if (!this.downed && inp.wasPressed('crouch')) {
       this.crouchHoldTime = 0;
       if (this.sprinting && body.grounded && !this.sliding && this.slideCooldown <= 0 && this.horizSpeed() > 5.2) {
         this.startSlide();
@@ -221,7 +257,7 @@ export class PlayerController {
         this.startSlide();
       }
     }
-    if (inp.isDown('crouch')) {
+    if (!this.downed && inp.isDown('crouch')) {
       this.crouchHoldTime += dt;
       if (this.crouchHoldTime > 0.45 && !this.sliding && this.wantStance === 'crouch' && body.grounded && this.horizSpeed() < 3) {
         this.wantStance = 'prone';
@@ -229,12 +265,13 @@ export class PlayerController {
       }
     }
     if (inp.wasReleased('crouch') && !Settings.data.toggleCrouch && this.wantStance === 'crouch') this.wantStance = 'stand';
-    if (inp.wasPressed('prone') && this.sprinting && body.grounded && !this.sliding && !this.diving && this.horizSpeed() > 4.5) this.startDive(fwd);
+    if (this.downed) { /* no stance change */ }
+    else if (inp.wasPressed('prone') && this.sprinting && body.grounded && !this.sliding && !this.diving && this.horizSpeed() > 4.5) this.startDive(fwd);
     else if (inp.wasPressed('prone')) this.wantStance = this.wantStance === 'prone' ? 'crouch' : 'prone';
 
     // ---- sprint / tactical sprint ----
     this.tacCooldown = Math.max(0, this.tacCooldown - dt);
-    const canSprint = forwardHeld && !this.sliding && this.ads < 0.5 && !this.blockSprint && body.stance !== 'prone';
+    const canSprint = forwardHeld && !this.sliding && this.ads < 0.5 && !this.blockSprint && body.stance !== 'prone' && !this.downed && this.busyCap < 0;
     if (inp.wasPressed('sprint') && canSprint) {
       if (this.sprinting && !this.tactical && this.tacFuel > 0.6 && this.tacCooldown <= 0) {
         this.tactical = true;
@@ -296,6 +333,8 @@ export class PlayerController {
       if (this.sprinting) max = this.tactical ? T.tactical : T.sprint;
       max *= lerp(1, this.adsSpeedMul, this.ads);
       max *= this.weaponSpeedMul * this.statusSpeedMul;
+      if (this.downed) max = Math.min(max, 0.55);
+      if (this.busyCap >= 0) max = Math.min(max, this.busyCap);
       const target = wish.clone().multiplyScalar(max);
       const hv = new THREE.Vector3(this.vel.x, 0, this.vel.z);
       if (onGround) {
@@ -318,7 +357,7 @@ export class PlayerController {
 
     // ---- jump / mantle ----
     const canCoyote = this.sinceGrounded < T.coyote && this.vel.y <= 0.5;
-    if (this.jumpBuffered > 0) {
+    if (this.jumpBuffered > 0 && !this.downed && this.busyCap < 0) {
       if (this.tryMantle(true)) {
         this.jumpBuffered = 0;
         return;
@@ -346,6 +385,8 @@ export class PlayerController {
     if (!body.grounded && forwardHeld && inp.isDown('jump') && this.vel.y < 2.5) {
       if (this.tryMantle(false)) return;
     }
+    // (Update 47) too high to mantle: grab the ledge and hang
+    if (!body.grounded && forwardHeld && this.vel.y < 2 && !this.downed && this.tryHang()) return;
 
     // ---- gravity & integrate ----
     if (!body.grounded || this.vel.y > 0) this.vel.y -= T.gravity * dt;
@@ -400,6 +441,18 @@ export class PlayerController {
   }
 
   /** kneel where you stand (planting / defusing roots you crouched, even while frozen) */
+  /** (Update 47) kneel for a revive (and stand back up after): the stance you wanted is kept */
+  private kneelSaved: 'stand' | 'crouch' | 'prone' | null = null;
+  kneel(on: boolean) {
+    if (on && this.kneelSaved === null) {
+      this.kneelSaved = this.wantStance;
+      if (this.wantStance === 'stand') this.wantStance = 'crouch';
+    } else if (!on && this.kneelSaved !== null) {
+      this.wantStance = this.kneelSaved;
+      this.kneelSaved = null;
+    }
+  }
+
   forceCrouch(dt: number) {
     this.wantStance = 'crouch';
     if (this.body.stance === 'stand' && this.body.setStance('crouch')) this.ev.onStance('crouch');
@@ -557,6 +610,198 @@ export class PlayerController {
       this.sprinting = false;
     }
     this.ev.onStance(this.body.stance);
+  }
+
+  // ---------------- climbing (Update 47) ----------------
+  /** a ledge in front, hands' reach above the head while airborne: hang from it */
+  private tryHang(): boolean {
+    const body = this.body;
+    if (body.stance === 'prone' || this.sliding) return false;
+    const fwd = this.forward();
+    const feet = body.pos;
+    let wall: THREE.Vector3 | null = null;
+    let n: THREE.Vector3 | null = null;
+    for (const h of [1.55, 1.9]) {
+      const hit = this.physics.raycast(new THREE.Vector3(feet.x, feet.y + h, feet.z), fwd, RADIUS + 0.45);
+      if (hit && Math.abs(hit.normal.y) < 0.5) {
+        wall = hit.point;
+        n = hit.normal.clone().setY(0).normalize();
+        break;
+      }
+    }
+    if (!wall || !n) return false;
+    const top = this.ledgeTop(wall, n, feet.y + 1.95, feet.y + 2.85);
+    if (!top) return false;
+    // something to stand on up there?
+    if (!this.body.fits('crouch', top.clone().addScaledVector(n, -(RADIUS + 0.1)))) return false;
+    this.startHang(top, n);
+    return true;
+  }
+  /** the top of the obstacle whose face is at `wall` (normal n), between lo and hi */
+  private ledgeTop(wall: THREE.Vector3, n: THREE.Vector3, lo: number, hi: number) {
+    const probe = new THREE.Vector3(wall.x - n.x * 0.22, hi + 0.3, wall.z - n.z * 0.22);
+    const h = this.physics.raycast(probe, new THREE.Vector3(0, -1, 0), hi + 0.3 - lo);
+    if (!h || h.normal.y < 0.7 || h.distance < 0.05) return null;
+    // the ledge's edge right above the wall face
+    return new THREE.Vector3(wall.x, h.point.y, wall.z);
+  }
+  startHang(top: THREE.Vector3, n: THREE.Vector3) {
+    this.body.setEnabled(false);
+    this.sprinting = this.tactical = false;
+    if (this.sliding) this.endSlide(false);
+    const along = new THREE.Vector3(0, 1, 0).cross(n).normalize();
+    this.climb = { kind: 'hang', top: top.clone(), n: n.clone(), along, t: 0, shimmy: 0 };
+    this.vel.set(0, 0, 0);
+    // face the wall
+    this.yaw = Math.atan2(n.x, n.z);
+    this.onClimb('grab', top);
+  }
+  /** over the edge onto a rope (the game checked there is a drop below) */
+  startRappel(anchor: THREE.Vector3, n: THREE.Vector3, ground: number) {
+    this.body.setEnabled(false);
+    this.sprinting = this.tactical = false;
+    if (this.sliding) this.endSlide(false);
+    const pos = anchor.clone().addScaledVector(n, RADIUS + 0.12);
+    pos.y -= 1.75;
+    this.climb = { kind: 'rappel', anchor: anchor.clone(), n: n.clone(), pos, out: 0, outV: 0, t: 0, kick: 0, ground };
+    this.vel.set(0, 0, 0);
+    this.yaw = Math.atan2(n.x, n.z);
+    this.onClimb('rappelStart', anchor);
+  }
+  /** reeled in by the hook towards `to` on a wall face n; `top` = the ledge height above it (NaN: none) */
+  startPull(to: THREE.Vector3, n: THREE.Vector3, top: number) {
+    this.body.setEnabled(false);
+    this.sprinting = this.tactical = false;
+    if (this.sliding) this.endSlide(false);
+    const from = this.body.pos.clone();
+    const dest = to.clone().addScaledVector(n, RADIUS + 0.15);
+    dest.y = Number.isFinite(top) ? top - 2.05 : to.y - 1.2;
+    const dist = from.distanceTo(dest);
+    this.climb = { kind: 'pull', to: dest, n: n.clone(), top, from, t: 0, dur: Math.max(0.35, dist / 17) };
+  }
+  private endClimb(vel?: THREE.Vector3) {
+    this.climb = null;
+    this.body.setEnabled(true);
+    this.vel.copy(vel ?? new THREE.Vector3());
+    this.mode = 'air';
+  }
+  private updateClimb(dt: number) {
+    const c = this.climb!;
+    const inp = this.input;
+    const ix = inp.axis('left', 'right');
+    const iz = inp.axis('back', 'forward');
+    c.t += dt;
+    if (c.kind === 'hang') {
+      this.eyeHeight = damp(this.eyeHeight, EYE_HEIGHT.stand, 10, dt);
+      // shimmy along the edge while it continues
+      if (Math.abs(ix) > 0.3) {
+        const step = c.along.clone().multiplyScalar(-ix * 0.95 * dt);
+        const next = c.top.clone().add(step);
+        const wallHit = this.physics.raycast(next.clone().addScaledVector(c.n, 0.6).setY(c.top.y - 0.25), c.n.clone().negate(), 1.0);
+        const top = wallHit ? this.ledgeTop(wallHit.point, c.n, c.top.y - 0.3, c.top.y + 0.3) : null;
+        if (top) {
+          c.top.copy(top);
+          c.shimmy += dt;
+          if (c.shimmy > 0.45) {
+            c.shimmy = 0;
+            this.onClimb('shimmy', c.top);
+          }
+        }
+      }
+      const feet = c.top.clone().addScaledVector(c.n, RADIUS + 0.1);
+      feet.y = c.top.y - 2.05 + Math.sin(c.t * 2) * 0.01;
+      this.body.teleport(feet);
+      if (inp.wasPressed('jump') || (iz > 0.5 && c.t > 0.35)) {
+        // pull up and over
+        const over = c.top.clone().addScaledVector(c.n, -(RADIUS + 0.12));
+        over.y = c.top.y + 0.02;
+        this.climb = null;
+        this.body.setStance('prone', true);
+        this.mantle = { p0: feet.clone(), p1: new THREE.Vector3(feet.x, c.top.y + 0.1, feet.z), p2: over, t: 0, dur: 0.85, vault: false, exitVel: new THREE.Vector3(), h: 2.05 };
+        this.ev.onMantle(2.05, false);
+        this.onClimb('pullUp', c.top);
+      } else if (inp.wasPressed('crouch') || (iz < -0.5 && c.t > 0.35)) {
+        this.onClimb('drop', c.top);
+        this.endClimb(c.n.clone().multiplyScalar(0.8));
+      }
+      return;
+    }
+    if (c.kind === 'pull') {
+      const k = Math.min(1, c.t / c.dur);
+      const e = k * k * (3 - 2 * k);
+      const p = c.from.clone().lerp(c.to, e);
+      p.y += Math.sin(k * Math.PI) * 0.4;
+      this.body.teleport(p);
+      this.eyeHeight = damp(this.eyeHeight, EYE_HEIGHT.stand, 10, dt);
+      if (k >= 1) {
+        this.onClimb('pullDone', c.to);
+        const wall = new THREE.Vector3(c.to.x - c.n.x * (RADIUS + 0.15), 0, c.to.z - c.n.z * (RADIUS + 0.15));
+        if (Number.isFinite(c.top)) this.startHang(wall.setY(c.top), c.n);
+        else {
+          // no ledge: you hang on the line against the wall, the hook above you (rappel from it)
+          const below = this.physics.raycast(c.to.clone().addScaledVector(c.n, 0.5), new THREE.Vector3(0, -1, 0), 80);
+          this.startRappel(wall.setY(c.to.y + 1.2 + 1.75 - 1.75), c.n, below ? below.point.y : c.to.y - 20);
+          const r = this.climb as { kind: 'rappel'; pos: THREE.Vector3 } | null;
+          if (r && r.kind === 'rappel') r.pos.copy(c.to).setY(c.to.y);
+        }
+      }
+      return;
+    }
+    // rappel
+    this.eyeHeight = damp(this.eyeHeight, EYE_HEIGHT.stand, 10, dt);
+    const fast = inp.isDown('sprint');
+    let vy = iz < -0.3 ? (fast ? -5.5 : -2.3) : iz > 0.3 ? 1.1 : 0;
+    // kick off: out from the wall, down a few metres in one swing
+    if (inp.wasPressed('jump') && c.out < 0.15) {
+      c.outV = 3.4;
+      c.kick = 0.75;
+      this.onClimb('rappelKick', c.pos);
+    }
+    if (c.kick > 0) {
+      c.kick -= dt;
+      vy = -4.2;
+    }
+    c.outV -= (c.out * 26 + c.outV * 2.2) * dt;
+    c.out = Math.max(0, c.out + c.outV * dt);
+    if (c.out === 0 && c.outV < 0) c.outV = 0;
+    c.pos.y = Math.min(c.anchor.y - 1.55, c.pos.y + vy * dt);
+    c.pos.addScaledVector(new THREE.Vector3(0, 1, 0).cross(c.n).normalize(), -ix * 1.0 * dt);
+    const p = c.pos.clone().addScaledVector(c.n, c.out);
+    // the wall face keeps us off it (follow its relief)
+    const wh = this.physics.raycast(p.clone().addScaledVector(c.n, 0.2).setY(p.y + 1.0), c.n.clone().negate(), 1.4);
+    if (wh) {
+      const want = wh.point.clone().addScaledVector(c.n, RADIUS + 0.1 + c.out);
+      p.x = want.x;
+      p.z = want.z;
+      c.pos.x = wh.point.x + c.n.x * (RADIUS + 0.1);
+      c.pos.z = wh.point.z + c.n.z * (RADIUS + 0.1);
+    }
+    this.body.teleport(p);
+    // the ground: step off; back at the top: climb over
+    const below = this.physics.raycast(p.clone().setY(p.y + 0.3), new THREE.Vector3(0, -1, 0), 0.5);
+    if (below && vy <= 0) {
+      this.onClimb('rappelLand', p);
+      this.endClimb();
+      return;
+    }
+    if (vy > 0 && p.y >= c.anchor.y - 1.56) {
+      const over = c.anchor.clone().addScaledVector(c.n, -(RADIUS + 0.2));
+      // nothing to stand on up there (a grapple line on a bare wall): stay on the rope
+      const floor = this.physics.raycast(over.clone().setY(c.anchor.y + 0.6), new THREE.Vector3(0, -1, 0), 0.9);
+      if (!floor || floor.normal.y < 0.7) {
+        c.pos.y = c.anchor.y - 1.56;
+        return;
+      }
+      this.climb = null;
+      this.body.setStance('prone', true);
+      this.mantle = { p0: p.clone(), p1: new THREE.Vector3(p.x, c.anchor.y + 0.1, p.z), p2: over, t: 0, dur: 0.8, vault: false, exitVel: new THREE.Vector3(), h: 1.6 };
+      this.ev.onMantle(1.6, false);
+      return;
+    }
+    if (inp.wasPressed('crouch')) {
+      this.onClimb('drop', p);
+      this.endClimb(c.n.clone().multiplyScalar(0.6));
+    }
   }
 
   // ---------------- mantle / vault ----------------
